@@ -20,19 +20,14 @@ class PolymarketSecrets(BaseSettings):
         alias="PRIVATE_KEY",
     )
 
-    # API Credentials
-    clob_api_key: str = Field(
-        ...,
-        description="CLOB API key",
-        alias="CLOB_API_KEY",
+    funder: str | None = Field(
+        default=None,
+        description="Funder address (proxy/smart wallet address) - required for Magic wallets",
+        alias="FUNDER",
     )
-    clob_secret: SecretStr = Field(
-        ...,
-        description="CLOB API secret",
-        alias="CLOB_SECRET",
-    )
-    clob_pass_phrase: SecretStr = Field(
-        ...,
-        description="CLOB API passphrase",
-        alias="CLOB_PASS_PHRASE",
+
+    signature_type: int = Field(
+        default=1,
+        description="Signature type: 0=EOA/MetaMask, 1=Magic wallet, 2=Browser wallet proxy",
+        alias="SIGNATURE_TYPE",
     )
