@@ -1,4 +1,4 @@
-.PHONY: help install install-dev lint format type-check
+.PHONY: help install install-dev lint format type-check test
 
 install:
 	pip install -r requirements.txt
@@ -14,3 +14,6 @@ format:
 
 type-check:
 	mypy .
+
+test:
+	pytest tests/ -v

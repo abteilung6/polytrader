@@ -39,3 +39,6 @@ plugins = ["pydantic.mypy"]
 module = "pydantic.*"
 ignore_missing_imports = false
 
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
