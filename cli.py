@@ -1,5 +1,7 @@
 import argparse
 import asyncio
+import csv
+import os
 from datetime import datetime, timezone
 
 from py_clob_client.client import ClobClient  # type: ignore[import-untyped]
@@ -395,7 +397,13 @@ async def watch_mode(args: argparse.Namespace) -> None:
                                 )
                     
                     if trade_executed:
-                        print(f"✅ Trade executed on {tick.market_id}")
+                        if isinstance(decision, list):
+                            # Multiple trades executed (e.g., arbitrage strategy buying both sides)
+                            outcomes = ", ".join(d.outcome for d in decision)
+                            total_cost = sum(d.amount for d in decision)
+                            print(f"✅ Trades executed on {tick.market_id}: {outcomes} (total: ${total_cost:.2f})")
+                        else:
+                            print(f"✅ Trade executed on {tick.market_id}: {decision.outcome}")
             else:
                 # Single outcome - simple row format
                 print(
@@ -503,6 +511,273 @@ async def watch_mode(args: argparse.Namespace) -> None:
             print("=" * 80)
 
 
+def get_market_timestamp(market_slug: str) -> datetime:
+    """Extract timestamp from market slug and return as datetime.
+    
+    For 15-minute markets: extracts timestamp from slug (e.g., btc-updown-15m-1767712500)
+    For hourly markets: parses date/time from slug format (e.g., bitcoin-up-or-down-january-6-9am-et)
+    """
+    # Check if it's a 15-minute market: {asset}-updown-15m-{timestamp}
+    if "-updown-15m-" in market_slug:
+        try:
+            timestamp_str = market_slug.split("-updown-15m-")[-1]
+            timestamp = int(timestamp_str)
+            return datetime.fromtimestamp(timestamp, tz=timezone.utc)
+        except (ValueError, IndexError):
+            raise ValueError(f"Could not parse timestamp from market slug: {market_slug}")
+    
+    # Check if it's an hourly market: {asset}-up-or-down-{month}-{day}-{hour}am-et
+    if "-up-or-down-" in market_slug and "-et" in market_slug:
+        try:
+            # Parse the date part: e.g., "january-6-9am"
+            date_part = market_slug.split("-up-or-down-")[-1].replace("-et", "")
+            parts = date_part.split("-")
+            
+            if len(parts) < 3:
+                raise ValueError(f"Could not parse date from market slug: {market_slug}")
+            
+            month_name = parts[0]
+            day = int(parts[1])
+            hour_str = parts[2]
+            
+            # Parse hour (e.g., "9am" or "2pm")
+            if hour_str.endswith("am"):
+                hour = int(hour_str[:-2])
+                if hour == 12:
+                    hour = 0
+            elif hour_str.endswith("pm"):
+                hour = int(hour_str[:-2])
+                if hour != 12:
+                    hour += 12
+            else:
+                raise ValueError(f"Could not parse hour from market slug: {market_slug}")
+            
+            # Get current year (markets are typically for current year)
+            now_utc = datetime.now(timezone.utc)
+            year = now_utc.year
+            
+            # Convert month name to number
+            month_map = {
+                "january": 1, "february": 2, "march": 3, "april": 4,
+                "may": 5, "june": 6, "july": 7, "august": 8,
+                "september": 9, "october": 10, "november": 11, "december": 12
+            }
+            month = month_map.get(month_name.lower())
+            if month is None:
+                raise ValueError(f"Unknown month name: {month_name}")
+            
+            # Create datetime in ET timezone
+            try:
+                from zoneinfo import ZoneInfo
+            except ImportError:
+                try:
+                    from backports.zoneinfo import ZoneInfo  # type: ignore
+                except ImportError:
+                    ZoneInfo = None  # type: ignore
+            
+            if ZoneInfo is not None:
+                et_tz = ZoneInfo("America/New_York")
+                market_start_et = datetime(year, month, day, hour, 0, 0, tzinfo=et_tz)
+            else:
+                from datetime import timedelta
+                et_offset = timedelta(hours=-5)
+                et_tz_fallback = timezone(et_offset, name="ET")
+                market_start_et = datetime(year, month, day, hour, 0, 0, tzinfo=et_tz_fallback)
+            
+            # Convert to UTC
+            return market_start_et.astimezone(timezone.utc)
+        except (ValueError, IndexError, KeyError) as e:
+            raise ValueError(f"Could not parse date/time from market slug: {market_slug}") from e
+    
+    raise ValueError(f"Unknown market slug format: {market_slug}")
+
+
+async def scrape_mode(args: argparse.Namespace) -> None:
+    """Scrape market prices and save to CSV files."""
+    secrets = PolymarketSecrets()
+    
+    # Determine if we should auto-refresh (only when using asset/time-period)
+    auto_refresh = args.asset and args.time_period
+    current_interval_id: str | None = None
+    
+    # Resolve initial market slug
+    if auto_refresh:
+        market_slug = MarketSlugGenerator.get_latest_slug(args.asset, args.time_period)
+        current_interval_id = get_current_interval_id(args.asset, args.time_period)
+        print(f"Resolved market slug: {market_slug}")
+        print(f"Auto-refresh enabled: will switch to new market when interval changes")
+    elif args.market:
+        market_slug = args.market
+    else:
+        raise ValueError("Either --market or both --asset and --time-period must be provided")
+    
+    # Always watch both outcomes
+    outcomes_to_watch = ["Up", "Down"]
+    
+    bus = EventBus()
+    store = MemoryTickStore()
+    
+    # Create initial observers
+    observers, observer_tasks = await create_observers(
+        market_slug, outcomes_to_watch, secrets, args.frequency, bus, store
+    )
+    
+    tick_queue = bus.subscribe(TICKS)
+    
+    # Initialize CSV file for first market
+    csv_file = None
+    csv_writer = None
+    csv_path = None
+    count = 0
+    total_count = 0
+    consecutive_no_data = 0
+    max_consecutive_no_data = 20  # Stop after 20 consecutive failures
+    
+    def setup_csv_file(slug: str) -> tuple[object, object, str]:
+        """Set up CSV file for a market."""
+        market_dt = get_market_timestamp(slug)
+        date_str = market_dt.strftime("%Y-%m-%d")
+        time_str = market_dt.strftime("%H-%M-%S")
+        
+        data_dir = os.path.join("data", slug, date_str, time_str)
+        os.makedirs(data_dir, exist_ok=True)
+        
+        path = os.path.join(data_dir, "data.csv")
+        file = open(path, "w", newline="")
+        writer = csv.writer(file)
+        writer.writerow(["timestamp", "market_slug", "outcome", "best_bid", "best_ask", "mid", "spread"])
+        return file, writer, path
+    
+    # Set up initial CSV file
+    csv_file, csv_writer, csv_path = setup_csv_file(market_slug)
+    
+    # Get market expiration time
+    expiration_time = MarketSlugGenerator.get_market_expiration_time(market_slug)
+    
+    print(f"Scraping market: {market_slug}")
+    print(f"Outcomes: {', '.join(outcomes_to_watch)}")
+    print(f"Frequency: {args.frequency} Hz")
+    if expiration_time:
+        print(f"Market expires at: {expiration_time.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+    print(f"Saving to: {csv_path}")
+    print("\nPress Ctrl+C to stop\n")
+    
+    try:
+        check_interval_counter = 0
+        
+        while True:
+            # Check for interval change (for auto-refresh)
+            if auto_refresh and check_interval_counter >= 10:
+                check_interval_counter = 0
+                new_interval_id = get_current_interval_id(args.asset, args.time_period)
+                
+                if new_interval_id != current_interval_id:
+                    # Interval has changed - switch to new market
+                    print(f"\n⚠️  Interval changed! Switching to new market...")
+                    print(f"   Closed {market_slug} with {count} ticks")
+                    
+                    # Close current CSV file
+                    csv_file.close()
+                    
+                    # Stop old observers
+                    await stop_observers(observers, observer_tasks)
+                    
+                    # Get new market slug
+                    new_market_slug = MarketSlugGenerator.get_latest_slug(args.asset, args.time_period)
+                    current_interval_id = new_interval_id
+                    market_slug = new_market_slug
+                    
+                    # Set up new CSV file
+                    csv_file, csv_writer, csv_path = setup_csv_file(market_slug)
+                    count = 0  # Reset count for new market
+                    
+                    # Get expiration time for new market
+                    expiration_time = MarketSlugGenerator.get_market_expiration_time(market_slug)
+                    
+                    # Create new observers
+                    observers, observer_tasks = await create_observers(
+                        market_slug, outcomes_to_watch, secrets, args.frequency, bus, store
+                    )
+                    
+                    print(f"✅ Now scraping: {market_slug}")
+                    if expiration_time:
+                        print(f"   Market expires at: {expiration_time.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+                    print(f"   Saving to: {csv_path}\n")
+            
+            # Check if market has expired (only if not auto-refreshing, or as fallback)
+            if expiration_time and not auto_refresh:
+                now_utc = datetime.now(timezone.utc)
+                if now_utc >= expiration_time:
+                    print(f"\n⏰ Market has expired at {expiration_time.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+                    if auto_refresh:
+                        # Will be handled by interval check above
+                        continue
+                    else:
+                        print("Stopping scraper...")
+                        await stop_observers(observers, observer_tasks)
+                        break
+            
+            # Wait for tick with timeout to periodically check expiration
+            try:
+                tick = await asyncio.wait_for(tick_queue.get(), timeout=1.0)
+                consecutive_no_data = 0  # Reset counter on successful tick
+                count += 1
+                total_count += 1
+                check_interval_counter += 1
+                
+                # Write tick to CSV
+                csv_writer.writerow([
+                    tick.ts,
+                    tick.market_id,
+                    tick.outcome,
+                    tick.best_bid,
+                    tick.best_ask,
+                    tick.mid,
+                    tick.spread,
+                ])
+                csv_file.flush()  # Ensure data is written immediately
+                
+                # Print progress every 10 ticks
+                if count % 10 == 0:
+                    print(f"Scraped {count} ticks for {market_slug} (total: {total_count})... (saved to {csv_path})")
+                
+                if args.limit and total_count >= args.limit:
+                    print(f"\nReached limit of {args.limit} ticks. Stopping...")
+                    await stop_observers(observers, observer_tasks)
+                    break
+            except asyncio.TimeoutError:
+                # Timeout occurred - check if market expired or if we should continue
+                if expiration_time and not auto_refresh:
+                    now_utc = datetime.now(timezone.utc)
+                    if now_utc >= expiration_time:
+                        print(f"\n⏰ Market has expired at {expiration_time.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+                        print("Stopping scraper...")
+                        await stop_observers(observers, observer_tasks)
+                        break
+                # If no expiration time or not expired, continue waiting
+                consecutive_no_data += 1
+                if consecutive_no_data >= max_consecutive_no_data:
+                    print(f"\n⚠️  No data received for {max_consecutive_no_data} consecutive attempts.")
+                    if auto_refresh:
+                        print("Will try to switch to next market on next interval check...")
+                        consecutive_no_data = 0  # Reset and continue
+                    else:
+                        print("Market may have expired or closed. Stopping scraper...")
+                        await stop_observers(observers, observer_tasks)
+                        break
+                continue
+    
+    except KeyboardInterrupt:
+        print("\n\nStopped by user")
+        await stop_observers(observers, observer_tasks)
+    finally:
+        if csv_file:
+            csv_file.close()
+        print(f"\n✅ Scraped {total_count} ticks total ({count} in current market)")
+        if csv_path:
+            print(f"Last data saved to: {csv_path}")
+
+
 def buy_mode(args: argparse.Namespace) -> None:
     secrets = PolymarketSecrets()
     print("Secrets loaded successfully!")
@@ -580,9 +855,9 @@ def main() -> None:
     )
     watch_parser.add_argument(
         "--strategy",
-        choices=["random"],
+        choices=["random", "arbitrage"],
         default="random",
-        help="Trading strategy (default: random) - only 'random' is currently available",
+        help="Trading strategy (default: random) - 'random' or 'arbitrage'",
     )
 
     buy_parser = subparsers.add_parser("buy", help="Place a buy order")
@@ -600,6 +875,31 @@ def main() -> None:
     )
     buy_parser.add_argument("--amount", type=float, required=True, help="Order amount in USDC")
 
+    scrape_parser = subparsers.add_parser("scrape", help="Scrape market prices to CSV for backtesting")
+    scrape_market_group = scrape_parser.add_mutually_exclusive_group(required=True)
+    scrape_market_group.add_argument("--market", help="Market slug (e.g., btc-updown-15m-1767709800)")
+    scrape_market_group.add_argument(
+        "--asset",
+        choices=["bitcoin", "btc", "ethereum", "eth"],
+        help="Asset name (requires --time-period)",
+    )
+    scrape_parser.add_argument(
+        "--time-period",
+        choices=["15m", "1h"],
+        help="Time period: 15m (15-minute) or 1h (hourly) (required with --asset)",
+    )
+    scrape_parser.add_argument(
+        "--frequency",
+        type=float,
+        default=1.0,
+        help="Polling frequency in Hz (default: 1.0)",
+    )
+    scrape_parser.add_argument(
+        "--limit",
+        type=int,
+        help="Number of ticks to scrape (default: unlimited)",
+    )
+
     args = parser.parse_args()
 
     # Validate that time-period is provided when asset is specified
@@ -607,11 +907,15 @@ def main() -> None:
         parser.error("--time-period is required when --asset is specified")
     if args.mode == "buy" and args.asset and not args.time_period:
         parser.error("--time-period is required when --asset is specified")
+    if args.mode == "scrape" and args.asset and not args.time_period:
+        parser.error("--time-period is required when --asset is specified")
 
     if args.mode == "watch":
         asyncio.run(watch_mode(args))
     elif args.mode == "buy":
         buy_mode(args)
+    elif args.mode == "scrape":
+        asyncio.run(scrape_mode(args))
 
 
 if __name__ == "__main__":

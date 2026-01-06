@@ -1,7 +1,7 @@
 """Portfolio manager for executing trades."""
 
 from polytrader.core.portfolio import Portfolio
-from polytrader.core.strategy import RandomStrategy, Strategy
+from polytrader.core.strategy import ArbitrageStrategy, RandomStrategy, Strategy
 from polytrader.core.trade import TradeDecision
 from polytrader.types import MarketTick
 
@@ -68,7 +68,7 @@ class PortfolioManager:
         market_id: str,
         up_price: float,
         down_price: float,
-    ) -> TradeDecision | None:
+    ) -> TradeDecision | list[TradeDecision] | None:
         """Process prices for both outcomes and potentially execute a trade.
 
         This is useful when you have prices for both UP and DOWN outcomes.
@@ -79,7 +79,7 @@ class PortfolioManager:
             down_price: Current mid price for DOWN outcome
 
         Returns:
-            TradeDecision if a trade was made, None otherwise
+            TradeDecision or list of TradeDecisions if trades were made, None otherwise
         """
         # Get decision from strategy
         decision = self.strategy.decide(
@@ -92,10 +92,16 @@ class PortfolioManager:
         if decision is None:
             return None
 
-        # Execute the trade (simulated)
-        self._execute_trade(decision)
-
-        return decision
+        # Handle both single decision and list of decisions (for arbitrage)
+        if isinstance(decision, list):
+            # Execute all trades in the list
+            for trade in decision:
+                self._execute_trade(trade)
+            return decision
+        else:
+            # Execute single trade
+            self._execute_trade(decision)
+            return decision
 
     def _execute_trade(self, decision: TradeDecision) -> None:
         """Execute a trade (simulated).
