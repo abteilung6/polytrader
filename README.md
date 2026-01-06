@@ -71,17 +71,17 @@ python cli.py watch --market <market-slug> [options]
 **Options**:
 - `--market`: Market slug (e.g., `btc-updown-15m-1767709800`) - mutually exclusive with `--asset`
 - `--asset`: Asset name - `bitcoin`, `btc`, `ethereum`, or `eth` (requires `--time-period`)
-- `--time-period`: Time period - `15min`, `15m`, `1h`, or `1hour` (required with `--asset`)
+- `--time-period`: Time period - `15m` (15-minute) or `1h` (hourly) (required with `--asset`)
 - `--frequency`: Polling frequency in Hz (default: 1.0)
 - `--limit`: Number of ticks to display before stopping (optional)
 
-**Note**: The watch command always watches both Up and Down outcomes side by side.
+**Note**: The watch command always watches both Up and Down outcomes side by side. When using `--asset` and `--time-period`, it automatically switches to the latest market when a new interval starts.
 
 **Example: Using Asset and Time Period**
 
 ```bash
 # Watch latest Bitcoin 15-minute market (both outcomes)
-python cli.py watch --asset bitcoin --time-period 15min --limit 2
+python cli.py watch --asset bitcoin --time-period 15m --limit 2
 
 # Watch latest Ethereum hourly market
 python cli.py watch --asset ethereum --time-period 1h
@@ -127,7 +127,7 @@ The table updates in real-time as new ticks arrive, showing both outcomes side b
 python cli.py watch --market btc-updown-15m-1767710700 --frequency 2.0
 
 # Poll every 5 seconds (0.2 Hz)
-python cli.py watch --asset bitcoin --time-period 15min --frequency 0.2
+python cli.py watch --asset bitcoin --time-period 15m --frequency 0.2
 ```
 
 ### Place Buy Orders
@@ -145,7 +145,7 @@ python cli.py buy --market <market-slug> --amount <usdc>
 **Options**:
 - `--market`: Market slug (e.g., `btc-updown-15m-1767709800`) - mutually exclusive with `--asset`
 - `--asset`: Asset name - `bitcoin`, `btc`, `ethereum`, or `eth` (requires `--time-period`)
-- `--time-period`: Time period - `15min`, `15m`, `1h`, or `1hour` (required with `--asset`)
+- `--time-period`: Time period - `15m` (15-minute) or `1h` (hourly) (required with `--asset`)
 - `--amount`: Order amount in USDC (required)
 
 **Note**: Buy orders default to the "Up" outcome.
@@ -153,7 +153,7 @@ python cli.py buy --market <market-slug> --amount <usdc>
 **Examples**:
 ```bash
 # Buy latest Bitcoin 15-minute market (Up outcome)
-python cli.py buy --asset bitcoin --time-period 15min --amount 10.0
+python cli.py buy --asset bitcoin --time-period 15m --amount 10.0
 
 # Buy using explicit market slug (Up outcome)
 python cli.py buy --market btc-updown-15m-1767710700 --amount 10.0
@@ -247,8 +247,8 @@ The system can automatically discover the latest market slug based on asset and 
 - `ethereum` or `eth` for Ethereum markets
 
 **Supported Time Periods**:
-- `15min` or `15m` for 15-minute markets
-- `1h` or `1hour` for hourly markets
+- `15m` for 15-minute markets
+- `1h` for hourly markets
 
 The system calculates the latest market slug based on the current UTC time, automatically aligning to the appropriate time interval. For hourly markets, it uses Eastern Time (ET) with automatic DST handling.
 

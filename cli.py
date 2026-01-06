@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+from datetime import datetime, timezone
 
 from py_clob_client.client import ClobClient  # type: ignore[import-untyped]
 from py_clob_client.order_builder.constants import BUY  # type: ignore[import-untyped]
@@ -15,13 +16,88 @@ from polytrader.store import MemoryTickStore
 from polytrader.types import MarketTick, Outcome
 
 
+def get_current_interval_id(asset: str, time_period: str) -> str:
+    """Get current interval identifier for checking if market slug needs refresh.
+    
+    For 15-minute markets: returns the aligned timestamp string
+    For hourly markets: returns the hour identifier string (month-day-hour-am/pm)
+    """
+    period = MarketSlugGenerator.normalize_time_period(time_period)
+    
+    if period == "15min":
+        # Return the aligned timestamp
+        now_utc = datetime.now(timezone.utc)
+        current_timestamp = int(now_utc.timestamp())
+        aligned_timestamp = current_timestamp - (current_timestamp % 900)
+        return str(aligned_timestamp)
+    elif period == "1h":
+        # Return hour identifier
+        _, long_format = MarketSlugGenerator.normalize_asset(asset)
+        slug = MarketSlugGenerator.get_latest_hourly_slug(asset)
+        # Extract the hour part: {asset}-up-or-down-{month}-{day}-{hour}am-et
+        parts = slug.split("-")
+        # Return everything after "up-or-down" as identifier
+        return "-".join(parts[3:])  # month-day-hour-am-et
+    else:
+        raise ValueError(f"Unsupported time period: {time_period}")
+
+
+async def create_observers(
+    market_slug: str,
+    outcomes_to_watch: list[str],
+    secrets: PolymarketSecrets,
+    frequency: float,
+    bus: EventBus,
+    store: MemoryTickStore,
+) -> tuple[list[Observer], list[asyncio.Task]]:
+    """Create observers for the given market slug."""
+    observers = []
+    observer_tasks = []
+    
+    for outcome_cli in outcomes_to_watch:
+        outcome_type: "Outcome" = "UP" if outcome_cli == "Up" else "DOWN"
+        
+        config = PolymarketAdapterConfig(
+            market_slug=market_slug,
+            outcome=outcome_type,
+            polling_frequency_hz=frequency,
+            secrets=secrets,
+        )
+        
+        adapter = PolymarketMarketDataAdapter(config)
+        observer = Observer(bus, adapter, store)
+        observers.append(observer)
+        observer_tasks.append(asyncio.create_task(observer.run()))
+    
+    return observers, observer_tasks
+
+
+async def stop_observers(observers: list[Observer], observer_tasks: list[asyncio.Task]) -> None:
+    """Stop observers and cancel their tasks."""
+    for observer in observers:
+        observer.stop()
+    for task in observer_tasks:
+        task.cancel()
+    for task in observer_tasks:
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+
 async def watch_mode(args: argparse.Namespace) -> None:
     secrets = PolymarketSecrets()
     
-    # Resolve market slug if asset and time_period are provided
-    if args.asset and args.time_period:
+    # Determine if we should auto-refresh (only when using asset/time-period)
+    auto_refresh = args.asset and args.time_period
+    current_interval_id: str | None = None
+    
+    # Resolve initial market slug
+    if auto_refresh:
         market_slug = MarketSlugGenerator.get_latest_slug(args.asset, args.time_period)
+        current_interval_id = get_current_interval_id(args.asset, args.time_period)
         print(f"Resolved market slug: {market_slug}")
+        print(f"Auto-refresh enabled: will switch to new market when interval changes")
     elif args.market:
         market_slug = args.market
     else:
@@ -33,25 +109,10 @@ async def watch_mode(args: argparse.Namespace) -> None:
     bus = EventBus()
     store = MemoryTickStore()
     
-    # Create observers for each outcome
-    observers = []
-    observer_tasks = []
-    
-    for outcome_cli in outcomes_to_watch:
-        # Convert CLI format ("Up"/"Down") to type format ("UP"/"DOWN")
-        outcome_type: "Outcome" = "UP" if outcome_cli == "Up" else "DOWN"
-        
-        config = PolymarketAdapterConfig(
-            market_slug=market_slug,
-            outcome=outcome_type,
-            polling_frequency_hz=args.frequency,
-            secrets=secrets,
-        )
-        
-        adapter = PolymarketMarketDataAdapter(config)
-        observer = Observer(bus, adapter, store)
-        observers.append(observer)
-        observer_tasks.append(asyncio.create_task(observer.run()))
+    # Create initial observers
+    observers, observer_tasks = await create_observers(
+        market_slug, outcomes_to_watch, secrets, args.frequency, bus, store
+    )
 
     tick_queue = bus.subscribe(TICKS)
 
@@ -78,9 +139,40 @@ async def watch_mode(args: argparse.Namespace) -> None:
 
     try:
         count = 0
+        check_interval_counter = 0  # Counter to check for interval changes periodically
+        
         while True:
             tick = await tick_queue.get()
             count += 1
+            check_interval_counter += 1
+            
+            # Check for interval change every 10 ticks (to avoid checking too frequently)
+            if auto_refresh and check_interval_counter >= 10:
+                check_interval_counter = 0
+                new_interval_id = get_current_interval_id(args.asset, args.time_period)
+                
+                if new_interval_id != current_interval_id:
+                    # Interval has changed - switch to new market
+                    print(f"\n⚠️  Interval changed! Switching to new market...")
+                    
+                    # Stop old observers
+                    await stop_observers(observers, observer_tasks)
+                    
+                    # Get new market slug
+                    new_market_slug = MarketSlugGenerator.get_latest_slug(args.asset, args.time_period)
+                    current_interval_id = new_interval_id
+                    market_slug = new_market_slug
+                    
+                    # Clear old ticks
+                    latest_ticks.clear()
+                    
+                    # Create new observers
+                    observers, observer_tasks = await create_observers(
+                        market_slug, outcomes_to_watch, secrets, args.frequency, bus, store
+                    )
+                    
+                    print(f"✅ Now watching: {market_slug}")
+                    print()
             
             # Store latest tick for this outcome
             outcome_key = tick.outcome
@@ -115,22 +207,12 @@ async def watch_mode(args: argparse.Namespace) -> None:
 
             if args.limit and count >= args.limit:
                 print(f"\nReached limit of {args.limit} ticks. Stopping...")
-                for observer in observers:
-                    observer.stop()
+                await stop_observers(observers, observer_tasks)
                 break
 
     except KeyboardInterrupt:
         print("\n\nStopped by user")
-        for observer in observers:
-            observer.stop()
-    finally:
-        for task in observer_tasks:
-            task.cancel()
-        for task in observer_tasks:
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
+        await stop_observers(observers, observer_tasks)
 
 
 def buy_mode(args: argparse.Namespace) -> None:
@@ -184,8 +266,8 @@ def main() -> None:
     )
     watch_parser.add_argument(
         "--time-period",
-        choices=["15min", "15m", "1h", "1hour"],
-        help="Time period (required with --asset)",
+        choices=["15m", "1h"],
+        help="Time period: 15m (15-minute) or 1h (hourly) (required with --asset)",
     )
     watch_parser.add_argument(
         "--frequency",
@@ -209,8 +291,8 @@ def main() -> None:
     )
     buy_parser.add_argument(
         "--time-period",
-        choices=["15min", "15m", "1h", "1hour"],
-        help="Time period (required with --asset)",
+        choices=["15m", "1h"],
+        help="Time period: 15m (15-minute) or 1h (hourly) (required with --asset)",
     )
     buy_parser.add_argument("--amount", type=float, required=True, help="Order amount in USDC")
 

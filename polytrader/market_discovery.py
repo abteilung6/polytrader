@@ -14,7 +14,7 @@ except ImportError:
         ZoneInfo = None  # type: ignore
 
 Asset = Literal["bitcoin", "ethereum", "btc", "eth"]
-TimePeriod = Literal["15min", "1h", "15m", "1hour"]
+TimePeriod = Literal["15m", "1h"]
 
 
 class MarketSlugGenerator:
@@ -38,14 +38,17 @@ class MarketSlugGenerator:
 
     @staticmethod
     def normalize_time_period(period: str) -> str:
-        """Normalize time period string."""
+        """Normalize time period string.
+        
+        Only supports: "15m" for 15-minute markets, "1h" for hourly markets.
+        """
         period_lower = period.lower()
-        if period_lower in ("15min", "15m", "15"):
+        if period_lower == "15m":
             return "15min"
-        elif period_lower in ("1h", "1hour", "hour", "hourly"):
+        elif period_lower == "1h":
             return "1h"
         else:
-            raise ValueError(f"Unknown time period: {period}. Supported: 15min, 1h")
+            raise ValueError(f"Unknown time period: {period}. Supported: 15m, 1h")
 
     @staticmethod
     def get_latest_15min_slug(asset: str) -> str:
@@ -111,13 +114,13 @@ class MarketSlugGenerator:
         
         Args:
             asset: Asset name (bitcoin, btc, ethereum, eth)
-            time_period: Time period (15min, 1h)
+            time_period: Time period - "15m" (15-minute) or "1h" (hourly)
             
         Returns:
             Latest market slug string
             
         Examples:
-            >>> MarketSlugGenerator.get_latest_slug("bitcoin", "15min")
+            >>> MarketSlugGenerator.get_latest_slug("bitcoin", "15m")
             'btc-updown-15m-1767709800'
             >>> MarketSlugGenerator.get_latest_slug("ethereum", "1h")
             'ethereum-up-or-down-january-6-9am-et'
