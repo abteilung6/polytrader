@@ -12,7 +12,7 @@ from polytrader.clob import place_market_order, verify_usdc_balance
 from polytrader.config import CHAIN_ID, CLOB_API_URL, PolymarketSecrets
 from polytrader.core import PortfolioManager
 from polytrader.core.position import Position
-from polytrader.core.strategy_registry import create_strategy, get_strategy_info
+from polytrader.core.strategy_registry import create_strategy
 from polytrader.events import TICKS, EventBus
 from polytrader.gamma import GammaClient
 from polytrader.market_discovery import MarketSlugGenerator
@@ -122,12 +122,9 @@ async def watch_mode(args: argparse.Namespace) -> None:
             initial_balance=args.initial_balance or 1000.0,
             strategy=strategy,
         )
-        strategy_info = get_strategy_info(args.strategy)
         print(f"💰 Trading enabled:")
         print(f"   Initial balance: ${portfolio_manager.get_balance():.2f} USDC")
-        print(f"   Strategy: {strategy_info['name']} ({strategy_info['type']})")
-        print(f"   Trade probability: {strategy_info['trade_probability']:.1%}")
-        print(f"   Trade amount: ${strategy_info['min_trade_amount']:.2f}-${strategy_info['max_trade_amount']:.2f} USDC")
+        print(f"   Strategy: {strategy}")
         print()
     
     # Create initial observers

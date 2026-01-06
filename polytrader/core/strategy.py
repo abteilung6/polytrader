@@ -51,6 +51,13 @@ class RandomStrategy:
         self.max_trade_amount = max_trade_amount
         self.trade_probability = trade_probability
 
+    def __str__(self) -> str:
+        """String representation of the strategy."""
+        return (
+            f"RandomStrategy(trade_probability={self.trade_probability:.1%}, "
+            f"amount_range=${self.min_trade_amount:.2f}-${self.max_trade_amount:.2f})"
+        )
+
     def decide(
         self,
         portfolio: Portfolio,
@@ -115,6 +122,15 @@ class ArbitrageStrategy:
         self.max_price_threshold = max_price_threshold
         self.trade_amount = trade_amount
         self.min_improvement = min_improvement
+
+    def __str__(self) -> str:
+        """String representation of the strategy."""
+        return (
+            f"ArbitrageStrategy(max_capital=${self.max_capital_per_market:.2f}, "
+            f"initial_pct={self.initial_position_pct:.1%}, "
+            f"trade_amount=${self.trade_amount:.2f}, "
+            f"min_improvement=${self.min_improvement:.2f})"
+        )
 
     def _calculate_net_arbitrage_profit(
         self, up_position: "Position | None", down_position: "Position | None"
@@ -201,6 +217,12 @@ class ArbitrageStrategy:
         if up_price > self.max_price_threshold or down_price > self.max_price_threshold:
             return None
 
+        # Validate price consistency: UP + DOWN should be close to 1.0
+        # If deviation > 0.3, it's likely a bug/data issue, don't trade
+        price_sum = up_price + down_price
+        if abs(price_sum - 1.0) > 0.3:
+            return None
+
         # Get existing positions
         up_position = portfolio.get_position(market_id, "UP")
         down_position = portfolio.get_position(market_id, "DOWN")
@@ -225,10 +247,7 @@ class ArbitrageStrategy:
         # Handle initial positions (no existing positions)
         if up_position is None and down_position is None:
             # Calculate initial capital (respecting max_capital_per_market)
-            initial_capital_per_side = min(
-                portfolio.balance * self.initial_position_pct,
-                self.max_capital_per_market / 2,
-            )
+            initial_capital_per_side = self.max_capital_per_market * self.initial_position_pct
 
             # Check if we have enough balance
             if initial_capital_per_side * 2 > portfolio.balance:

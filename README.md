@@ -50,103 +50,55 @@ A Python trading system for Polymarket that enables real-time market monitoring 
    SIGNATURE_TYPE=1  # 0=EOA/MetaMask, 1=Magic wallet, 2=Browser wallet proxy
    ```
 
-## Usage
+## Commands
 
-### Watch Market Prices
+### `watch` - Watch Market Prices
 
 Monitor real-time prices for a specific market. By default, watches both Up and Down outcomes.
 
-You can specify the market in two ways:
-
-**Option 1: Use asset and time period (auto-discovers latest market)**
 ```bash
-python cli.py watch --asset <asset> --time-period <period> [options]
+python cli.py watch [--market <market-slug> | --asset <asset> --time-period <period>] [options]
 ```
 
-**Option 2: Use explicit market slug**
-```bash
-python cli.py watch --market <market-slug> [options]
-```
+**Market Selection** (one required):
+- `--market <market-slug>`: Market slug (e.g., `btc-updown-15m-1767709800`)
+- `--asset <asset>`: Asset name - `bitcoin`, `btc`, `ethereum`, or `eth` (requires `--time-period`)
+- `--time-period <period>`: Time period - `15m` (15-minute) or `1h` (hourly) (required with `--asset`)
 
 **Options**:
-- `--market`: Market slug (e.g., `btc-updown-15m-1767709800`) - mutually exclusive with `--asset`
-- `--asset`: Asset name - `bitcoin`, `btc`, `ethereum`, or `eth` (requires `--time-period`)
-- `--time-period`: Time period - `15m` (15-minute) or `1h` (hourly) (required with `--asset`)
-- `--frequency`: Polling frequency in Hz (default: 1.0)
-- `--limit`: Number of ticks to display before stopping (optional)
+- `--frequency <hz>`: Polling frequency in Hz (default: 1.0)
+- `--limit <n>`: Number of ticks to display before stopping (optional)
+- `--trade`: Enable automated trading with portfolio manager
+- `--initial-balance <amount>`: Initial USDC balance for trading (default: 1000.0)
+- `--strategy <strategy>`: Trading strategy - `random` or `arbitrage` (default: `random`)
 
-**Note**: The watch command always watches both Up and Down outcomes side by side. When using `--asset` and `--time-period`, it automatically switches to the latest market when a new interval starts.
-
-**Example: Using Asset and Time Period**
-
+**Examples**:
 ```bash
-# Watch latest Bitcoin 15-minute market (both outcomes)
+# Watch latest Bitcoin 15-minute market
 python cli.py watch --asset bitcoin --time-period 15m --limit 2
 
-# Watch latest Ethereum hourly market
-python cli.py watch --asset ethereum --time-period 1h
+# Watch with automated trading using arbitrage strategy
+python cli.py watch --asset btc --time-period 15m --trade --strategy arbitrage --initial-balance 500.0
 
-# Watch latest BTC 15-minute market
-python cli.py watch --asset btc --time-period 15m --limit 1
-```
-
-**Example: Using Explicit Market Slug**
-
-```bash
-# Watch both Up and Down outcomes
-python cli.py watch --market btc-updown-15m-1767710700 --limit 2
-
-# Watch continuously
-python cli.py watch --market btc-updown-15m-1767710700
-```
-
-**Example Output** (watching both outcomes):
-```
-Resolved market slug: btc-updown-15m-1767710700
-Watching market: btc-updown-15m-1767710700
-Outcomes: Up, Down
-Frequency: 1.0 Hz
-
-Outcome     Best Bid     Best Ask     Mid Price    Spread       Timestamp   
---------------------------------------------------------------------------------
-Up          0.4850       0.5150       0.5000       0.0300       1704067200.123
-Down        0.5150       0.5450       0.5300       0.0300       1704067200.456
-
---- Update #2 ---
-Outcome     Best Bid     Best Ask     Mid Price    Spread       Timestamp   
---------------------------------------------------------------------------------
-Up          0.4860       0.5160       0.5010       0.0300       1704067201.123
-Down        0.5140       0.5440       0.5290       0.0300       1704067201.456
-```
-
-The table updates in real-time as new ticks arrive, showing both outcomes side by side for easy comparison.
-
-**Watch with Custom Frequency**:
-```bash
-# Poll every 0.5 seconds (2 Hz)
+# Watch explicit market slug
 python cli.py watch --market btc-updown-15m-1767710700 --frequency 2.0
-
-# Poll every 5 seconds (0.2 Hz)
-python cli.py watch --asset bitcoin --time-period 15m --frequency 0.2
 ```
 
-### Place Buy Orders
+### `buy` - Place Buy Order
 
-Place a market buy order. You can specify the market using asset/time-period or explicit slug:
+Place a market buy order on Polymarket.
 
 ```bash
-# Using asset and time period
-python cli.py buy --asset <asset> --time-period <period> --amount <usdc>
-
-# Using explicit market slug
-python cli.py buy --market <market-slug> --amount <usdc>
+python cli.py buy [--market <market-slug> | --asset <asset> --time-period <period>] --amount <usdc>
 ```
+
+**Market Selection** (one required):
+- `--market <market-slug>`: Market slug (e.g., `btc-updown-15m-1767709800`)
+- `--asset <asset>`: Asset name - `bitcoin`, `btc`, `ethereum`, or `eth` (requires `--time-period`)
+- `--time-period <period>`: Time period - `15m` (15-minute) or `1h` (hourly) (required with `--asset`)
 
 **Options**:
-- `--market`: Market slug (e.g., `btc-updown-15m-1767709800`) - mutually exclusive with `--asset`
-- `--asset`: Asset name - `bitcoin`, `btc`, `ethereum`, or `eth` (requires `--time-period`)
-- `--time-period`: Time period - `15m` (15-minute) or `1h` (hourly) (required with `--asset`)
-- `--amount`: Order amount in USDC (required)
+- `--amount <usdc>`: Order amount in USDC (required)
 
 **Note**: Buy orders default to the "Up" outcome.
 
@@ -155,14 +107,35 @@ python cli.py buy --market <market-slug> --amount <usdc>
 # Buy latest Bitcoin 15-minute market (Up outcome)
 python cli.py buy --asset bitcoin --time-period 15m --amount 10.0
 
-# Buy using explicit market slug (Up outcome)
+# Buy using explicit market slug
 python cli.py buy --market btc-updown-15m-1767710700 --amount 10.0
 ```
 
-This will:
-1. Verify your USDC balance
-2. Resolve the market token ID
-3. Place a Fill-or-Kill (FOK) market order
+### `scrape` - Scrape Market Prices to CSV
+
+Scrape market prices to CSV file for backtesting.
+
+```bash
+python cli.py scrape [--market <market-slug> | --asset <asset> --time-period <period>] [options]
+```
+
+**Market Selection** (one required):
+- `--market <market-slug>`: Market slug (e.g., `btc-updown-15m-1767709800`)
+- `--asset <asset>`: Asset name - `bitcoin`, `btc`, `ethereum`, or `eth` (requires `--time-period`)
+- `--time-period <period>`: Time period - `15m` (15-minute) or `1h` (hourly) (required with `--asset`)
+
+**Options**:
+- `--frequency <hz>`: Polling frequency in Hz (default: 1.0)
+- `--limit <n>`: Number of ticks to scrape (optional)
+
+**Examples**:
+```bash
+# Scrape latest Bitcoin 15-minute market
+python cli.py scrape --asset bitcoin --time-period 15m --limit 100
+
+# Scrape explicit market slug
+python cli.py scrape --market btc-updown-15m-1767710700 --frequency 0.5
+```
 
 ## Project Structure
 
