@@ -59,7 +59,9 @@ class PolymarketMarketDataAdapter(IMarketDataAdapter):
     def _get_token_id(self) -> str:
         if self._token_id is None:
             market = self.gamma.get_market_by_slug(self.market_slug)
-            self._token_id = market.get_token_id(self.outcome)
+            # Convert internal format ("UP"/"DOWN") to API format ("Up"/"Down")
+            outcome_api = "Up" if self.outcome == "UP" else "Down"
+            self._token_id = market.get_token_id(outcome_api)
         return self._token_id
 
     async def ticks(self) -> AsyncIterator[MarketTick]:
