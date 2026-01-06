@@ -7,7 +7,7 @@ from py_clob_client.order_builder.constants import BUY  # type: ignore[import-un
 from polytrader.adapters.polymarket import PolymarketAdapterConfig, PolymarketMarketDataAdapter
 from polytrader.clob import place_market_order, verify_usdc_balance
 from polytrader.config import CHAIN_ID, CLOB_API_URL, PolymarketSecrets
-from polytrader.events import EventBus
+from polytrader.events import TICKS, EventBus
 from polytrader.gamma import GammaClient
 from polytrader.observer import Observer
 
@@ -25,7 +25,7 @@ async def watch_mode(args: argparse.Namespace) -> None:
     adapter = PolymarketMarketDataAdapter(config)
     observer = Observer(bus, adapter)
 
-    tick_queue = bus.subscribe("ticks")
+    tick_queue = bus.subscribe(TICKS)
 
     print(f"Watching market: {args.market}")
     print(f"Outcome: {args.outcome}")

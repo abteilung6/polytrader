@@ -2,21 +2,23 @@ import asyncio
 
 import pytest
 
-from polytrader.events import EventBus
+from polytrader.events import TICKS, EventBus, Topic
 from polytrader.types import MarketTick
 
 
 def test_subscribe_creates_queue() -> None:
     bus = EventBus()
-    queue = bus.subscribe("test")
+    test_topic = Topic[str]("test")
+    queue = bus.subscribe(test_topic)
     assert isinstance(queue, asyncio.Queue)
 
 
 async def test_publish_subscribe_single_message() -> None:
     bus = EventBus()
-    queue = bus.subscribe("test")
+    test_topic = Topic[str]("test")
+    queue = bus.subscribe(test_topic)
 
-    await bus.publish("test", "hello")
+    await bus.publish(test_topic, "hello")
     msg = await queue.get()
 
     assert msg == "hello"
@@ -24,10 +26,11 @@ async def test_publish_subscribe_single_message() -> None:
 
 async def test_multiple_subscribers_same_topic() -> None:
     bus = EventBus()
-    queue1 = bus.subscribe("test")
-    queue2 = bus.subscribe("test")
+    test_topic = Topic[str]("test")
+    queue1 = bus.subscribe(test_topic)
+    queue2 = bus.subscribe(test_topic)
 
-    await bus.publish("test", "hello")
+    await bus.publish(test_topic, "hello")
 
     msg1 = await queue1.get()
     msg2 = await queue2.get()
@@ -38,11 +41,13 @@ async def test_multiple_subscribers_same_topic() -> None:
 
 async def test_topic_isolation() -> None:
     bus = EventBus()
-    queue1 = bus.subscribe("topic1")
-    queue2 = bus.subscribe("topic2")
+    topic1 = Topic[str]("topic1")
+    topic2 = Topic[str]("topic2")
+    queue1 = bus.subscribe(topic1)
+    queue2 = bus.subscribe(topic2)
 
-    await bus.publish("topic1", "msg1")
-    await bus.publish("topic2", "msg2")
+    await bus.publish(topic1, "msg1")
+    await bus.publish(topic2, "msg2")
 
     msg1 = await queue1.get()
     msg2 = await queue2.get()
@@ -53,16 +58,18 @@ async def test_topic_isolation() -> None:
 
 async def test_publish_to_nonexistent_topic() -> None:
     bus = EventBus()
-    await bus.publish("nonexistent", "message")
+    nonexistent_topic = Topic[str]("nonexistent")
+    await bus.publish(nonexistent_topic, "message")
 
 
 async def test_multiple_messages_same_topic() -> None:
     bus = EventBus()
-    queue = bus.subscribe("test")
+    test_topic = Topic[str]("test")
+    queue = bus.subscribe(test_topic)
 
-    await bus.publish("test", "msg1")
-    await bus.publish("test", "msg2")
-    await bus.publish("test", "msg3")
+    await bus.publish(test_topic, "msg1")
+    await bus.publish(test_topic, "msg2")
+    await bus.publish(test_topic, "msg3")
 
     assert await queue.get() == "msg1"
     assert await queue.get() == "msg2"
@@ -71,7 +78,7 @@ async def test_multiple_messages_same_topic() -> None:
 
 async def test_complex_message_types() -> None:
     bus = EventBus()
-    queue = bus.subscribe("ticks")
+    queue = bus.subscribe(TICKS)
 
     tick = MarketTick(
         ts=1234567890.0,
@@ -81,7 +88,7 @@ async def test_complex_message_types() -> None:
         best_ask=0.51,
     )
 
-    await bus.publish("ticks", tick)
+    await bus.publish(TICKS, tick)
     received = await queue.get()
 
     assert received == tick
@@ -92,16 +99,21 @@ async def test_complex_message_types() -> None:
 async def test_multiple_topics_multiple_subscribers() -> None:
     bus = EventBus()
 
-    tick_queue = bus.subscribe("ticks")
-    proposal_queue = bus.subscribe("proposals")
-    order_queue1 = bus.subscribe("orders")
-    order_queue2 = bus.subscribe("orders")
+    tick_queue = bus.subscribe(TICKS)
+    proposals_topic = Topic[str]("proposals")
+    orders_topic = Topic[str]("orders")
+    proposal_queue = bus.subscribe(proposals_topic)
+    order_queue1 = bus.subscribe(orders_topic)
+    order_queue2 = bus.subscribe(orders_topic)
 
-    await bus.publish("ticks", "tick1")
-    await bus.publish("proposals", "proposal1")
-    await bus.publish("orders", "order1")
+    await bus.publish(
+        TICKS, MarketTick(ts=1.0, market_id="test", outcome="UP", best_bid=0.49, best_ask=0.51)
+    )
+    await bus.publish(proposals_topic, "proposal1")
+    await bus.publish(orders_topic, "order1")
 
-    assert await tick_queue.get() == "tick1"
+    tick = await tick_queue.get()
+    assert isinstance(tick, MarketTick)
     assert await proposal_queue.get() == "proposal1"
     assert await order_queue1.get() == "order1"
     assert await order_queue2.get() == "order1"
@@ -109,11 +121,12 @@ async def test_multiple_topics_multiple_subscribers() -> None:
 
 async def test_subscribe_after_publish() -> None:
     bus = EventBus()
+    test_topic = Topic[str]("test")
 
-    await bus.publish("test", "msg1")
+    await bus.publish(test_topic, "msg1")
 
-    queue = bus.subscribe("test")
-    await bus.publish("test", "msg2")
+    queue = bus.subscribe(test_topic)
+    await bus.publish(test_topic, "msg2")
 
     msg = await queue.get()
     assert msg == "msg2"
@@ -124,12 +137,13 @@ async def test_subscribe_after_publish() -> None:
 
 async def test_concurrent_publish_subscribe() -> None:
     bus = EventBus()
-    queue = bus.subscribe("test")
+    test_topic = Topic[str]("test")
+    queue = bus.subscribe(test_topic)
 
     await asyncio.gather(
-        bus.publish("test", "msg1"),
-        bus.publish("test", "msg2"),
-        bus.publish("test", "msg3"),
+        bus.publish(test_topic, "msg1"),
+        bus.publish(test_topic, "msg2"),
+        bus.publish(test_topic, "msg3"),
     )
 
     messages = set()

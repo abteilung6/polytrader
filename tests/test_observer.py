@@ -2,7 +2,7 @@ import asyncio
 from collections.abc import AsyncIterator
 
 from polytrader.adapters import IMarketDataAdapter
-from polytrader.events import EventBus
+from polytrader.events import TICKS, EventBus
 from polytrader.observer import Observer
 from polytrader.types import MarketTick
 
@@ -24,7 +24,7 @@ async def test_observer_publishes_ticks() -> None:
     adapter = FakeMarketDataAdapter([tick1, tick2])
     observer = Observer(bus, adapter)
 
-    queue = bus.subscribe("ticks")
+    queue = bus.subscribe(TICKS)
 
     task = asyncio.create_task(observer.run())
 
@@ -44,8 +44,8 @@ async def test_observer_multiple_subscribers() -> None:
     adapter = FakeMarketDataAdapter([tick])
     observer = Observer(bus, adapter)
 
-    queue1 = bus.subscribe("ticks")
-    queue2 = bus.subscribe("ticks")
+    queue1 = bus.subscribe(TICKS)
+    queue2 = bus.subscribe(TICKS)
 
     task = asyncio.create_task(observer.run())
 
@@ -75,7 +75,7 @@ async def test_observer_stops_when_stopped() -> None:
     adapter = SlowAdapter()
     observer = Observer(bus, adapter)
 
-    queue = bus.subscribe("ticks")
+    queue = bus.subscribe(TICKS)
 
     task = asyncio.create_task(observer.run())
     await asyncio.sleep(0.01)

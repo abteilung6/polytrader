@@ -1,7 +1,8 @@
 import logging
 
 from polytrader.adapters import IMarketDataAdapter
-from polytrader.events import EventBus
+from polytrader.events import TICKS, EventBus
+from polytrader.types import MarketTick
 
 logger = logging.getLogger(__name__)
 
@@ -18,12 +19,15 @@ class Observer:
             async for tick in self.adapter.ticks():
                 if not self._running:
                     break
-                await self.bus.publish("ticks", tick)
+                await self.publish_market_tick(tick)
         except Exception as e:
             logger.error(f"Observer error: {e}", exc_info=True)
             raise
         finally:
             self._running = False
+
+    async def publish_market_tick(self, tick: MarketTick) -> None:
+        await self.bus.publish(TICKS, tick)
 
     def stop(self) -> None:
         self._running = False

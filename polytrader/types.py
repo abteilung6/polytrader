@@ -1,5 +1,3 @@
-"""Core types for market data."""
-
 from dataclasses import dataclass
 from typing import Literal
 
