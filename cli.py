@@ -7,7 +7,9 @@ from py_clob_client.order_builder.constants import BUY  # type: ignore[import-un
 from polytrader.adapters.polymarket import PolymarketAdapterConfig, PolymarketMarketDataAdapter
 from polytrader.clob import place_market_order, verify_usdc_balance
 from polytrader.config import CHAIN_ID, CLOB_API_URL, PolymarketSecrets
+from polytrader.events import EventBus
 from polytrader.gamma import GammaClient
+from polytrader.observer import Observer
 
 
 async def watch_mode(args: argparse.Namespace) -> None:
@@ -19,7 +21,11 @@ async def watch_mode(args: argparse.Namespace) -> None:
         secrets=secrets,
     )
 
+    bus = EventBus()
     adapter = PolymarketMarketDataAdapter(config)
+    observer = Observer(bus, adapter)
+
+    tick_queue = bus.subscribe("ticks")
 
     print(f"Watching market: {args.market}")
     print(f"Outcome: {args.outcome}")
@@ -28,9 +34,12 @@ async def watch_mode(args: argparse.Namespace) -> None:
         print(f"Limit: {args.limit} ticks")
     print("\nPress Ctrl+C to stop\n")
 
+    observer_task = asyncio.create_task(observer.run())
+
     try:
         count = 0
-        async for tick in adapter.ticks():
+        while True:
+            tick = await tick_queue.get()
             count += 1
             print(f"Tick #{count}:")
             print(f"  Timestamp: {tick.ts:.3f}")
@@ -44,10 +53,18 @@ async def watch_mode(args: argparse.Namespace) -> None:
 
             if args.limit and count >= args.limit:
                 print(f"Reached limit of {args.limit} ticks. Stopping...")
+                observer.stop()
                 break
 
     except KeyboardInterrupt:
         print("\nStopped by user")
+        observer.stop()
+    finally:
+        observer_task.cancel()
+        try:
+            await observer_task
+        except asyncio.CancelledError:
+            pass
 
 
 def buy_mode(args: argparse.Namespace) -> None:

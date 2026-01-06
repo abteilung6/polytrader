@@ -10,7 +10,7 @@ class IMarketDataAdapter(Protocol):
     Adapters provide a stream of market ticks asynchronously.
     """
 
-    async def ticks(self) -> AsyncIterator[MarketTick]:
+    def ticks(self) -> AsyncIterator[MarketTick]:
         """Yield market ticks asynchronously.
 
         This is an async generator that yields MarketTick objects
