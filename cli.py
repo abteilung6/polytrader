@@ -1,5 +1,7 @@
 import argparse
 import asyncio
+import logging
+from datetime import datetime
 
 from py_clob_client.client import ClobClient  # type: ignore[import-untyped]
 from py_clob_client.order_builder.constants import BUY  # type: ignore[import-untyped]
@@ -13,6 +15,12 @@ from polytrader.models import SimpleThresholdModel
 from polytrader.observer import Observer
 from polytrader.order_manager import OrderManager
 from polytrader.store import MemoryTickStore
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
 
 
 async def watch_mode(args: argparse.Namespace) -> None:
@@ -215,15 +223,48 @@ async def auto_buy_mode(args: argparse.Namespace) -> None:
     try:
         while True:
             order = await order_queue.get()
-            print("Order Executed:")
-            print(f"  Timestamp: {order.ts:.3f}")
-            print(f"  Market: {order.market_id}")
-            print(f"  Outcome: {order.outcome}")
-            print(f"  Side: {order.side}")
-            print(f"  Size: ${order.size}")
-            print(f"  Reason: {order.proposal_reason}")
-            print(f"  Response: {order.response}")
-            print()
+            order_time = datetime.fromtimestamp(order.ts).strftime("%Y-%m-%d %H:%M:%S")
+
+            print("\n" + "=" * 60)
+            print("✅ ORDER EXECUTED SUCCESSFULLY")
+            print("=" * 60)
+            print(f"Time:        {order_time}")
+            print(f"Market:      {order.market_id}")
+            print(f"Outcome:     {order.outcome}")
+            print(f"Side:        {order.side}")
+            print(f"Size:        ${order.size:.2f} USDC")
+            print(f"Reason:      {order.proposal_reason}")
+
+            response = order.response
+            if isinstance(response, dict):
+                order_id = response.get("order_id") or response.get("id") or "N/A"
+                status = response.get("status") or response.get("state") or "N/A"
+                fills = response.get("fills", [])
+
+                print("\nOrder Details:")
+                print(f"  Order ID:   {order_id}")
+                print(f"  Status:     {status}")
+
+                if fills:
+                    print(f"  Fills:      {len(fills)} fill(s)")
+                    for i, fill in enumerate(fills, 1):
+                        price = fill.get("price", "N/A")
+                        size = fill.get("size", "N/A")
+                        print(f"    Fill {i}: {size} @ {price}")
+                else:
+                    print("  Fills:      No fills yet")
+
+                if "error" in response:
+                    print(f"  ⚠️  Error:   {response['error']}")
+
+                print("\nFull Response:")
+                for key, value in response.items():
+                    if key not in ["order_id", "id", "status", "state", "fills"]:
+                        print(f"  {key}: {value}")
+            else:
+                print(f"\nResponse: {response}")
+
+            print("=" * 60 + "\n")
 
     except KeyboardInterrupt:
         print("\nStopped by user")

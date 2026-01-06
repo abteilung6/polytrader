@@ -48,13 +48,21 @@ def verify_usdc_balance(client: IClobClient, *, required_amount: float) -> float
     Raises:
         ValueError: If balance is insufficient
     """
-    print("\nChecking USDC balance...")
+    import logging
+
+    logger = logging.getLogger(__name__)
+
     balance_params = BalanceAllowanceParams(asset_type=AssetType.COLLATERAL)
     balance_info = client.get_balance_allowance(balance_params)
-    balance = float(balance_info.get("balance", "0") or "0")
 
-    print(f"Balance: {balance} USDC")
-    print("Allowance: Auto-managed (Magic wallet)")
+    logger.debug(f"Raw balance info from API: {balance_info}")
+
+    balance_str = balance_info.get("balance", "0") or "0"
+    balance = float(balance_str)
+
+    logger.info(f"USDC Balance: {balance} (required: {required_amount})")
+    logger.debug(f"Allowance info: {balance_info.get('allowance', 'N/A')}")
+    logger.info("Allowance: Auto-managed (Magic wallet)")
 
     if balance < required_amount:
         raise ValueError(
@@ -83,7 +91,11 @@ def place_market_order(
     Returns:
         Order response from the API
     """
-    print(f"\nPlacing market order: {amount} USDC...")
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    logger.info(f"Placing market order: {amount} USDC, side={side}, token_id={token_id[:20]}...")
     market_order = MarketOrderArgs(
         token_id=token_id,
         amount=amount,
@@ -91,7 +103,16 @@ def place_market_order(
         order_type=OrderType.FOK,
     )
     signed_order = client.create_market_order(market_order)
+    order_hash = signed_order.get("hash", "N/A")[:20] if isinstance(signed_order, dict) else "N/A"
+    logger.debug(f"Created signed order (hash: {order_hash}...)")
     response: dict[str, Any] = client.post_order(signed_order, OrderType.FOK)
+
+    order_id = response.get("order_id") or response.get("id", "unknown")
+    status = response.get("status") or response.get("state", "unknown")
+    logger.info(
+        f"Order submitted: ID={order_id}, status={status}, side={side}, amount={amount} USDC"
+    )
+    logger.debug(f"Full order response: {response}")
     return response
 
 
