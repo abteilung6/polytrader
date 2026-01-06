@@ -27,19 +27,36 @@ class Market(BaseModel):
         return [str(item) for item in result]
 
     def get_token_id(self, outcome: str) -> str:
-        """Get token ID for a specific outcome."""
+        """Get token ID for a specific outcome.
+
+        Accepts both "UP"/"DOWN" and "Up"/"Down" formats and normalizes
+        to match Polymarket's actual outcome format.
+        """
         outcomes = self.get_outcomes()
         token_ids = self.get_token_ids()
 
         if len(outcomes) != len(token_ids):
             raise ValueError("Mismatch between outcomes and token IDs")
 
+        outcome_normalized = self._normalize_outcome_for_api(outcome)
+
         try:
-            outcome_index = outcomes.index(outcome)
+            outcome_index = outcomes.index(outcome_normalized)
             return token_ids[outcome_index]
         except ValueError as err:
             available = ", ".join(outcomes)
             raise ValueError(f"Outcome '{outcome}' not found. Available: {available}") from err
+
+    @staticmethod
+    def _normalize_outcome_for_api(outcome: str) -> str:
+        """Normalize outcome to match Polymarket API format (Up/Down)."""
+        outcome_upper = outcome.upper()
+        if outcome_upper == "UP":
+            return "Up"
+        elif outcome_upper == "DOWN":
+            return "Down"
+        else:
+            return outcome
 
 
 class GammaClient:

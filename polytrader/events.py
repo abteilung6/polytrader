@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, TypeVar
 
 if TYPE_CHECKING:
-    from polytrader.types import MarketTick
+    from polytrader.types import MarketTick, TradeProposal
 
 T = TypeVar("T")
 
@@ -34,4 +34,11 @@ def _create_ticks_topic() -> "Topic[MarketTick]":
     return Topic[MarketTick]("ticks")
 
 
+def _create_proposals_topic() -> "Topic[TradeProposal]":
+    from polytrader.types import TradeProposal
+
+    return Topic[TradeProposal]("proposals")
+
+
 TICKS = _create_ticks_topic()
+PROPOSALS = _create_proposals_topic()

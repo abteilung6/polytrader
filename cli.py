@@ -7,8 +7,9 @@ from py_clob_client.order_builder.constants import BUY  # type: ignore[import-un
 from polytrader.adapters.polymarket import PolymarketAdapterConfig, PolymarketMarketDataAdapter
 from polytrader.clob import place_market_order, verify_usdc_balance
 from polytrader.config import CHAIN_ID, CLOB_API_URL, PolymarketSecrets
-from polytrader.events import TICKS, EventBus
+from polytrader.events import PROPOSALS, TICKS, EventBus
 from polytrader.gamma import GammaClient
+from polytrader.models import SimpleThresholdModel
 from polytrader.observer import Observer
 from polytrader.store import MemoryTickStore
 
@@ -95,6 +96,73 @@ def buy_mode(args: argparse.Namespace) -> None:
     print(f"Order placed! Response: {response}")
 
 
+async def predict_mode(args: argparse.Namespace) -> None:
+    secrets = PolymarketSecrets()
+    config = PolymarketAdapterConfig(
+        market_slug=args.market,
+        outcome=args.outcome.upper(),
+        polling_frequency_hz=args.frequency,
+        secrets=secrets,
+    )
+
+    bus = EventBus()
+    store = MemoryTickStore()
+    adapter = PolymarketMarketDataAdapter(config)
+    observer = Observer(bus, adapter, store)
+
+    model = SimpleThresholdModel(
+        bus=bus,
+        store=store,
+        market_id=args.market,
+        outcome=args.outcome.upper(),
+        buy_threshold=args.buy_threshold,
+        sell_threshold=args.sell_threshold,
+        size=args.size,
+        min_history=args.min_history,
+    )
+
+    proposal_queue = bus.subscribe(PROPOSALS)
+
+    print(f"Predicting trades for market: {args.market}")
+    print(f"Outcome: {args.outcome}")
+    print(f"Frequency: {args.frequency} Hz")
+    print(f"Buy threshold: {args.buy_threshold}")
+    print(f"Sell threshold: {args.sell_threshold}")
+    print(f"Size: ${args.size}")
+    print(f"Min history: {args.min_history} ticks")
+    print("\nPress Ctrl+C to stop\n")
+
+    observer_task = asyncio.create_task(observer.run())
+    model_task = asyncio.create_task(model.run())
+
+    try:
+        while True:
+            proposal = await proposal_queue.get()
+            print("Trade Proposal:")
+            print(f"  Timestamp: {proposal.ts:.3f}")
+            print(f"  Market: {proposal.market_id}")
+            print(f"  Outcome: {proposal.outcome}")
+            print(f"  Side: {proposal.side}")
+            print(f"  Target Price: {proposal.target_price:.4f}")
+            print(f"  Limit Price: {proposal.limit_price:.4f}")
+            print(f"  Size: ${proposal.size}")
+            print(f"  Reason: {proposal.reason}")
+            print()
+
+    except KeyboardInterrupt:
+        print("\nStopped by user")
+        observer.stop()
+        model.stop()
+    finally:
+        observer_task.cancel()
+        model_task.cancel()
+        try:
+            await observer_task
+            await model_task
+        except asyncio.CancelledError:
+            pass
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Polymarket trading system")
     subparsers = parser.add_subparsers(dest="mode", required=True, help="Command to execute")
@@ -121,12 +189,50 @@ def main() -> None:
     buy_parser.add_argument("--outcome", required=True, help="Outcome name (e.g., 'Up', 'Down')")
     buy_parser.add_argument("--amount", type=float, required=True, help="Order amount in USDC")
 
+    predict_parser = subparsers.add_parser("predict", help="Run trading model predictions")
+    predict_parser.add_argument("--market", required=True, help="Market slug")
+    predict_parser.add_argument(
+        "--outcome", choices=["Up", "Down"], required=True, help="Market outcome"
+    )
+    predict_parser.add_argument(
+        "--frequency",
+        type=float,
+        default=1.0,
+        help="Polling frequency in Hz (default: 1.0)",
+    )
+    predict_parser.add_argument(
+        "--buy-threshold",
+        type=float,
+        default=0.30,
+        help="Buy threshold price (default: 0.30)",
+    )
+    predict_parser.add_argument(
+        "--sell-threshold",
+        type=float,
+        default=0.50,
+        help="Sell threshold price (default: 0.50)",
+    )
+    predict_parser.add_argument(
+        "--size",
+        type=float,
+        default=1.0,
+        help="Trade size in USD (default: 1.0)",
+    )
+    predict_parser.add_argument(
+        "--min-history",
+        type=int,
+        default=30,
+        help="Minimum history ticks required (default: 30)",
+    )
+
     args = parser.parse_args()
 
     if args.mode == "watch":
         asyncio.run(watch_mode(args))
     elif args.mode == "buy":
         buy_mode(args)
+    elif args.mode == "predict":
+        asyncio.run(predict_mode(args))
 
 
 if __name__ == "__main__":
