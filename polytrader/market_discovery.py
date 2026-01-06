@@ -84,8 +84,13 @@ class MarketSlugGenerator:
             now_et = now_utc.astimezone(et_tz)
         else:
             # Fallback: use UTC-5 (simplified, doesn't handle DST)
+            # Convert UTC to ET: ET is UTC-5, so subtract 5 hours from UTC time
             from datetime import timedelta
-            now_et = now_utc + timedelta(hours=-5)
+            et_offset = timedelta(hours=-5)
+            et_tz_fallback = timezone(et_offset, name="ET")
+            # Get ET time: add negative offset (which subtracts 5 hours)
+            et_time_naive = now_utc.replace(tzinfo=None) + et_offset
+            now_et = et_time_naive.replace(tzinfo=et_tz_fallback)
         
         # Round down to current hour
         current_hour = now_et.replace(minute=0, second=0, microsecond=0)
