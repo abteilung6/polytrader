@@ -10,6 +10,7 @@ from polytrader.config import CHAIN_ID, CLOB_API_URL, PolymarketSecrets
 from polytrader.events import TICKS, EventBus
 from polytrader.gamma import GammaClient
 from polytrader.observer import Observer
+from polytrader.store import MemoryTickStore
 
 
 async def watch_mode(args: argparse.Namespace) -> None:
@@ -22,8 +23,9 @@ async def watch_mode(args: argparse.Namespace) -> None:
     )
 
     bus = EventBus()
+    store = MemoryTickStore()
     adapter = PolymarketMarketDataAdapter(config)
-    observer = Observer(bus, adapter)
+    observer = Observer(bus, adapter, store)
 
     tick_queue = bus.subscribe(TICKS)
 

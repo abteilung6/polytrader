@@ -4,6 +4,7 @@ from collections.abc import AsyncIterator
 from polytrader.adapters import IMarketDataAdapter
 from polytrader.events import TICKS, EventBus
 from polytrader.observer import Observer
+from polytrader.store import MemoryTickStore
 from polytrader.types import MarketTick
 
 
@@ -18,11 +19,12 @@ class FakeMarketDataAdapter(IMarketDataAdapter):
 
 async def test_observer_publishes_ticks() -> None:
     bus = EventBus()
+    store = MemoryTickStore()
     tick1 = MarketTick(ts=1.0, market_id="test", outcome="UP", best_bid=0.49, best_ask=0.51)
     tick2 = MarketTick(ts=2.0, market_id="test", outcome="UP", best_bid=0.50, best_ask=0.52)
 
     adapter = FakeMarketDataAdapter([tick1, tick2])
-    observer = Observer(bus, adapter)
+    observer = Observer(bus, adapter, store)
 
     queue = bus.subscribe(TICKS)
 
@@ -34,15 +36,19 @@ async def test_observer_publishes_ticks() -> None:
     assert received_tick1 == tick1
     assert received_tick2 == tick2
 
+    assert store.latest("test", "UP") == tick2
+    assert store.history("test", "UP") == [tick1, tick2]
+
     await asyncio.wait_for(task, timeout=1.0)
 
 
 async def test_observer_multiple_subscribers() -> None:
     bus = EventBus()
+    store = MemoryTickStore()
     tick = MarketTick(ts=1.0, market_id="test", outcome="UP", best_bid=0.49, best_ask=0.51)
 
     adapter = FakeMarketDataAdapter([tick])
-    observer = Observer(bus, adapter)
+    observer = Observer(bus, adapter, store)
 
     queue1 = bus.subscribe(TICKS)
     queue2 = bus.subscribe(TICKS)
@@ -55,11 +61,14 @@ async def test_observer_multiple_subscribers() -> None:
     assert received1 == tick
     assert received2 == tick
 
+    assert store.latest("test", "UP") == tick
+
     await asyncio.wait_for(task, timeout=1.0)
 
 
 async def test_observer_stops_when_stopped() -> None:
     bus = EventBus()
+    store = MemoryTickStore()
     tick = MarketTick(ts=1.0, market_id="test", outcome="UP", best_bid=0.49, best_ask=0.51)
 
     async def slow_ticks():
@@ -73,7 +82,7 @@ async def test_observer_stops_when_stopped() -> None:
                 yield tick
 
     adapter = SlowAdapter()
-    observer = Observer(bus, adapter)
+    observer = Observer(bus, adapter, store)
 
     queue = bus.subscribe(TICKS)
 
@@ -82,6 +91,7 @@ async def test_observer_stops_when_stopped() -> None:
 
     received = await queue.get()
     assert received == tick
+    assert store.latest("test", "UP") == tick
 
     observer.stop()
     await asyncio.sleep(0.05)
