@@ -8,6 +8,9 @@ from py_clob_client.order_builder.constants import BUY  # type: ignore[import-un
 from polytrader.adapters.polymarket import PolymarketAdapterConfig, PolymarketMarketDataAdapter
 from polytrader.clob import place_market_order, verify_usdc_balance
 from polytrader.config import CHAIN_ID, CLOB_API_URL, PolymarketSecrets
+from polytrader.core import PortfolioManager
+from polytrader.core.position import Position
+from polytrader.core.strategy_registry import create_strategy, get_strategy_info
 from polytrader.events import TICKS, EventBus
 from polytrader.gamma import GammaClient
 from polytrader.market_discovery import MarketSlugGenerator
@@ -109,12 +112,35 @@ async def watch_mode(args: argparse.Namespace) -> None:
     bus = EventBus()
     store = MemoryTickStore()
     
+    # Initialize portfolio manager if trading is enabled
+    portfolio_manager: PortfolioManager | None = None
+    if args.trade:
+        strategy = create_strategy(args.strategy)
+        portfolio_manager = PortfolioManager(
+            initial_balance=args.initial_balance or 1000.0,
+            strategy=strategy,
+        )
+        strategy_info = get_strategy_info(args.strategy)
+        print(f"💰 Trading enabled:")
+        print(f"   Initial balance: ${portfolio_manager.get_balance():.2f} USDC")
+        print(f"   Strategy: {strategy_info['name']} ({strategy_info['type']})")
+        print(f"   Trade probability: {strategy_info['trade_probability']:.1%}")
+        print(f"   Trade amount: ${strategy_info['min_trade_amount']:.2f}-${strategy_info['max_trade_amount']:.2f} USDC")
+        print()
+    
     # Create initial observers
     observers, observer_tasks = await create_observers(
         market_slug, outcomes_to_watch, secrets, args.frequency, bus, store
     )
 
     tick_queue = bus.subscribe(TICKS)
+    
+    # Track expiration time for initial market if trading is enabled
+    market_expirations: dict[str, datetime] = {}
+    if portfolio_manager:
+        expiration_time = MarketSlugGenerator.get_market_expiration_time(market_slug)
+        if expiration_time:
+            market_expirations[market_slug] = expiration_time
 
     print(f"Watching market: {market_slug}")
     print(f"Outcomes: {', '.join(outcomes_to_watch)}")
@@ -125,6 +151,8 @@ async def watch_mode(args: argparse.Namespace) -> None:
 
     # Track latest ticks for each outcome
     latest_ticks: dict[str, "MarketTick"] = {}
+    # Track when we last successfully received a tick for each outcome (to detect API errors)
+    last_successful_tick_time: dict[str, float] = {}
     
     # Print table header
     if len(outcomes_to_watch) > 1:
@@ -146,6 +174,43 @@ async def watch_mode(args: argparse.Namespace) -> None:
             count += 1
             check_interval_counter += 1
             
+            # Check for expired markets and settle positions
+            if portfolio_manager and check_interval_counter >= 10:
+                now_utc = datetime.now(timezone.utc)
+                expired_markets: list[str] = []
+                
+                for market_id, expiration_time in market_expirations.items():
+                    if now_utc >= expiration_time:
+                        expired_markets.append(market_id)
+                
+                # Settle expired markets
+                for expired_market_id in expired_markets:
+                    # Get latest prices for this market
+                    up_tick = latest_ticks.get("UP")
+                    down_tick = latest_ticks.get("DOWN")
+                    
+                    if up_tick and down_tick and up_tick.market_id == expired_market_id:
+                        # Determine winner based on highest price
+                        settlement_info = portfolio_manager.expire_positions(
+                            market_id=expired_market_id,
+                            up_price=up_tick.mid,
+                            down_price=down_tick.mid,
+                        )
+                        
+                        winner = settlement_info["winner"]
+                        positions_settled = settlement_info["positions_settled"]
+                        total_payout = settlement_info["total_payout"]
+                        
+                        print(f"\n⏰ Market expired: {expired_market_id}")
+                        print(f"   Winner: {winner} (UP: ${up_tick.mid:.4f}, DOWN: ${down_tick.mid:.4f})")
+                        print(f"   Positions settled: {positions_settled}")
+                        print(f"   Total payout: ${total_payout:.2f} USDC")
+                        print(f"   New balance: ${portfolio_manager.get_balance():.2f} USDC")
+                        print()
+                    
+                    # Remove from tracking
+                    del market_expirations[expired_market_id]
+            
             # Check for interval change every 10 ticks (to avoid checking too frequently)
             if auto_refresh and check_interval_counter >= 10:
                 check_interval_counter = 0
@@ -155,6 +220,25 @@ async def watch_mode(args: argparse.Namespace) -> None:
                     # Interval has changed - switch to new market
                     print(f"\n⚠️  Interval changed! Switching to new market...")
                     
+                    # Before switching, check if old market expired and settle positions
+                    if portfolio_manager:
+                        old_expiration = MarketSlugGenerator.get_market_expiration_time(market_slug)
+                        if old_expiration:
+                            now_utc = datetime.now(timezone.utc)
+                            if now_utc >= old_expiration:
+                                up_tick = latest_ticks.get("UP")
+                                down_tick = latest_ticks.get("DOWN")
+                                if up_tick and down_tick:
+                                    settlement_info = portfolio_manager.expire_positions(
+                                        market_id=market_slug,
+                                        up_price=up_tick.mid,
+                                        down_price=down_tick.mid,
+                                    )
+                                    winner = settlement_info["winner"]
+                                    total_payout = settlement_info["total_payout"]
+                                    print(f"   Settled expired market: {market_slug}")
+                                    print(f"   Winner: {winner}, Payout: ${total_payout:.2f} USDC")
+                    
                     # Stop old observers
                     await stop_observers(observers, observer_tasks)
                     
@@ -162,6 +246,12 @@ async def watch_mode(args: argparse.Namespace) -> None:
                     new_market_slug = MarketSlugGenerator.get_latest_slug(args.asset, args.time_period)
                     current_interval_id = new_interval_id
                     market_slug = new_market_slug
+                    
+                    # Track expiration for new market
+                    if portfolio_manager:
+                        expiration_time = MarketSlugGenerator.get_market_expiration_time(market_slug)
+                        if expiration_time:
+                            market_expirations[market_slug] = expiration_time
                     
                     # Clear old ticks
                     latest_ticks.clear()
@@ -177,6 +267,57 @@ async def watch_mode(args: argparse.Namespace) -> None:
             # Store latest tick for this outcome
             outcome_key = tick.outcome
             latest_ticks[outcome_key] = tick
+            # Mark that we successfully received a tick for this outcome
+            last_successful_tick_time[outcome_key] = tick.ts
+
+            # Process with portfolio manager if we have both UP and DOWN prices
+            trade_executed = False
+            if portfolio_manager and len(outcomes_to_watch) > 1:
+                up_tick = latest_ticks.get("UP")
+                down_tick = latest_ticks.get("DOWN")
+                
+                # Only trade if we have both ticks AND they are recent (within 5 seconds)
+                # This ensures we don't trade on stale data if there's an API error
+                current_time = tick.ts
+                max_tick_age = 5.0  # Maximum age in seconds for valid ticks
+                
+                # Check if we have both ticks and they're both recent
+                has_fresh_up = up_tick is not None and (current_time - last_successful_tick_time.get("UP", 0)) <= max_tick_age
+                has_fresh_down = down_tick is not None and (current_time - last_successful_tick_time.get("DOWN", 0)) <= max_tick_age
+                
+                if has_fresh_up and has_fresh_down:
+                    # Both ticks are fresh - safe to trade
+                    decision = portfolio_manager.process_prices(
+                        market_id=tick.market_id,
+                        up_price=up_tick.mid,
+                        down_price=down_tick.mid,
+                    )
+                    if decision:
+                        trade_executed = True
+                        # Track expiration time for this market if not already tracked
+                        if tick.market_id not in market_expirations:
+                            expiration_time = MarketSlugGenerator.get_market_expiration_time(tick.market_id)
+                            if expiration_time:
+                                market_expirations[tick.market_id] = expiration_time
+                else:
+                    # Skip trading if we don't have fresh data for both outcomes
+                    # This happens when there's an API error and we stop receiving ticks
+                    if count % 10 == 0:  # Only log occasionally to avoid spam
+                        missing_or_stale = []
+                        if not has_fresh_up:
+                            if up_tick is None:
+                                missing_or_stale.append("UP (missing)")
+                            else:
+                                age = current_time - last_successful_tick_time.get("UP", 0)
+                                missing_or_stale.append(f"UP ({age:.1f}s old)")
+                        if not has_fresh_down:
+                            if down_tick is None:
+                                missing_or_stale.append("DOWN (missing)")
+                            else:
+                                age = current_time - last_successful_tick_time.get("DOWN", 0)
+                                missing_or_stale.append(f"DOWN ({age:.1f}s old)")
+                        if missing_or_stale:
+                            print(f"⚠️  Skipping trade: API error or stale data ({', '.join(missing_or_stale)})")
 
             if len(outcomes_to_watch) > 1:
                 # Display table with all outcomes side by side
@@ -198,6 +339,63 @@ async def watch_mode(args: argparse.Namespace) -> None:
                         )
                     else:
                         print(f"{outcome_cli:<10} {'-':<12} {'-':<12} {'-':<12} {'-':<12} {'-':<12}")
+                
+                # Show portfolio info if trading is enabled
+                if portfolio_manager:
+                    stats = portfolio_manager.get_statistics()
+                    portfolio = portfolio_manager.get_portfolio()
+                    
+                    # Calculate current prices for positions
+                    up_tick = latest_ticks.get("UP")
+                    down_tick = latest_ticks.get("DOWN")
+                    current_prices: dict[tuple[str, Outcome], float] = {}
+                    if up_tick and down_tick:
+                        current_prices[(tick.market_id, "UP")] = up_tick.mid
+                        current_prices[(tick.market_id, "DOWN")] = down_tick.mid
+                    
+                    # Calculate profit scenarios for this market
+                    # Get all positions for this market
+                    market_positions = {
+                        outcome: pos
+                        for (m_id, outcome), pos in portfolio.positions.items()
+                        if m_id == tick.market_id
+                    }
+                    
+                    if market_positions:
+                        # Calculate total cost for all positions in this market
+                        total_cost = sum(
+                            pos.quantity * pos.avg_price
+                            for pos in market_positions.values()
+                        )
+                        
+                        # Calculate profit if UP wins
+                        up_position = market_positions.get("UP")
+                        down_position = market_positions.get("DOWN")
+                        up_value_if_up_wins = (up_position.quantity * 1.0) if up_position else 0.0
+                        down_value_if_up_wins = (down_position.quantity * 0.0) if down_position else 0.0
+                        profit_if_up = (up_value_if_up_wins + down_value_if_up_wins) - total_cost
+                        
+                        # Calculate profit if DOWN wins
+                        up_value_if_down_wins = (up_position.quantity * 0.0) if up_position else 0.0
+                        down_value_if_down_wins = (down_position.quantity * 1.0) if down_position else 0.0
+                        profit_if_down = (up_value_if_down_wins + down_value_if_down_wins) - total_cost
+                        
+                        print(f"\n💼 Portfolio: Balance=${stats['balance']:.2f} | Trades={stats['total_trades']} | Positions={stats['num_positions']}")
+                        print(f"   Profit if UP: ${profit_if_up:+.2f}")
+                        print(f"   Profit if DOWN: ${profit_if_down:+.2f}")
+                        
+                        # Show positions for current market
+                        if up_tick and down_tick:
+                            print(f"\n   Positions in {tick.market_id}:")
+                            for outcome, position in market_positions.items():
+                                current_price = current_prices.get((tick.market_id, outcome), position.avg_price)
+                                print(
+                                    f"     {outcome}: {position.quantity:.4f} @ ${position.avg_price:.4f} "
+                                    f"(Current: ${current_price:.4f})"
+                                )
+                    
+                    if trade_executed:
+                        print(f"✅ Trade executed on {tick.market_id}")
             else:
                 # Single outcome - simple row format
                 print(
@@ -213,6 +411,96 @@ async def watch_mode(args: argparse.Namespace) -> None:
     except KeyboardInterrupt:
         print("\n\nStopped by user")
         await stop_observers(observers, observer_tasks)
+    finally:
+        # Print final portfolio statistics if trading was enabled
+        if portfolio_manager:
+            stats = portfolio_manager.get_statistics()
+            portfolio = portfolio_manager.get_portfolio()
+            
+            # Get final prices from latest ticks
+            final_prices: dict[tuple[str, Outcome], float] = {}
+            for (market_id, outcome), position in portfolio.positions.items():
+                # Use latest tick prices if available, otherwise use entry price
+                if market_id in [t.market_id for t in latest_ticks.values()]:
+                    up_tick = latest_ticks.get("UP")
+                    down_tick = latest_ticks.get("DOWN")
+                    if up_tick and up_tick.market_id == market_id:
+                        final_prices[(market_id, "UP")] = up_tick.mid
+                    if down_tick and down_tick.market_id == market_id:
+                        final_prices[(market_id, "DOWN")] = down_tick.mid
+            
+            print("\n" + "=" * 80)
+            print("📊 Final Portfolio Statistics:")
+            print("=" * 80)
+            print(f"Balance: ${stats['balance']:.2f} USDC")
+            print(f"Total Trades: {stats['total_trades']}")
+            print(f"Total Spent: ${stats['total_spent']:.2f} USDC")
+            print(f"Open Positions: {stats['num_positions']}")
+            
+            if stats['num_positions'] > 0:
+                # Group positions by market
+                markets: dict[str, dict[Outcome, Position]] = {}
+                for (market_id, outcome), position in portfolio.positions.items():
+                    if market_id not in markets:
+                        markets[market_id] = {}
+                    markets[market_id][outcome] = position
+                
+                print("\nPositions:")
+                print(f"{'Market':<30} {'Direction':<10} {'Quantity':<12} {'Entry Price':<12} {'Current Price':<14}")
+                print("-" * 78)
+                
+                for market_id, market_positions in markets.items():
+                    for outcome, position in market_positions.items():
+                        current_price = final_prices.get((market_id, outcome), position.avg_price)
+                        print(
+                            f"{market_id:<30} {outcome:<10} {position.quantity:<12.4f} "
+                            f"${position.avg_price:<11.4f} ${current_price:<13.4f}"
+                        )
+                
+                print("-" * 78)
+                print("\nProfit by Market:")
+                print(f"{'Market':<30} {'Profit if UP':<15} {'Profit if DOWN':<15}")
+                print("-" * 60)
+                
+                total_profit_if_all_up = 0.0
+                total_profit_if_all_down = 0.0
+                
+                for market_id, market_positions in markets.items():
+                    # Calculate total cost for all positions in this market
+                    total_cost = sum(
+                        pos.quantity * pos.avg_price
+                        for pos in market_positions.values()
+                    )
+                    
+                    # Calculate profit if UP wins
+                    up_position = market_positions.get("UP")
+                    down_position = market_positions.get("DOWN")
+                    up_value_if_up_wins = (up_position.quantity * 1.0) if up_position else 0.0
+                    down_value_if_up_wins = (down_position.quantity * 0.0) if down_position else 0.0
+                    profit_if_up = (up_value_if_up_wins + down_value_if_up_wins) - total_cost
+                    
+                    # Calculate profit if DOWN wins
+                    up_value_if_down_wins = (up_position.quantity * 0.0) if up_position else 0.0
+                    down_value_if_down_wins = (down_position.quantity * 1.0) if down_position else 0.0
+                    profit_if_down = (up_value_if_down_wins + down_value_if_down_wins) - total_cost
+                    
+                    total_profit_if_all_up += profit_if_up
+                    total_profit_if_all_down += profit_if_down
+                    
+                    print(f"{market_id:<30} ${profit_if_up:+14.2f} ${profit_if_down:+14.2f}")
+                
+                print("-" * 60)
+                print(f"{'Total':<30} ${total_profit_if_all_up:+14.2f} ${total_profit_if_all_down:+14.2f}")
+                
+                # Calculate total portfolio value scenarios
+                total_value_if_all_up = stats['balance'] + total_profit_if_all_up
+                total_value_if_all_down = stats['balance'] + total_profit_if_all_down
+                
+                print(f"\nTotal Portfolio Value:")
+                print(f"  If all UP outcomes win: ${total_value_if_all_up:.2f}")
+                print(f"  If all DOWN outcomes win: ${total_value_if_all_down:.2f}")
+            
+            print("=" * 80)
 
 
 def buy_mode(args: argparse.Namespace) -> None:
@@ -279,6 +567,22 @@ def main() -> None:
         "--limit",
         type=int,
         help="Number of ticks to show (default: unlimited)",
+    )
+    watch_parser.add_argument(
+        "--trade",
+        action="store_true",
+        help="Enable automated trading with portfolio manager",
+    )
+    watch_parser.add_argument(
+        "--initial-balance",
+        type=float,
+        help="Initial USDC balance for trading (default: 1000.0)",
+    )
+    watch_parser.add_argument(
+        "--strategy",
+        choices=["random"],
+        default="random",
+        help="Trading strategy (default: random) - only 'random' is currently available",
     )
 
     buy_parser = subparsers.add_parser("buy", help="Place a buy order")

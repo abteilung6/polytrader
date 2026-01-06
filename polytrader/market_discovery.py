@@ -134,3 +134,86 @@ class MarketSlugGenerator:
         else:
             raise ValueError(f"Unsupported time period: {time_period}")
 
+    @staticmethod
+    def get_market_expiration_time(market_slug: str) -> datetime | None:
+        """Get the expiration time for a market based on its slug.
+        
+        Args:
+            market_slug: Market slug (e.g., "btc-updown-15m-1767709800" or "bitcoin-up-or-down-january-6-9am-et")
+            
+        Returns:
+            Expiration datetime in UTC, or None if slug format is not recognized
+        """
+        # Check if it's a 15-minute market: {asset}-updown-15m-{timestamp}
+        if "-updown-15m-" in market_slug:
+            try:
+                timestamp_str = market_slug.split("-updown-15m-")[-1]
+                start_timestamp = int(timestamp_str)
+                # Market expires 15 minutes (900 seconds) after start
+                expiration_timestamp = start_timestamp + 900
+                return datetime.fromtimestamp(expiration_timestamp, tz=timezone.utc)
+            except (ValueError, IndexError):
+                return None
+        
+        # Check if it's an hourly market: {asset}-up-or-down-{month}-{day}-{hour}am-et
+        if "-up-or-down-" in market_slug and "-et" in market_slug:
+            try:
+                # Parse the date part: e.g., "january-6-9am"
+                date_part = market_slug.split("-up-or-down-")[-1].replace("-et", "")
+                parts = date_part.split("-")
+                
+                if len(parts) < 3:
+                    return None
+                
+                month_name = parts[0]
+                day = int(parts[1])
+                hour_str = parts[2]
+                
+                # Parse hour (e.g., "9am" or "2pm")
+                if hour_str.endswith("am"):
+                    hour = int(hour_str[:-2])
+                    if hour == 12:
+                        hour = 0
+                elif hour_str.endswith("pm"):
+                    hour = int(hour_str[:-2])
+                    if hour != 12:
+                        hour += 12
+                else:
+                    return None
+                
+                # Get current year (markets are typically for current year)
+                now_utc = datetime.now(timezone.utc)
+                year = now_utc.year
+                
+                # Convert month name to number
+                month_map = {
+                    "january": 1, "february": 2, "march": 3, "april": 4,
+                    "may": 5, "june": 6, "july": 7, "august": 8,
+                    "september": 9, "october": 10, "november": 11, "december": 12
+                }
+                month = month_map.get(month_name.lower())
+                if month is None:
+                    return None
+                
+                # Create datetime in ET timezone
+                if ZoneInfo is not None:
+                    et_tz = ZoneInfo("America/New_York")
+                    market_start_et = datetime(year, month, day, hour, 0, 0, tzinfo=et_tz)
+                else:
+                    from datetime import timedelta
+                    et_offset = timedelta(hours=-5)
+                    et_tz_fallback = timezone(et_offset, name="ET")
+                    market_start_et = datetime(year, month, day, hour, 0, 0, tzinfo=et_tz_fallback)
+                
+                # Convert to UTC
+                market_start_utc = market_start_et.astimezone(timezone.utc)
+                
+                # Market expires 1 hour after start
+                from datetime import timedelta
+                expiration_utc = market_start_utc + timedelta(hours=1)
+                return expiration_utc
+            except (ValueError, IndexError, KeyError):
+                return None
+        
+        return None
+
