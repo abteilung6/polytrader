@@ -59,3 +59,26 @@ class TradeProposal:
     size: float
     reason: str
     ttl_s: float = 2.0
+
+
+@dataclass(frozen=True)
+class Order:
+    """Executed order from OrderManager.
+
+    Attributes:
+        ts: Unix timestamp in seconds (float for precision) when order was executed
+        market_id: Market identifier (e.g., market slug)
+        outcome: Market outcome ("UP" or "DOWN")
+        side: Trade side ("BUY" or "SELL")
+        size: Trade size in USD
+        proposal_reason: Original reason from the trade proposal
+        response: Order response from the CLOB API
+    """
+
+    ts: float
+    market_id: str
+    outcome: Outcome
+    side: Side
+    size: float
+    proposal_reason: str
+    response: dict

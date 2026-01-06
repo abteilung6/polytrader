@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Protocol
 
 from py_clob_client.client import ClobClient  # type: ignore[import-untyped]
 from py_clob_client.clob_types import (  # type: ignore[import-untyped]
@@ -8,8 +8,34 @@ from py_clob_client.clob_types import (  # type: ignore[import-untyped]
     OrderType,
 )
 
+from polytrader.config import CHAIN_ID, CLOB_API_URL, PolymarketSecrets
 
-def verify_usdc_balance(client: ClobClient, *, required_amount: float) -> float:
+
+class IClobClient(Protocol):
+    """Protocol for CLOB client operations used by the trading system."""
+
+    def get_balance_allowance(self, params: Any) -> dict[str, Any]:
+        """Get balance and allowance information."""
+        ...
+
+    def create_market_order(self, order_args: Any) -> dict[str, Any]:
+        """Create a signed market order."""
+        ...
+
+    def post_order(self, signed_order: Any, order_type: Any) -> dict[str, Any]:
+        """Post an order to the exchange."""
+        ...
+
+    def create_or_derive_api_creds(self) -> Any:
+        """Create or derive API credentials."""
+        ...
+
+    def set_api_creds(self, creds: Any) -> None:
+        """Set API credentials on the client."""
+        ...
+
+
+def verify_usdc_balance(client: IClobClient, *, required_amount: float) -> float:
     """Verify USDC balance is sufficient for the order.
 
     Args:
@@ -40,7 +66,7 @@ def verify_usdc_balance(client: ClobClient, *, required_amount: float) -> float:
 
 
 def place_market_order(
-    client: ClobClient,
+    client: IClobClient,
     *,
     token_id: str,
     amount: float,
@@ -67,3 +93,27 @@ def place_market_order(
     signed_order = client.create_market_order(market_order)
     response: dict[str, Any] = client.post_order(signed_order, OrderType.FOK)
     return response
+
+
+class IClobClientFactory(Protocol):
+    """Protocol for creating CLOB client instances."""
+
+    def __call__(self) -> IClobClient: ...
+
+
+def create_clob_client_factory(secrets: PolymarketSecrets) -> IClobClientFactory:
+    """Create a factory function for ClobClient instances."""
+
+    def factory() -> ClobClient:
+        client = ClobClient(
+            host=CLOB_API_URL,
+            key=secrets.private_key.get_secret_value(),
+            chain_id=CHAIN_ID,
+            signature_type=secrets.signature_type,
+            funder=secrets.funder,
+        )
+        creds = client.create_or_derive_api_creds()
+        client.set_api_creds(creds)
+        return client
+
+    return factory

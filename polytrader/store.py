@@ -12,7 +12,7 @@ class ITickStore(Protocol):
     def history(self, market_id: str, outcome: Outcome) -> list[MarketTick]: ...
 
 
-class MemoryTickStore:
+class MemoryTickStore(ITickStore):
     def __init__(self, window: int = 3000) -> None:
         self.window = window
         self._ticks: dict[tuple[str, Outcome], deque[MarketTick]] = {}
