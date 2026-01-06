@@ -22,8 +22,8 @@ class Strategy(Protocol):
         Args:
             portfolio: Current portfolio state
             market_id: Market identifier
-            up_price: Current mid price for UP outcome
-            down_price: Current mid price for DOWN outcome
+            up_price: Current best ask price (best bid + spread) for UP outcome
+            down_price: Current best ask price (best bid + spread) for DOWN outcome
 
         Returns:
             TradeDecision or list of TradeDecisions if trades should be made, None otherwise
@@ -103,8 +103,13 @@ class ArbitrageStrategy:
         initial_position_pct: float = 0.1,
         min_profit_threshold: float = 5.0,
         max_price_threshold: float = 0.91,
-        trade_amount: float = 10.0,
+        trade_pct: float = 0.01,
+        max_trade_multiplier: float = 2.0,
+        min_trade_amount: float = 1.0,
+        max_trade_amount: float = 50.0,
         min_improvement: float = 0.10,
+        max_loss_limit: float = -20.0,
+        max_imbalance_ratio: float = 3.0,
     ) -> None:
         """Initialize arbitrage strategy.
 
@@ -113,23 +118,34 @@ class ArbitrageStrategy:
             initial_position_pct: Percentage of capital for initial positions (default: 0.1 = 10% per side)
             min_profit_threshold: Minimum profit threshold (default: $5) - if profit exceeds this, don't trade
             max_price_threshold: Maximum price threshold (default: 0.91) - don't trade if either price exceeds this
-            trade_amount: Fixed amount per trade (default: $10)
+            trade_pct: Percentage of portfolio balance for base trade size (default: 0.01 = 1%)
+            max_trade_multiplier: Maximum multiplier when scaling by improvement (default: 2.0)
+            min_trade_amount: Minimum trade size in USDC (default: $1)
+            max_trade_amount: Maximum trade size in USDC (default: $50)
             min_improvement: Minimum improvement in guaranteed profit required (default: $0.10)
+            max_loss_limit: Stop-loss limit - don't trade if guaranteed profit below this (default: -$20)
+            max_imbalance_ratio: Don't trade if position imbalance exceeds this ratio (default: 3.0)
         """
         self.max_capital_per_market = max_capital_per_market
         self.initial_position_pct = initial_position_pct
         self.min_profit_threshold = min_profit_threshold
         self.max_price_threshold = max_price_threshold
-        self.trade_amount = trade_amount
+        self.trade_pct = trade_pct
+        self.max_trade_multiplier = max_trade_multiplier
+        self.min_trade_amount = min_trade_amount
+        self.max_trade_amount = max_trade_amount
         self.min_improvement = min_improvement
+        self.max_loss_limit = max_loss_limit
+        self.max_imbalance_ratio = max_imbalance_ratio
 
     def __str__(self) -> str:
         """String representation of the strategy."""
         return (
             f"ArbitrageStrategy(max_capital=${self.max_capital_per_market:.2f}, "
             f"initial_pct={self.initial_position_pct:.1%}, "
-            f"trade_amount=${self.trade_amount:.2f}, "
-            f"min_improvement=${self.min_improvement:.2f})"
+            f"trade_pct={self.trade_pct:.1%}, "
+            f"min_improvement=${self.min_improvement:.2f}, "
+            f"max_loss=${self.max_loss_limit:.2f})"
         )
 
     def _calculate_net_arbitrage_profit(
@@ -193,6 +209,83 @@ class ArbitrageStrategy:
         new_guaranteed_profit = min(new_up_shares, new_down_shares) * 1.0 - new_total_cost
         return new_guaranteed_profit
 
+    def _check_loss_limit(self, current_profit: float) -> bool:
+        """Check if current profit is above the loss limit.
+        
+        Args:
+            current_profit: Current guaranteed profit
+            
+        Returns:
+            True if trading is allowed (profit above loss limit), False otherwise
+        """
+        return current_profit >= self.max_loss_limit
+
+    def _check_position_imbalance(
+        self, up_position: "Position | None", down_position: "Position | None"
+    ) -> bool:
+        """Check if position imbalance is within acceptable limits.
+        
+        Args:
+            up_position: UP position or None
+            down_position: DOWN position or None
+            
+        Returns:
+            True if imbalance is acceptable, False if too imbalanced
+        """
+        up_shares = up_position.quantity if up_position else 0
+        down_shares = down_position.quantity if down_position else 0
+        
+        # If either side is zero, imbalance is acceptable (we're building positions)
+        if up_shares == 0 or down_shares == 0:
+            return True
+        
+        # Calculate imbalance ratio (larger / smaller)
+        imbalance_ratio = max(up_shares, down_shares) / min(up_shares, down_shares)
+        return imbalance_ratio <= self.max_imbalance_ratio
+
+    def _calculate_dynamic_trade_amount(
+        self,
+        portfolio: Portfolio,
+        total_cost: float,
+        current_profit: float,
+        improvement: float,
+    ) -> float:
+        """Calculate dynamic trade amount based on portfolio, opportunity, and risk.
+        
+        Args:
+            portfolio: Current portfolio state
+            total_cost: Total cost of existing positions
+            current_profit: Current guaranteed profit
+            improvement: Expected improvement from the trade
+            
+        Returns:
+            Calculated trade amount in USDC
+        """
+        # Base amount: percentage of portfolio balance
+        base_amount = portfolio.balance * self.trade_pct
+        
+        # Scale by improvement (better opportunities get more capital)
+        if improvement > 0:
+            improvement_factor = min(improvement / self.min_improvement, self.max_trade_multiplier)
+        else:
+            improvement_factor = 1.0
+        
+        scaled_amount = base_amount * improvement_factor
+        
+        # Risk adjustment: reduce size if losing
+        if current_profit < 0:
+            risk_factor = max(0.5, 1.0 + current_profit / abs(self.max_loss_limit))
+            scaled_amount *= risk_factor
+        
+        # Cap by remaining capital allocation
+        remaining_capital = self.max_capital_per_market - total_cost
+        trade_amount = min(scaled_amount, remaining_capital, portfolio.balance)
+        
+        # Enforce min/max bounds
+        trade_amount = max(self.min_trade_amount, min(trade_amount, self.max_trade_amount))
+        
+        return trade_amount
+
     def decide(
         self,
         portfolio: Portfolio,
@@ -205,8 +298,8 @@ class ArbitrageStrategy:
         Args:
             portfolio: Current portfolio state
             market_id: Market identifier
-            up_price: Current mid price for UP outcome
-            down_price: Current mid price for DOWN outcome
+            up_price: Current best ask price (best bid + spread) for UP outcome
+            down_price: Current best ask price (best bid + spread) for DOWN outcome
 
         Returns:
             TradeDecision, list of TradeDecisions, or None
@@ -239,6 +332,10 @@ class ArbitrageStrategy:
 
         # Calculate current guaranteed profit
         current_profit = self._calculate_net_arbitrage_profit(up_position, down_position)
+
+        # Check loss limit (stop-loss protection)
+        if not self._check_loss_limit(current_profit):
+            return None
 
         # Check profit threshold
         if current_profit >= self.min_profit_threshold:
@@ -273,25 +370,89 @@ class ArbitrageStrategy:
             ]
 
         # Handle ongoing trades (existing positions)
-        # Check if adding trade_amount would exceed max_capital_per_market
-        if total_cost + self.trade_amount > self.max_capital_per_market:
+        # Check position imbalance (risk protection)
+        if not self._check_position_imbalance(up_position, down_position):
             return None
+
+        # Calculate dynamic trade amounts for both sides
+        # First, estimate improvements with a base amount to determine which side is better
+        base_trade_amount = portfolio.balance * self.trade_pct
+        base_trade_amount = max(self.min_trade_amount, min(base_trade_amount, self.max_trade_amount))
+        
+        # Try buying UP with base amount to estimate improvement
+        up_profit_after_base = self._calculate_profit_after_trade(
+            up_position, down_position, "UP", base_trade_amount, up_price
+        )
+        up_improvement_base = up_profit_after_base - current_profit
+
+        # Try buying DOWN with base amount to estimate improvement
+        down_profit_after_base = self._calculate_profit_after_trade(
+            up_position, down_position, "DOWN", base_trade_amount, down_price
+        )
+        down_improvement_base = down_profit_after_base - current_profit
+
+        # Calculate dynamic trade amounts based on improvements
+        up_trade_amount = self._calculate_dynamic_trade_amount(
+            portfolio, total_cost, current_profit, up_improvement_base
+        )
+        down_trade_amount = self._calculate_dynamic_trade_amount(
+            portfolio, total_cost, current_profit, down_improvement_base
+        )
+
+        # Check if trades would exceed max_capital_per_market
+        if total_cost + up_trade_amount > self.max_capital_per_market:
+            up_trade_amount = 0
+        if total_cost + down_trade_amount > self.max_capital_per_market:
+            down_trade_amount = 0
 
         # Check if we have enough balance
-        if self.trade_amount > portfolio.balance:
-            return None
+        if up_trade_amount > portfolio.balance:
+            up_trade_amount = 0
+        if down_trade_amount > portfolio.balance:
+            down_trade_amount = 0
 
-        # Try buying UP
-        up_profit_after = self._calculate_profit_after_trade(
-            up_position, down_position, "UP", self.trade_amount, up_price
-        )
-        up_improvement = up_profit_after - current_profit
+        # Recalculate improvements with actual dynamic amounts
+        up_improvement = 0.0
+        down_improvement = 0.0
+        
+        if up_trade_amount > 0:
+            up_profit_after = self._calculate_profit_after_trade(
+                up_position, down_position, "UP", up_trade_amount, up_price
+            )
+            up_improvement = up_profit_after - current_profit
 
-        # Try buying DOWN
-        down_profit_after = self._calculate_profit_after_trade(
-            up_position, down_position, "DOWN", self.trade_amount, down_price
-        )
-        down_improvement = down_profit_after - current_profit
+        if down_trade_amount > 0:
+            down_profit_after = self._calculate_profit_after_trade(
+                up_position, down_position, "DOWN", down_trade_amount, down_price
+            )
+            down_improvement = down_profit_after - current_profit
+
+        # Apply relative balancing boost: favor the side that's cheaper to balance
+        # This helps balance positions while adapting to changing prices and positions
+        up_shares = up_position.quantity if up_position else 0
+        down_shares = down_position.quantity if down_position else 0
+        
+        if up_shares > 0 and down_shares > 0:
+            # Calculate shares needed to balance each side
+            up_shares_needed = max(0, down_shares - up_shares)
+            down_shares_needed = max(0, up_shares - down_shares)
+            
+            # Calculate cost to balance each side (using current prices)
+            up_cost_to_balance = up_shares_needed * up_price
+            down_cost_to_balance = down_shares_needed * down_price
+            
+            # Give a small boost (10%) to the side that's cheaper to balance
+            # Only apply if there's a meaningful imbalance (>20% cost difference)
+            balancing_boost = 1.1
+            if up_cost_to_balance > 0 and down_cost_to_balance > 0:
+                cost_ratio = min(up_cost_to_balance, down_cost_to_balance) / max(up_cost_to_balance, down_cost_to_balance)
+                if cost_ratio < 0.8:  # More than 20% difference
+                    if up_cost_to_balance < down_cost_to_balance:
+                        # UP is cheaper to balance
+                        up_improvement *= balancing_boost
+                    elif down_cost_to_balance < up_cost_to_balance:
+                        # DOWN is cheaper to balance
+                        down_improvement *= balancing_boost
 
         # Choose the trade that improves guaranteed profit most
         if (
@@ -301,7 +462,7 @@ class ArbitrageStrategy:
             return TradeDecision(
                 market_id=market_id,
                 outcome="UP",
-                amount=self.trade_amount,
+                amount=up_trade_amount,
                 price=up_price,
             )
 
@@ -312,7 +473,7 @@ class ArbitrageStrategy:
             return TradeDecision(
                 market_id=market_id,
                 outcome="DOWN",
-                amount=self.trade_amount,
+                amount=down_trade_amount,
                 price=down_price,
             )
 

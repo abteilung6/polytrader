@@ -286,10 +286,11 @@ async def watch_mode(args: argparse.Namespace) -> None:
                 
                 if has_fresh_up and has_fresh_down:
                     # Both ticks are fresh - safe to trade
+                    # Use best_ask (best_bid + spread) for buying - accounts for spread
                     decision = portfolio_manager.process_prices(
                         market_id=tick.market_id,
-                        up_price=up_tick.mid,
-                        down_price=down_tick.mid,
+                        up_price=up_tick.best_ask,
+                        down_price=down_tick.best_ask,
                     )
                     if decision:
                         trade_executed = True

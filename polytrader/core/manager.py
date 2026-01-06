@@ -39,13 +39,14 @@ class PortfolioManager:
             TradeDecision if a trade was made, None otherwise
         """
         # Get prices for both outcomes
+        # Use best_ask (best_bid + spread) for buying - accounts for spread
         # For binary markets, UP + DOWN = 1.0, so we can calculate the other price
         if tick.outcome == "UP":
-            up_price = tick.mid
-            down_price = 1.0 - tick.mid  # Assuming binary market
+            up_price = tick.best_ask
+            down_price = 1.0 - tick.best_ask  # Assuming binary market
         else:
-            down_price = tick.mid
-            up_price = 1.0 - tick.mid  # Assuming binary market
+            down_price = tick.best_ask
+            up_price = 1.0 - tick.best_ask  # Assuming binary market
 
         # Get decision from strategy
         decision = self.strategy.decide(
