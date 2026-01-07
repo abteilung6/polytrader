@@ -1,8 +1,9 @@
 Printer: 
 
-python cli.py watch --asset eth --time-period 15m --strategy gabagool  --trade --frequency 1
-python cli.py watch --asset bitcoin --time-period 15m --strategy gabagool  --trade --frequency 1
-python cli.py watch --asset sol --time-period 15m --strategy gabagool  --trade --frequency 1
+python cli.py watch --asset eth --time-period 15m --strategy gabagool  --trade --frequency 2
+python cli.py watch --asset bitcoin --time-period 15m --strategy gabagool  --trade --frequency 2
+python cli.py watch --asset sol --time-period 15m --strategy gabagool  --trade --frequency 2
+python cli.py watch --asset xrp --time-period 15m --strategy gabagool  --trade --frequency 2
 
 
 # Polytrader

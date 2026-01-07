@@ -31,6 +31,8 @@ class BacktestResult:
     winner: str | None
     profit: float
     profit_pct: float
+    guaranteed_profit: float  # Guaranteed profit from hedged positions before settlement
+    actual_profit: float  # Actual profit after settlement
 
 
 def find_all_data_files(data_dir: str = "data") -> dict[str, list[str]]:
@@ -158,6 +160,8 @@ def backtest_market(
             winner=None,
             profit=0.0,
             profit_pct=0.0,
+            guaranteed_profit=0.0,
+            actual_profit=0.0,
         )
     
     # Sort all ticks by timestamp
@@ -266,6 +270,9 @@ def backtest_market(
                         print(f"{trade_number:<5} {timestamp_str:<12} {trade.outcome:<8} ${trade.amount:<11.2f} "
                               f"{shares:<10.2f} ${trade.price:<9.4f} ${profit_before:<14.2f} ${profit_after:<14.2f} ${balance:<11.2f}")
     
+    # Calculate guaranteed profit before settlement (for hedged positions)
+    guaranteed_profit_before_settlement = calculate_guaranteed_profit(market_id)
+    
     # Print summary after all trades
     if trade_number > 0:
         final_profit = calculate_guaranteed_profit(market_id)
@@ -281,6 +288,16 @@ def backtest_market(
     positions_settled = 0
     total_payout = 0.0
     
+    # Get positions before settlement to calculate actual profit
+    from polytrader.core.position import Position
+    up_position_before = portfolio_manager.portfolio.get_position(market_id, "UP")
+    down_position_before = portfolio_manager.portfolio.get_position(market_id, "DOWN")
+    
+    total_cost_before_settlement = (
+        (up_position_before.quantity * up_position_before.avg_price if up_position_before else 0)
+        + (down_position_before.quantity * down_position_before.avg_price if down_position_before else 0)
+    )
+    
     if expiration_time and latest_up_tick and latest_down_tick:
         # Use final prices to determine winner
         final_up_price = latest_up_tick.best_ask
@@ -295,10 +312,44 @@ def backtest_market(
         positions_settled = settlement["positions_settled"]
         total_payout = settlement["total_payout"]
     
+    # Calculate actual profit after settlement
+    # Actual profit = payout from winning positions - total cost
+    # For hedged positions: if we have both UP and DOWN, we get min(UP_shares, DOWN_shares) * $1.00
+    # For unhedged positions: we only get payout if our position wins
+    if up_position_before and down_position_before:
+        # Hedged position: guaranteed profit is min(UP, DOWN) * $1.00 - total_cost
+        up_shares = up_position_before.quantity
+        down_shares = down_position_before.quantity
+        hedged_shares = min(up_shares, down_shares)
+        
+        # Actual payout depends on winner
+        if winner == "UP":
+            # UP wins: we get $1.00 per UP share, $0.00 per DOWN share
+            actual_payout = up_shares * 1.0
+        else:  # DOWN wins
+            # DOWN wins: we get $0.00 per UP share, $1.00 per DOWN share
+            actual_payout = down_shares * 1.0
+        
+        # Actual profit = actual payout - total cost
+        actual_profit = actual_payout - total_cost_before_settlement
+    elif up_position_before:
+        # Only UP position
+        up_shares = up_position_before.quantity
+        actual_payout = up_shares * 1.0 if winner == "UP" else 0.0
+        actual_profit = actual_payout - total_cost_before_settlement
+    elif down_position_before:
+        # Only DOWN position
+        down_shares = down_position_before.quantity
+        actual_payout = down_shares * 1.0 if winner == "DOWN" else 0.0
+        actual_profit = actual_payout - total_cost_before_settlement
+    else:
+        # No positions
+        actual_profit = 0.0
+    
     # Calculate final statistics
     stats = portfolio_manager.get_statistics()
     final_balance = stats["balance"]
-    profit = final_balance - initial_balance
+    profit = final_balance - initial_balance  # This is the same as actual_profit, but calculated from balance
     profit_pct = (profit / initial_balance * 100) if initial_balance > 0 else 0.0
     
     return BacktestResult(
@@ -312,6 +363,8 @@ def backtest_market(
         winner=winner,
         profit=profit,
         profit_pct=profit_pct,
+        guaranteed_profit=guaranteed_profit_before_settlement,
+        actual_profit=actual_profit,
     )
 
 
@@ -326,8 +379,8 @@ def print_results(results: list[BacktestResult]) -> None:
     print("=" * 100)
     
     # Header
-    print(f"{'Market':<40} {'Initial':<12} {'Final':<12} {'Profit':<12} {'Profit %':<10} {'Trades':<8} {'Winner':<8}")
-    print("-" * 100)
+    print(f"{'Market':<40} {'Initial':<12} {'Final':<12} {'Actual Profit':<14} {'Guaranteed':<12} {'Profit %':<10} {'Trades':<8} {'Winner':<8}")
+    print("-" * 120)
     
     # Individual market results
     for result in results:
@@ -336,23 +389,26 @@ def print_results(results: list[BacktestResult]) -> None:
             f"{result.market_id:<40} "
             f"${result.initial_balance:<11.2f} "
             f"${result.final_balance:<11.2f} "
-            f"${result.profit:<11.2f} "
+            f"${result.actual_profit:<13.2f} "
+            f"${result.guaranteed_profit:<11.2f} "
             f"{result.profit_pct:<9.2f}% "
             f"{result.total_trades:<8} "
             f"{winner_str:<8}"
         )
     
     # Summary statistics
-    print("-" * 100)
+    print("-" * 120)
     total_initial = sum(r.initial_balance for r in results)
     total_final = sum(r.final_balance for r in results)
     total_profit = total_final - total_initial
+    total_actual_profit = sum(r.actual_profit for r in results)
+    total_guaranteed_profit = sum(r.guaranteed_profit for r in results)
     total_profit_pct = (total_profit / total_initial * 100) if total_initial > 0 else 0.0
     total_trades = sum(r.total_trades for r in results)
     total_spent = sum(r.total_spent for r in results)
     
-    print(f"{'TOTAL':<40} ${total_initial:<11.2f} ${total_final:<11.2f} ${total_profit:<11.2f} {total_profit_pct:<9.2f}% {total_trades:<8}")
-    print("=" * 100)
+    print(f"{'TOTAL':<40} ${total_initial:<11.2f} ${total_final:<11.2f} ${total_actual_profit:<13.2f} ${total_guaranteed_profit:<11.2f} {total_profit_pct:<9.2f}% {total_trades:<8}")
+    print("=" * 120)
     
     # Additional metrics
     print(f"\n📊 SUMMARY STATISTICS:")
@@ -361,9 +417,11 @@ def print_results(results: list[BacktestResult]) -> None:
     print(f"{'Total Spent:':<25} ${total_spent:.2f}")
     print(f"{'Total Initial Balance:':<25} ${total_initial:.2f}")
     print(f"{'Total Final Balance:':<25} ${total_final:.2f}")
-    print(f"{'💰 TOTAL PROFIT:':<25} ${total_profit:+.2f} ({total_profit_pct:+.2f}%)")
-    print(f"{'Average Profit per Market:':<25} ${total_profit / len(results):+.2f}")
-    print(f"{'Win Rate:':<25} {sum(1 for r in results if r.profit > 0) / len(results) * 100:.1f}%")
+    print(f"{'💰 TOTAL ACTUAL PROFIT:':<25} ${total_actual_profit:+.2f} ({total_profit_pct:+.2f}%)")
+    print(f"{'💰 TOTAL GUARANTEED PROFIT:':<25} ${total_guaranteed_profit:+.2f}")
+    print(f"{'Average Actual Profit per Market:':<25} ${total_actual_profit / len(results):+.2f}")
+    print(f"{'Average Guaranteed Profit per Market:':<25} ${total_guaranteed_profit / len(results):+.2f}")
+    print(f"{'Win Rate (Actual):':<25} {sum(1 for r in results if r.actual_profit > 0) / len(results) * 100:.1f}%")
     
     # Markets with positions settled
     settled_markets = [r for r in results if r.positions_settled > 0]

@@ -128,18 +128,19 @@ class PortfolioManager:
         if isinstance(decision, list):
             # Execute all trades in the list
             for trade in decision:
-                self._execute_trade(trade)
+                self._execute_trade(trade, timestamp=timestamp)
             return decision
         else:
             # Execute single trade
-            self._execute_trade(decision)
+            self._execute_trade(decision, timestamp=timestamp)
             return decision
 
-    def _execute_trade(self, decision: TradeDecision) -> None:
+    def _execute_trade(self, decision: TradeDecision, timestamp: float | None = None) -> None:
         """Execute a trade (simulated or real).
 
         Args:
             decision: Trade decision to execute
+            timestamp: Optional timestamp for backtesting (defaults to None)
         """
         # Validate price to prevent division by zero
         if decision.price <= 0:
@@ -248,6 +249,15 @@ class PortfolioManager:
                 # Track statistics
                 self.total_trades += 1
                 self.total_spent += actual_amount_spent
+                
+                # Notify strategy that trade was executed successfully
+                if hasattr(self.strategy, 'on_trade_executed'):
+                    self.strategy.on_trade_executed(
+                        market_id=decision.market_id,
+                        outcome=decision.outcome,
+                        price=actual_price,
+                        timestamp=timestamp,  # Use provided timestamp (None for real trades)
+                    )
                 return
         
         # Simulated trading: calculate quantity based on amount and price
@@ -265,6 +275,15 @@ class PortfolioManager:
         # Track statistics
         self.total_trades += 1
         self.total_spent += decision.amount
+        
+        # Notify strategy that trade was executed successfully
+        if hasattr(self.strategy, 'on_trade_executed'):
+            self.strategy.on_trade_executed(
+                market_id=decision.market_id,
+                outcome=decision.outcome,
+                price=decision.price,
+                timestamp=timestamp,  # Use provided timestamp (None for simulated trades)
+            )
 
     def expire_positions(
         self,
