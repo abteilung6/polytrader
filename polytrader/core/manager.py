@@ -1,9 +1,9 @@
 """Portfolio manager for executing trades."""
 
 from polytrader.core.portfolio import Portfolio
-from polytrader.core.strategy import ArbitrageStrategy, RandomStrategy, Strategy
+from polytrader.core.strategy import RandomStrategy, Strategy
 from polytrader.core.trade import TradeDecision
-from polytrader.types import MarketTick
+from polytrader.types import MarketTick, Outcome
 
 
 class PortfolioManager:

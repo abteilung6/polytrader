@@ -30,10 +30,11 @@ def get_current_interval_id(asset: str, time_period: str) -> str:
     period = MarketSlugGenerator.normalize_time_period(time_period)
     
     if period == "15min":
-        # Return the aligned timestamp
+        # Return the current 15-minute interval (round down)
+        # This gets the currently active market
         now_utc = datetime.now(timezone.utc)
         current_timestamp = int(now_utc.timestamp())
-        aligned_timestamp = current_timestamp - (current_timestamp % 900)
+        aligned_timestamp = (current_timestamp // 900) * 900
         return str(aligned_timestamp)
     elif period == "1h":
         # Return hour identifier
@@ -150,6 +151,8 @@ async def watch_mode(args: argparse.Namespace) -> None:
 
     # Track latest ticks for each outcome
     latest_ticks: dict[str, "MarketTick"] = {}
+    # Track latest prices per market (for calculating portfolio value)
+    market_prices: dict[tuple[str, Outcome], float] = {}
     # Track when we last successfully received a tick for each outcome (to detect API errors)
     last_successful_tick_time: dict[str, float] = {}
     
@@ -266,6 +269,8 @@ async def watch_mode(args: argparse.Namespace) -> None:
             # Store latest tick for this outcome
             outcome_key = tick.outcome
             latest_ticks[outcome_key] = tick
+            # Store price for this market/outcome
+            market_prices[(tick.market_id, tick.outcome)] = tick.mid
             # Mark that we successfully received a tick for this outcome
             last_successful_tick_time[outcome_key] = tick.ts
 
@@ -284,8 +289,15 @@ async def watch_mode(args: argparse.Namespace) -> None:
                 has_fresh_up = up_tick is not None and (current_time - last_successful_tick_time.get("UP", 0)) <= max_tick_age
                 has_fresh_down = down_tick is not None and (current_time - last_successful_tick_time.get("DOWN", 0)) <= max_tick_age
                 
+                # Check if timestamps match (within small tolerance for floating point precision)
+                timestamps_match = False
                 if has_fresh_up and has_fresh_down:
-                    # Both ticks are fresh - safe to trade
+                    timestamp_diff = abs(up_tick.ts - down_tick.ts)
+                    timestamp_tolerance = 0.1  # 100ms tolerance for floating point precision
+                    timestamps_match = timestamp_diff <= timestamp_tolerance
+                
+                if has_fresh_up and has_fresh_down and timestamps_match:
+                    # Both ticks are fresh and have matching timestamps - safe to trade
                     # Use best_ask (best_bid + spread) for buying - accounts for spread
                     decision = portfolio_manager.process_prices(
                         market_id=tick.market_id,
@@ -300,8 +312,8 @@ async def watch_mode(args: argparse.Namespace) -> None:
                             if expiration_time:
                                 market_expirations[tick.market_id] = expiration_time
                 else:
-                    # Skip trading if we don't have fresh data for both outcomes
-                    # This happens when there's an API error and we stop receiving ticks
+                    # Skip trading if we don't have fresh data for both outcomes or timestamps don't match
+                    # This happens when there's an API error, stale data, or timestamps are out of sync
                     if count % 10 == 0:  # Only log occasionally to avoid spam
                         missing_or_stale = []
                         if not has_fresh_up:
@@ -316,6 +328,9 @@ async def watch_mode(args: argparse.Namespace) -> None:
                             else:
                                 age = current_time - last_successful_tick_time.get("DOWN", 0)
                                 missing_or_stale.append(f"DOWN ({age:.1f}s old)")
+                        if has_fresh_up and has_fresh_down and not timestamps_match:
+                            timestamp_diff = abs(up_tick.ts - down_tick.ts)
+                            missing_or_stale.append(f"timestamps don't match (diff: {timestamp_diff:.3f}s)")
                         if missing_or_stale:
                             print(f"⚠️  Skipping trade: API error or stale data ({', '.join(missing_or_stale)})")
 
@@ -345,13 +360,26 @@ async def watch_mode(args: argparse.Namespace) -> None:
                     stats = portfolio_manager.get_statistics()
                     portfolio = portfolio_manager.get_portfolio()
                     
-                    # Calculate current prices for positions
+                    # Build price dictionary for all positions
+                    # Use current market prices if available, otherwise use entry price
+                    current_prices: dict[tuple[str, Outcome], float] = {}
+                    for (market_id, outcome), position in portfolio.positions.items():
+                        price_key = (market_id, outcome)
+                        if price_key in market_prices:
+                            # Use current market price
+                            current_prices[price_key] = market_prices[price_key]
+                        else:
+                            # Use entry price as fallback
+                            current_prices[price_key] = position.avg_price
+                    
+                    # Calculate total portfolio value (cash + current value of positions)
+                    total_portfolio_value = portfolio.get_total_value(current_prices)
+                    initial_balance = args.initial_balance or 1000.0
+                    total_profit = total_portfolio_value - initial_balance
+                    
+                    # Get current market prices for display
                     up_tick = latest_ticks.get("UP")
                     down_tick = latest_ticks.get("DOWN")
-                    current_prices: dict[tuple[str, Outcome], float] = {}
-                    if up_tick and down_tick:
-                        current_prices[(tick.market_id, "UP")] = up_tick.mid
-                        current_prices[(tick.market_id, "DOWN")] = down_tick.mid
                     
                     # Calculate profit scenarios for this market
                     # Get all positions for this market
@@ -380,7 +408,7 @@ async def watch_mode(args: argparse.Namespace) -> None:
                         down_value_if_down_wins = (down_position.quantity * 1.0) if down_position else 0.0
                         profit_if_down = (up_value_if_down_wins + down_value_if_down_wins) - total_cost
                         
-                        print(f"\n💼 Portfolio: Balance=${stats['balance']:.2f} | Trades={stats['total_trades']} | Positions={stats['num_positions']}")
+                        print(f"\n💼 Portfolio: Cash=${stats['balance']:.2f} | Total Value=${total_portfolio_value:.2f} | Profit=${total_profit:+.2f} | Trades={stats['total_trades']} | Positions={stats['num_positions']}")
                         print(f"   Profit if UP: ${profit_if_up:+.2f}")
                         print(f"   Profit if DOWN: ${profit_if_down:+.2f}")
                         
@@ -423,22 +451,26 @@ async def watch_mode(args: argparse.Namespace) -> None:
             stats = portfolio_manager.get_statistics()
             portfolio = portfolio_manager.get_portfolio()
             
-            # Get final prices from latest ticks
+            # Build final prices using market_prices (current prices) or entry prices as fallback
             final_prices: dict[tuple[str, Outcome], float] = {}
             for (market_id, outcome), position in portfolio.positions.items():
-                # Use latest tick prices if available, otherwise use entry price
-                if market_id in [t.market_id for t in latest_ticks.values()]:
-                    up_tick = latest_ticks.get("UP")
-                    down_tick = latest_ticks.get("DOWN")
-                    if up_tick and up_tick.market_id == market_id:
-                        final_prices[(market_id, "UP")] = up_tick.mid
-                    if down_tick and down_tick.market_id == market_id:
-                        final_prices[(market_id, "DOWN")] = down_tick.mid
+                price_key = (market_id, outcome)
+                if price_key in market_prices:
+                    final_prices[price_key] = market_prices[price_key]
+                else:
+                    final_prices[price_key] = position.avg_price
+            
+            # Calculate total portfolio value
+            total_portfolio_value = portfolio.get_total_value(final_prices)
+            initial_balance = args.initial_balance or 1000.0
+            total_profit = total_portfolio_value - initial_balance
             
             print("\n" + "=" * 80)
             print("📊 Final Portfolio Statistics:")
             print("=" * 80)
-            print(f"Balance: ${stats['balance']:.2f} USDC")
+            print(f"Cash Balance: ${stats['balance']:.2f} USDC")
+            print(f"Total Portfolio Value: ${total_portfolio_value:.2f} USDC")
+            print(f"Total Profit: ${total_profit:+.2f} USDC ({total_profit/initial_balance*100:+.2f}%)")
             print(f"Total Trades: {stats['total_trades']}")
             print(f"Total Spent: ${stats['total_spent']:.2f} USDC")
             print(f"Open Positions: {stats['num_positions']}")
@@ -853,9 +885,8 @@ def main() -> None:
     )
     watch_parser.add_argument(
         "--strategy",
-        choices=["random", "arbitrage"],
         default="random",
-        help="Trading strategy (default: random) - 'random' or 'arbitrage'",
+        help="Trading strategy (default: random) - 'random' or 'balancedpair' (aliases: balanced, lockprofit, gabagool)",
     )
 
     buy_parser = subparsers.add_parser("buy", help="Place a buy order")
