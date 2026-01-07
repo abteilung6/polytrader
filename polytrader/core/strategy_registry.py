@@ -25,9 +25,9 @@ def create_strategy(strategy_name: str = "gabagool") -> Strategy:
         return GabagoolStrategy(
             accumulate_price=0.6,  # Buy whichever side hits 0.6 first
             hedge_price=0.35,  # Buy the other side when it hits 0.33 or lower
-            max_accumulate_price=0.62,  # Maximum price to buy at when accumulating
+            max_accumulate_price=0.64,  # Maximum price to buy at when accumulating
             max_buy_price=0.9,  # Maximum price to ever buy at (rejects prices >= 0.92)
-            max_ratio=1.8,  # Maximum ratio between sides (e.g., 2.5x)
+            max_ratio=1.4,  # Maximum ratio between sides (e.g., 2.5x)
             min_arbitrage_pair_cost=0.92,  # Minimum arbitrage condition: AVG_YES + AVG_NO must be < 0.95
             max_order_size=20.0,  # Maximum shares to buy in one operation
             min_trade_size=2.0,  # Minimum trade size in USDC

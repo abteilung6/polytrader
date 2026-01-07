@@ -1,3 +1,10 @@
+Printer: 
+
+python cli.py watch --asset eth --time-period 15m --strategy gabagool  --trade --frequency 1
+python cli.py watch --asset bitcoin --time-period 15m --strategy gabagool  --trade --frequency 1
+python cli.py watch --asset sol --time-period 15m --strategy gabagool  --trade --frequency 1
+
+
 # Polytrader
 
 A Python trading system for Polymarket that enables real-time market monitoring and order placement on prediction markets.

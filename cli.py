@@ -952,8 +952,8 @@ def main() -> None:
     buy_market_group.add_argument("--market", help="Market slug (e.g., btc-updown-15m-1767709800)")
     buy_market_group.add_argument(
         "--asset",
-        choices=["bitcoin", "btc", "ethereum", "eth"],
-        help="Asset name (requires --time-period)",
+        choices=["bitcoin", "btc", "ethereum", "eth", "solana", "sol", "xrp"],
+        help="Asset name (requires --time-period). Supported: bitcoin, btc, ethereum, eth, solana, sol",
     )
     buy_parser.add_argument(
         "--time-period",

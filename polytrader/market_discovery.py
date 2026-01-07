@@ -33,6 +33,10 @@ class MarketSlugGenerator:
             return ("btc", "bitcoin")
         elif asset_lower in ("ethereum", "eth"):
             return ("eth", "ethereum")
+        elif asset_lower in ("solana", "sol"):
+            return ("sol", "solana")
+        elif asset_lower in ("xrp"):
+            return ("xrp", "xrp")
         else:
             raise ValueError(f"Unknown asset: {asset}. Supported: bitcoin, btc, ethereum, eth")
 
