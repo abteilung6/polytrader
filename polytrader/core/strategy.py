@@ -67,15 +67,27 @@ class GabagoolState:
     cost_yes: float = 0.0
     qty_no: float = 0.0
     cost_no: float = 0.0
-    last_trade_time: float = 0.0
+    last_trade_time_up: float = 0.0  # Last trade time for UP side
+    last_trade_time_down: float = 0.0  # Last trade time for DOWN side
     last_trade_price: float = 0.0  # Last price we traded at
     last_trade_outcome: str = ""  # Last outcome we traded ("UP" or "DOWN")
     trade_count: int = 0
     locked_profit: bool = False  # True when profit is mathematically locked
-    first_accumulate_side: str = ""  # "YES" or "NO" - which side reached accumulate_price first (V2)
-    last_accumulate_side: str = ""  # "YES" or "NO" - which side reached accumulate_price last (laggard) (V2)
-    yes_reached_accumulate: bool = False  # Track if YES has reached accumulate_price (V2)
-    no_reached_accumulate: bool = False  # Track if NO has reached accumulate_price (V2)
+    
+    def get_last_trade_time(self, outcome: str) -> float:
+        """Get last trade time for a specific outcome."""
+        if outcome == "UP":
+            return self.last_trade_time_up
+        elif outcome == "DOWN":
+            return self.last_trade_time_down
+        return 0.0
+    
+    def set_last_trade_time(self, outcome: str, time: float) -> None:
+        """Set last trade time for a specific outcome."""
+        if outcome == "UP":
+            self.last_trade_time_up = time
+        elif outcome == "DOWN":
+            self.last_trade_time_down = time
 
 
 class GabagoolStrategy:
@@ -102,6 +114,7 @@ class GabagoolStrategy:
             min_seconds_between_trades: float = 0.5,
             max_capital_per_market: float = 1000.0,
             max_loss_threshold: float = 5.0,
+            lock_profit_threshold: float = 5.0,
     ) -> None:
             """Initialize asymmetric hedge strategy.
 
@@ -116,7 +129,8 @@ class GabagoolStrategy:
                 min_trade_size: Minimum trade size in USDC
                 min_seconds_between_trades: Minimum seconds between trades
                 max_capital_per_market: Maximum capital per market
-                max_loss_threshold: Maximum acceptable loss in USDC, also stops if profit > this (default 5.0)
+                max_loss_threshold: Maximum acceptable loss in USDC (default 5.0)
+                lock_profit_threshold: Lock profit when profit exceeds this threshold in USDC (default 5.0)
             """
             self.accumulate_price = accumulate_price
             self.hedge_price = hedge_price
@@ -129,6 +143,7 @@ class GabagoolStrategy:
             self.min_seconds_between_trades = min_seconds_between_trades
             self.max_capital_per_market = max_capital_per_market
             self.max_loss_threshold = max_loss_threshold
+            self.lock_profit_threshold = lock_profit_threshold
 
             self.market_states: dict[str, GabagoolState] = {}
 
@@ -162,7 +177,7 @@ class GabagoolStrategy:
             """
             now = timestamp if timestamp is not None else time.time()
             state = self._get_state(market_id)
-            state.last_trade_time = now
+            state.set_last_trade_time(outcome, now)
             state.last_trade_price = price
             state.last_trade_outcome = outcome
             state.trade_count += 1
@@ -230,8 +245,8 @@ class GabagoolStrategy:
                 shares_match = abs(qty_yes - qty_no) / max(qty_yes, qty_no) < 0.05 if max(qty_yes, qty_no) > 0 else False
                 is_arbitrage = shares_match and pair_cost <= self.min_arbitrage_pair_cost
                 
-                # Lock if: profit exceeds threshold OR we have arbitrage
-                state.locked_profit = current_profit > self.max_loss_threshold or is_arbitrage
+                # Lock if: profit exceeds lock_profit_threshold OR we have arbitrage
+                state.locked_profit = current_profit > self.lock_profit_threshold or is_arbitrage
 
     def _check_arbitrage_opportunity(
             self,
@@ -347,7 +362,7 @@ class GabagoolStrategy:
             """Check if we're hedged (profit > threshold).
             
             Always calculates worst case scenario: min_payout - total_cost.
-            Only stop if profit > threshold (we've maximized profit enough).
+            Only stop if profit > lock_profit_threshold (we've maximized profit enough).
             Continue trading even if loss <= threshold to maximize profit.
             """
             if state.qty_yes == 0 or state.qty_no == 0:
@@ -358,8 +373,8 @@ class GabagoolStrategy:
             loss = total_cost - min_payout  # Worst case loss
             profit = min_payout - total_cost  # Worst case profit
             
-            # Only consider hedged if profit exceeds threshold
-            return profit > self.max_loss_threshold
+            # Only consider hedged if profit exceeds lock_profit_threshold
+            return profit > self.lock_profit_threshold
 
     def _should_buy_side(
             self,
@@ -519,8 +534,8 @@ class GabagoolStrategy:
                 loss = total_cost - min_payout  # Worst case loss
                 profit = min_payout - total_cost  # Worst case profit
                 
-                # Reject if profit exceeds threshold (we're done maximizing)
-                if profit > self.max_loss_threshold:
+                # Reject if profit exceeds lock_profit_threshold (we're done maximizing)
+                if profit > self.lock_profit_threshold:
                     return False
                 
                 # Always allow trades that help maximize profit, regardless of loss
@@ -545,30 +560,8 @@ class GabagoolStrategy:
             if state.locked_profit:
                 return None
             
-            if now - state.last_trade_time < self.min_seconds_between_trades:
-                return None
-            
             if portfolio.balance < self.min_trade_size:
                 return None
-            
-            # Avoid trading at the exact same price for the same outcome
-            # (unless enough time has passed or price has changed)
-            if state.last_trade_time > 0:
-                price_tolerance = 0.001  # 0.1% tolerance
-                # Check if we're trying to trade UP at the same price
-                if (state.last_trade_outcome == "UP" and 
-                    abs(up_price - state.last_trade_price) < price_tolerance and
-                    state.qty_yes > 0):
-                    # Same UP price, skip unless significant time passed
-                    if now - state.last_trade_time < self.min_seconds_between_trades * 2:
-                        return None
-                # Check if we're trying to trade DOWN at the same price
-                if (state.last_trade_outcome == "DOWN" and 
-                    abs(down_price - state.last_trade_price) < price_tolerance and
-                    state.qty_no > 0):
-                    # Same DOWN price, skip unless significant time passed
-                    if now - state.last_trade_time < self.min_seconds_between_trades * 2:
-                        return None
             
             total_invested = state.cost_yes + state.cost_no
             if total_invested >= self.max_capital_per_market:
@@ -599,6 +592,11 @@ class GabagoolStrategy:
             )
             if arbitrage_trade:
                 arbitrage_trade.market_id = market_id
+                # Per-side rate limiting: check the specific outcome we want to trade
+                outcome = arbitrage_trade.outcome
+                last_trade_time_for_side = state.get_last_trade_time(outcome)
+                if now - last_trade_time_for_side < self.min_seconds_between_trades:
+                    return None
                 # Don't update last_trade_time here - wait for successful execution
                 # The manager will call on_trade_executed() after successful trade
                 return arbitrage_trade
@@ -656,6 +654,16 @@ class GabagoolStrategy:
                         if actual_qty > 0 and actual_qty >= target_qty * 0.8:  # Allow 80% match minimum
                             trade_amount = actual_qty * down_price
                             if trade_amount <= portfolio.balance and trade_amount > 0:
+                                # Per-side rate limiting: check DOWN side
+                                last_trade_time_down = state.get_last_trade_time("DOWN")
+                                if now - last_trade_time_down < self.min_seconds_between_trades:
+                                    return None
+                                # Avoid trading at the exact same price for the same outcome
+                                if last_trade_time_down > 0:
+                                    price_tolerance = 0.001
+                                    if (abs(down_price - state.last_trade_price) < price_tolerance and
+                                        now - last_trade_time_down < self.min_seconds_between_trades * 2):
+                                        return None
                                 # Don't update last_trade_time here - wait for successful execution
                                 # The manager will call on_trade_executed() after successful trade
                                 from polytrader.types import Outcome
@@ -681,6 +689,16 @@ class GabagoolStrategy:
                         if actual_qty > 0 and actual_qty >= target_qty * 0.8:  # Allow 80% match minimum
                             trade_amount = actual_qty * up_price
                             if trade_amount <= portfolio.balance and trade_amount > 0:
+                                # Per-side rate limiting: check UP side
+                                last_trade_time_up = state.get_last_trade_time("UP")
+                                if now - last_trade_time_up < self.min_seconds_between_trades:
+                                    return None
+                                # Avoid trading at the exact same price for the same outcome
+                                if last_trade_time_up > 0:
+                                    price_tolerance = 0.001
+                                    if (abs(up_price - state.last_trade_price) < price_tolerance and
+                                        now - last_trade_time_up < self.min_seconds_between_trades * 2):
+                                        return None
                                 # Don't update last_trade_time here - wait for successful execution
                                 # The manager will call on_trade_executed() after successful trade
                                 from polytrader.types import Outcome
@@ -725,6 +743,24 @@ class GabagoolStrategy:
             if side_to_buy is None:
                 return None
 
+            # Per-side rate limiting: check the specific side we want to trade
+            outcome_for_rate_limit = "UP" if side_to_buy == "YES" else "DOWN"
+            last_trade_time_for_side = state.get_last_trade_time(outcome_for_rate_limit)
+            if now - last_trade_time_for_side < self.min_seconds_between_trades:
+                return None
+            
+            # Avoid trading at the exact same price for the same outcome
+            if last_trade_time_for_side > 0:
+                price_tolerance = 0.001  # 0.1% tolerance
+                if outcome_for_rate_limit == "UP" and state.qty_yes > 0:
+                    if (abs(up_price - state.last_trade_price) < price_tolerance and
+                        now - last_trade_time_for_side < self.min_seconds_between_trades * 2):
+                        return None
+                elif outcome_for_rate_limit == "DOWN" and state.qty_no > 0:
+                    if (abs(down_price - state.last_trade_price) < price_tolerance and
+                        now - last_trade_time_for_side < self.min_seconds_between_trades * 2):
+                        return None
+
             # Validate price
             if price_to_buy <= 0 or price_to_buy >= self.max_buy_price:
                 return None
@@ -758,7 +794,7 @@ class GabagoolStrategy:
                 amount=trade_amount,
                 price=price_to_buy,
             )
-
+    
     def get_metrics(self, portfolio: Portfolio, market_id: str) -> dict[str, float | int | bool]:
             """Get strategy metrics for a market."""
             state = self._get_state(market_id)
@@ -781,574 +817,3 @@ class GabagoolStrategy:
                 "estimated_profit": estimated_profit,
                 "trade_count": state.trade_count,
             }
-
-
-class GabagoolV2Strategy(GabagoolStrategy):
-    """Gabagool strategy V2 with laggard prioritization.
-    
-    This version prioritizes buying the side that reached accumulate_price LAST
-    (the laggard) to help balance the portfolio better.
-    
-    Strategy:
-    1. Check for arbitrage: if one side avg ~0.6 and other side is 0.15-0.16, buy to match
-    2. Buy whichever side hits 0.6 first (at actual price if < 0.62)
-    3. Buy the other side when it hits 0.35 or lower
-    4. Keep accumulating until hedged: loss <= $5 OR profit > $5
-    5. Limit accumulation: max 2.5x ratio between sides (based on share count)
-    6. V2: Prioritize the laggard side (reached accumulate_price last) when both sides are in accumulate range
-    """
-
-    def __str__(self) -> str:
-        return (
-            f"GabagoolV2Strategy("
-            f"accumulate@{self.accumulate_price:.2f}, "
-            f"max_accumulate@{self.max_accumulate_price:.2f}, "
-            f"max_buy@{self.max_buy_price:.2f}, "
-            f"hedge@{self.hedge_price:.2f}, "
-            f"max_ratio@{self.max_ratio:.1f}x, "
-            f"max_loss=${self.max_loss_threshold:.1f})"
-        )
-
-    def decide(
-            self,
-            portfolio: Portfolio,
-            market_id: str,
-            up_price: float,
-            down_price: float,
-            timestamp: float | None = None,
-    ) -> TradeDecision | None:
-        """Make gabagool-style trading decision with laggard prioritization."""
-        now = timestamp if timestamp is not None else time.time()
-        state = self._get_state(market_id)
-        self._update_state_from_portfolio(portfolio, market_id, state)
-
-        # Early exit checks
-        if state.locked_profit:
-            return None
-        
-        if now - state.last_trade_time < self.min_seconds_between_trades:
-            return None
-        
-        if portfolio.balance < self.min_trade_size:
-            return None
-        
-        # Avoid trading at the exact same price for the same outcome
-        # (unless enough time has passed or price has changed)
-        if state.last_trade_time > 0:
-            price_tolerance = 0.001  # 0.1% tolerance
-            # Check if we're trying to trade UP at the same price
-            if (state.last_trade_outcome == "UP" and 
-                abs(up_price - state.last_trade_price) < price_tolerance and
-                state.qty_yes > 0):
-                # Same UP price, skip unless significant time passed
-                if now - state.last_trade_time < self.min_seconds_between_trades * 2:
-                    return None
-            # Check if we're trying to trade DOWN at the same price
-            if (state.last_trade_outcome == "DOWN" and 
-                abs(down_price - state.last_trade_price) < price_tolerance and
-                state.qty_no > 0):
-                # Same DOWN price, skip unless significant time passed
-                if now - state.last_trade_time < self.min_seconds_between_trades * 2:
-                    return None
-        
-        total_invested = state.cost_yes + state.cost_no
-        if total_invested >= self.max_capital_per_market:
-            return None
-        
-        available_capital = min(
-            self.max_capital_per_market - total_invested,
-            portfolio.balance
-        )
-
-        # Check if we already have arbitrage (matching shares with profitable pair cost)
-        if state.qty_yes > 0 and state.qty_no > 0:
-            avg_yes = self._avg(state.cost_yes, state.qty_yes)
-            avg_no = self._avg(state.cost_no, state.qty_no)
-            pair_cost = avg_yes + avg_no
-            # Check if shares match (within 5% difference)
-            shares_match = abs(state.qty_yes - state.qty_no) / max(state.qty_yes, state.qty_no) < 0.05 if max(state.qty_yes, state.qty_no) > 0 else False
-            
-            # If shares match and pair cost is profitable (<= min_arbitrage_pair_cost), lock arbitrage
-            if shares_match and pair_cost <= self.min_arbitrage_pair_cost:
-                # We already have arbitrage - lock profit and stop trading
-                state.locked_profit = True
-                return None
-
-        # Check for arbitrage opportunity (when we have one side and not the other)
-        arbitrage_trade = self._check_arbitrage_opportunity(
-            state, up_price, down_price, portfolio
-        )
-        if arbitrage_trade:
-            arbitrage_trade.market_id = market_id
-            state.last_trade_time = now
-            state.last_trade_price = arbitrage_trade.price
-            state.last_trade_outcome = arbitrage_trade.outcome
-            state.trade_count += 1
-            return arbitrage_trade
-
-        # Check if already hedged
-        if self._is_hedged(state):
-            state.locked_profit = True
-            return None
-
-        # V2: Track which side reaches accumulate_price first/last
-        # Check if prices are in accumulate range
-        up_in_accumulate_range = (self.accumulate_price <= up_price < self.max_accumulate_price and up_price > self.hedge_price)
-        down_in_accumulate_range = (self.accumulate_price <= down_price < self.max_accumulate_price and down_price > self.hedge_price)
-        
-        # Track when each side first reaches accumulate_price
-        if up_in_accumulate_range and not state.yes_reached_accumulate:
-            state.yes_reached_accumulate = True
-            if not state.first_accumulate_side:
-                state.first_accumulate_side = "YES"
-            state.last_accumulate_side = "YES"
-        elif down_in_accumulate_range and not state.no_reached_accumulate:
-            state.no_reached_accumulate = True
-            if not state.first_accumulate_side:
-                state.first_accumulate_side = "NO"
-            state.last_accumulate_side = "NO"
-
-        # Determine which side to buy
-        side_to_buy: str | None = None
-        price_to_buy: float = 0.0
-
-        # If loss > threshold, prioritize buying the side that helps balance
-        if state.qty_yes > 0 and state.qty_no > 0:
-            min_payout = min(state.qty_yes, state.qty_no)
-            total_cost = state.cost_yes + state.cost_no
-            current_loss = total_cost - min_payout
-            
-            # If loss > threshold, prioritize buying the side with fewer shares to balance
-            if current_loss > self.max_loss_threshold:
-                if state.qty_yes < state.qty_no:
-                    # YES has fewer shares, prioritize buying YES to balance
-                    if (up_price <= self.hedge_price or 
-                        (self.accumulate_price <= up_price < self.max_accumulate_price)):
-                        max_yes_qty = self._get_max_qty_for_side("YES", state)
-                        if state.qty_yes < max_yes_qty:
-                            side_to_buy = "YES"
-                            price_to_buy = up_price
-                elif state.qty_no < state.qty_yes:
-                    # NO has fewer shares, prioritize buying NO to balance
-                    if (down_price <= self.hedge_price or 
-                        (self.accumulate_price <= down_price < self.max_accumulate_price)):
-                        max_no_qty = self._get_max_qty_for_side("NO", state)
-                        if state.qty_no < max_no_qty:
-                            side_to_buy = "NO"
-                            price_to_buy = down_price
-
-        # If no balancing trade needed, check for normal hedging/accumulation opportunities
-        if side_to_buy is None:
-            # Priority 1: Check for hedging opportunities (price <= hedge_price)
-            # BUT: If we have one side and the other hits hedge_price, ALWAYS match shares for arbitrage
-            if state.qty_yes > 0 and state.qty_no == 0:
-                # We have YES, if NO hits hedge_price, match shares for arbitrage
-                if down_price <= self.hedge_price:
-                    # Match shares exactly - this is hedging, so we match regardless of pair cost
-                    target_qty = state.qty_yes
-                    available_capital = min(
-                        self.max_capital_per_market - (state.cost_yes + state.cost_no),
-                        portfolio.balance
-                    )
-                    max_qty_by_capital = available_capital / down_price if down_price > 0 else 0
-                    actual_qty = min(target_qty, max_qty_by_capital)
-                    
-                    if actual_qty > 0 and actual_qty >= target_qty * 0.8:  # Allow 80% match minimum
-                        trade_amount = actual_qty * down_price
-                        if trade_amount <= portfolio.balance and trade_amount > 0:
-                            state.last_trade_time = now
-                            state.last_trade_price = down_price
-                            state.last_trade_outcome = "DOWN"
-                            state.trade_count += 1
-                            from polytrader.types import Outcome
-                            return TradeDecision(
-                                market_id=market_id,
-                                outcome="DOWN",
-                                amount=trade_amount,
-                                price=down_price,
-                            )
-            
-            if state.qty_no > 0 and state.qty_yes == 0:
-                # We have NO, if YES hits hedge_price, match shares for arbitrage
-                if up_price <= self.hedge_price:
-                    # Match shares exactly - this is hedging, so we match regardless of pair cost
-                    target_qty = state.qty_no
-                    available_capital = min(
-                        self.max_capital_per_market - (state.cost_yes + state.cost_no),
-                        portfolio.balance
-                    )
-                    max_qty_by_capital = available_capital / up_price if up_price > 0 else 0
-                    actual_qty = min(target_qty, max_qty_by_capital)
-                    
-                    if actual_qty > 0 and actual_qty >= target_qty * 0.8:  # Allow 80% match minimum
-                        trade_amount = actual_qty * up_price
-                        if trade_amount <= portfolio.balance and trade_amount > 0:
-                            state.last_trade_time = now
-                            state.last_trade_price = up_price
-                            state.last_trade_outcome = "UP"
-                            state.trade_count += 1
-                            from polytrader.types import Outcome
-                            return TradeDecision(
-                                market_id=market_id,
-                                outcome="UP",
-                                amount=trade_amount,
-                                price=up_price,
-                            )
-            
-            # Normal hedging logic (when we already have both sides or arbitrage didn't work)
-            if down_price <= self.hedge_price and self._should_buy_side("NO", down_price, up_price, state):
-                max_no_qty = self._get_max_qty_for_side("NO", state)
-                if state.qty_no < max_no_qty:
-                    side_to_buy = "NO"
-                    price_to_buy = down_price
-            
-            if up_price <= self.hedge_price and self._should_buy_side("YES", up_price, down_price, state):
-                max_yes_qty = self._get_max_qty_for_side("YES", state)
-                if state.qty_yes < max_yes_qty:
-                    # Only override if we don't have a hedge trade or YES hedge is better
-                    if side_to_buy is None:
-                        side_to_buy = "YES"
-                        price_to_buy = up_price
-            
-            # Priority 2: Check for accumulation opportunities (accumulate_price <= price < max_accumulate_price)
-            # V2: Prioritize the laggard side (the one that reached accumulate_price LAST)
-            if side_to_buy is None:
-                # Determine which side to prioritize based on laggard logic
-                prioritize_yes = False
-                prioritize_no = False
-                
-                # If both sides have reached accumulate_price, prioritize the laggard
-                if state.yes_reached_accumulate and state.no_reached_accumulate:
-                    if state.last_accumulate_side == "YES":
-                        prioritize_yes = True
-                    elif state.last_accumulate_side == "NO":
-                        prioritize_no = True
-                
-                # Check both sides first
-                yes_can_buy = self._should_buy_side("YES", up_price, down_price, state)
-                no_can_buy = self._should_buy_side("NO", down_price, up_price, state)
-                
-                # Prioritize laggard side if both can buy
-                if prioritize_yes and yes_can_buy:
-                    max_yes_qty = self._get_max_qty_for_side("YES", state)
-                    if state.qty_yes < max_yes_qty:
-                        side_to_buy = "YES"
-                        price_to_buy = up_price
-                elif prioritize_no and no_can_buy:
-                    max_no_qty = self._get_max_qty_for_side("NO", state)
-                    if state.qty_no < max_no_qty:
-                        side_to_buy = "NO"
-                        price_to_buy = down_price
-                else:
-                    # No laggard preference or laggard not available - check both sides normally
-                    if yes_can_buy:
-                        max_yes_qty = self._get_max_qty_for_side("YES", state)
-                        if state.qty_yes < max_yes_qty:
-                            side_to_buy = "YES"
-                            price_to_buy = up_price
-                    
-                    if no_can_buy:
-                        max_no_qty = self._get_max_qty_for_side("NO", state)
-                        if state.qty_no < max_no_qty:
-                            # Only override if we don't have YES or NO is laggard
-                            if side_to_buy is None or prioritize_no:
-                                side_to_buy = "NO"
-                                price_to_buy = down_price
-
-        if side_to_buy is None:
-            return None
-
-        # Validate price
-        if price_to_buy <= 0 or price_to_buy >= self.max_buy_price:
-            return None
-
-        # Calculate order size
-        delta_q = self._calculate_order_size(
-            side_to_buy, price_to_buy, state, available_capital
-        )
-        
-        if delta_q <= 0:
-            return None
-
-        # Validate trade
-        if not self._validate_trade(side_to_buy, delta_q, price_to_buy, state):
-            return None
-
-        trade_amount = delta_q * price_to_buy
-        if trade_amount > portfolio.balance:
-            return None
-
-        # Don't update last_trade_time here - wait for successful execution
-        # The manager will call on_trade_executed() after successful trade
-
-        # Create trade decision
-        from polytrader.types import Outcome
-        outcome: Outcome = "UP" if side_to_buy == "YES" else "DOWN"
-
-        return TradeDecision(
-            market_id=market_id,
-            outcome=outcome,
-            amount=trade_amount,
-            price=price_to_buy,
-        )
-
-
-class GabagoolV3Strategy(GabagoolStrategy):
-    """Gabagool strategy V3 with confidence-based accumulation.
-    
-    This version buys the MORE EXPENSIVE/CONFIDENT option when accumulating,
-    instead of the cheaper option. The idea is that higher prices indicate
-    more market confidence in that outcome.
-    
-    Strategy:
-    1. Check for arbitrage: if one side avg ~0.6 and other side is 0.15-0.16, buy to match
-    2. Buy whichever side hits 0.6 first (at actual price if < 0.62)
-    3. Buy the other side when it hits 0.35 or lower
-    4. Keep accumulating until hedged: loss <= $5 OR profit > $5
-    5. Limit accumulation: max 2.5x ratio between sides (based on share count)
-    6. V3: When accumulating, buy the MORE EXPENSIVE option (momentum/confidence approach)
-    """
-
-    def __str__(self) -> str:
-        return (
-            f"GabagoolV3Strategy("
-            f"accumulate@{self.accumulate_price:.2f}, "
-            f"max_accumulate@{self.max_accumulate_price:.2f}, "
-            f"max_buy@{self.max_buy_price:.2f}, "
-            f"hedge@{self.hedge_price:.2f}, "
-            f"max_ratio@{self.max_ratio:.1f}x, "
-            f"max_loss=${self.max_loss_threshold:.1f})"
-        )
-
-    def decide(
-            self,
-            portfolio: Portfolio,
-            market_id: str,
-            up_price: float,
-            down_price: float,
-            timestamp: float | None = None,
-    ) -> TradeDecision | None:
-            """Make gabagool-style trading decision with confidence-based accumulation.
-            
-            V3: When accumulating, prefers the MORE EXPENSIVE option (more confident).
-            """
-            now = timestamp if timestamp is not None else time.time()
-            state = self._get_state(market_id)
-            self._update_state_from_portfolio(portfolio, market_id, state)
-
-            # Early exit checks
-            if state.locked_profit:
-                return None
-            
-            if now - state.last_trade_time < self.min_seconds_between_trades:
-                return None
-            
-            if portfolio.balance < self.min_trade_size:
-                return None
-            
-            # Avoid trading at the exact same price for the same outcome
-            if state.last_trade_time > 0:
-                price_tolerance = 0.001  # 0.1% tolerance
-                if (state.last_trade_outcome == "UP" and 
-                    abs(up_price - state.last_trade_price) < price_tolerance and
-                    state.qty_yes > 0):
-                    if now - state.last_trade_time < self.min_seconds_between_trades * 2:
-                        return None
-                if (state.last_trade_outcome == "DOWN" and 
-                    abs(down_price - state.last_trade_price) < price_tolerance and
-                    state.qty_no > 0):
-                    if now - state.last_trade_time < self.min_seconds_between_trades * 2:
-                        return None
-            
-            total_invested = state.cost_yes + state.cost_no
-            if total_invested >= self.max_capital_per_market:
-                return None
-            
-            available_capital = min(
-                self.max_capital_per_market - total_invested,
-                portfolio.balance
-            )
-
-            # Check if we already have arbitrage (matching shares with profitable pair cost)
-            if state.qty_yes > 0 and state.qty_no > 0:
-                avg_yes = self._avg(state.cost_yes, state.qty_yes)
-                avg_no = self._avg(state.cost_no, state.qty_no)
-                pair_cost = avg_yes + avg_no
-                shares_match = abs(state.qty_yes - state.qty_no) / max(state.qty_yes, state.qty_no) < 0.05 if max(state.qty_yes, state.qty_no) > 0 else False
-                
-                if shares_match and pair_cost <= self.min_arbitrage_pair_cost:
-                    state.locked_profit = True
-                    return None
-
-            # Check for arbitrage opportunity (when we have one side and not the other)
-            arbitrage_trade = self._check_arbitrage_opportunity(
-                state, up_price, down_price, portfolio
-            )
-            if arbitrage_trade:
-                arbitrage_trade.market_id = market_id
-                return arbitrage_trade
-
-            # Check if already hedged
-            if self._is_hedged(state):
-                state.locked_profit = True
-                return None
-
-            # Determine which side to buy
-            side_to_buy: str | None = None
-            price_to_buy: float = 0.0
-
-            # If loss > threshold, prioritize buying the side that helps balance
-            if state.qty_yes > 0 and state.qty_no > 0:
-                min_payout = min(state.qty_yes, state.qty_no)
-                total_cost = state.cost_yes + state.cost_no
-                current_loss = total_cost - min_payout
-                
-                # If loss > threshold, prioritize buying the side with fewer shares to balance
-                if current_loss > self.max_loss_threshold:
-                    if state.qty_yes < state.qty_no:
-                        # YES has fewer shares, prioritize buying YES to balance
-                        if (up_price <= self.hedge_price or 
-                            (self.accumulate_price <= up_price < self.max_accumulate_price)):
-                            max_yes_qty = self._get_max_qty_for_side("YES", state)
-                            if state.qty_yes < max_yes_qty:
-                                side_to_buy = "YES"
-                                price_to_buy = up_price
-                    elif state.qty_no < state.qty_yes:
-                        # NO has fewer shares, prioritize buying NO to balance
-                        if (down_price <= self.hedge_price or 
-                            (self.accumulate_price <= down_price < self.max_accumulate_price)):
-                            max_no_qty = self._get_max_qty_for_side("NO", state)
-                            if state.qty_no < max_no_qty:
-                                side_to_buy = "NO"
-                                price_to_buy = down_price
-
-            # If no balancing trade needed, check for normal hedging/accumulation opportunities
-            if side_to_buy is None:
-                # Priority 1: Check for hedging opportunities (price <= hedge_price)
-                # BUT: If we have one side and the other hits hedge_price, ALWAYS match shares for arbitrage
-                if state.qty_yes > 0 and state.qty_no == 0:
-                    # We have YES, if NO hits hedge_price, match shares for arbitrage
-                    if down_price <= self.hedge_price:
-                        target_qty = state.qty_yes
-                        available_capital = min(
-                            self.max_capital_per_market - (state.cost_yes + state.cost_no),
-                            portfolio.balance
-                        )
-                        max_qty_by_capital = available_capital / down_price if down_price > 0 else 0
-                        actual_qty = min(target_qty, max_qty_by_capital)
-                        
-                        if actual_qty > 0 and actual_qty >= target_qty * 0.8:
-                            trade_amount = actual_qty * down_price
-                            if trade_amount <= portfolio.balance and trade_amount > 0:
-                                from polytrader.types import Outcome
-                                return TradeDecision(
-                                    market_id=market_id,
-                                    outcome="DOWN",
-                                    amount=trade_amount,
-                                    price=down_price,
-                                )
-                
-                if state.qty_no > 0 and state.qty_yes == 0:
-                    # We have NO, if YES hits hedge_price, match shares for arbitrage
-                    if up_price <= self.hedge_price:
-                        target_qty = state.qty_no
-                        available_capital = min(
-                            self.max_capital_per_market - (state.cost_yes + state.cost_no),
-                            portfolio.balance
-                        )
-                        max_qty_by_capital = available_capital / up_price if up_price > 0 else 0
-                        actual_qty = min(target_qty, max_qty_by_capital)
-                        
-                        if actual_qty > 0 and actual_qty >= target_qty * 0.8:
-                            trade_amount = actual_qty * up_price
-                            if trade_amount <= portfolio.balance and trade_amount > 0:
-                                from polytrader.types import Outcome
-                                return TradeDecision(
-                                    market_id=market_id,
-                                    outcome="UP",
-                                    amount=trade_amount,
-                                    price=up_price,
-                                )
-                
-                # Normal hedging logic (when we already have both sides or arbitrage didn't work)
-                if down_price <= self.hedge_price and self._should_buy_side("NO", down_price, up_price, state):
-                    max_no_qty = self._get_max_qty_for_side("NO", state)
-                    if state.qty_no < max_no_qty:
-                        side_to_buy = "NO"
-                        price_to_buy = down_price
-                
-                if up_price <= self.hedge_price and self._should_buy_side("YES", up_price, down_price, state):
-                    max_yes_qty = self._get_max_qty_for_side("YES", state)
-                    if state.qty_yes < max_yes_qty:
-                        if side_to_buy is None:
-                            side_to_buy = "YES"
-                            price_to_buy = up_price
-                
-                # Priority 2: Check for accumulation opportunities (V3: Buy MORE EXPENSIVE option)
-                if side_to_buy is None:
-                    # Check both sides and determine which ones qualify
-                    yes_qualifies = False
-                    no_qualifies = False
-                    
-                    if self._should_buy_side("YES", up_price, down_price, state):
-                        max_yes_qty = self._get_max_qty_for_side("YES", state)
-                        if state.qty_yes < max_yes_qty:
-                            yes_qualifies = True
-                    
-                    if self._should_buy_side("NO", down_price, up_price, state):
-                        max_no_qty = self._get_max_qty_for_side("NO", state)
-                        if state.qty_no < max_no_qty:
-                            no_qualifies = True
-                    
-                    # V3: If both qualify, buy the MORE EXPENSIVE one (more confident)
-                    if yes_qualifies and no_qualifies:
-                        # Both qualify - buy the more expensive/confident option
-                        if up_price >= down_price:
-                            side_to_buy = "YES"
-                            price_to_buy = up_price
-                        else:
-                            side_to_buy = "NO"
-                            price_to_buy = down_price
-                    elif yes_qualifies:
-                        side_to_buy = "YES"
-                        price_to_buy = up_price
-                    elif no_qualifies:
-                        side_to_buy = "NO"
-                        price_to_buy = down_price
-
-            if side_to_buy is None:
-                return None
-
-            # Validate price
-            if price_to_buy <= 0 or price_to_buy >= self.max_buy_price:
-                return None
-
-            # Calculate order size
-            delta_q = self._calculate_order_size(
-                side_to_buy, price_to_buy, state, available_capital
-            )
-            
-            if delta_q <= 0:
-                return None
-
-            # Validate trade
-            if not self._validate_trade(side_to_buy, delta_q, price_to_buy, state):
-                return None
-
-            trade_amount = delta_q * price_to_buy
-            if trade_amount > portfolio.balance:
-                return None
-
-            # Don't update last_trade_time here - wait for successful execution
-            # The manager will call on_trade_executed() after successful trade
-
-            # Create trade decision
-            from polytrader.types import Outcome
-            outcome: Outcome = "UP" if side_to_buy == "YES" else "DOWN"
-
-            return TradeDecision(
-                market_id=market_id,
-                outcome=outcome,
-                amount=trade_amount,
-                price=price_to_buy,
-            )

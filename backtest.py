@@ -33,6 +33,7 @@ class BacktestResult:
     profit_pct: float
     guaranteed_profit: float  # Guaranteed profit from hedged positions before settlement
     actual_profit: float  # Actual profit after settlement
+    asset: str  # Asset name extracted from market_id (e.g., "btc", "eth")
 
 
 def find_all_data_files(data_dir: str = "data") -> dict[str, list[str]]:
@@ -97,6 +98,156 @@ def load_ticks_from_csv(csv_path: str) -> list[MarketTick]:
     return ticks
 
 
+def extract_asset_from_market_id(market_id: str) -> str:
+    """Extract asset name from market slug.
+    
+    Supports formats:
+    - 15-minute: btc-updown-15m-{timestamp} or eth-updown-15m-{timestamp}
+    - Hourly: bitcoin-up-or-down-{month}-{day}-{hour}am-et or ethereum-up-or-down-...
+    
+    Args:
+        market_id: Market slug string
+        
+    Returns:
+        Asset name in short format (e.g., "btc", "eth", "bitcoin", "ethereum")
+    """
+    market_id_lower = market_id.lower()
+    
+    # Check for 15-minute format: {asset}-updown-15m-{timestamp}
+    if "-updown-15m-" in market_id_lower:
+        asset = market_id_lower.split("-updown-15m-")[0]
+        # Normalize common asset names
+        if asset in ("bitcoin", "btc"):
+            return "btc"
+        elif asset in ("ethereum", "eth"):
+            return "eth"
+        return asset
+    
+    # Check for hourly format: {asset}-up-or-down-{month}-{day}-{hour}am-et
+    if "-up-or-down-" in market_id_lower:
+        asset = market_id_lower.split("-up-or-down-")[0]
+        # Normalize to short format
+        if asset == "bitcoin":
+            return "btc"
+        elif asset == "ethereum":
+            return "eth"
+        return asset
+    
+    # Fallback: try to extract from beginning of slug
+    # Take first part before any hyphen
+    parts = market_id_lower.split("-")
+    if parts:
+        asset = parts[0]
+        if asset == "bitcoin":
+            return "btc"
+        elif asset == "ethereum":
+            return "eth"
+        return asset
+    
+    # Default to "unknown" if can't parse
+    return "unknown"
+
+
+def filter_markets_by_time_window(
+    markets: dict[str, list[str]],
+    hours_window: float = 8.0,
+) -> tuple[dict[str, list[str]], dict[str, float]]:
+    """Filter markets to only include those within the last N hours per asset.
+    
+    For each asset, finds the latest timestamp across all markets,
+    then keeps only markets that have ticks within the time window.
+    
+    Args:
+        markets: Dictionary mapping market slugs to CSV file paths
+        hours_window: Number of hours to include (default: 8.0)
+        
+    Returns:
+        Tuple of (filtered_markets, market_cutoffs) where:
+        - filtered_markets: Dictionary mapping market slugs to CSV file paths
+        - market_cutoffs: Dictionary mapping market slugs to cutoff timestamps
+    """
+    # 8 hours in seconds
+    window_seconds = hours_window * 3600.0
+    
+    # Group markets by asset and find latest timestamp per asset
+    asset_max_timestamps: dict[str, float] = {}
+    asset_markets: dict[str, list[tuple[str, list[str]]]] = defaultdict(list)
+    
+    # Group markets by asset
+    for market_id, csv_files in markets.items():
+        asset = extract_asset_from_market_id(market_id)
+        asset_markets[asset].append((market_id, csv_files))
+    
+    # Find latest timestamp per asset by sampling ticks from each market
+    print(f"🔍 Finding latest timestamps per asset...")
+    for asset, market_list in asset_markets.items():
+        max_timestamp = 0.0
+        for market_id, csv_files in market_list:
+            # Sample ticks from first CSV file to get timestamp range
+            for csv_file in csv_files[:1]:  # Just check first file for efficiency
+                try:
+                    ticks = load_ticks_from_csv(csv_file)
+                    if ticks:
+                        market_max = max(tick.ts for tick in ticks)
+                        max_timestamp = max(max_timestamp, market_max)
+                except Exception as e:
+                    print(f"⚠️  Warning: Could not load {csv_file}: {e}")
+                    continue
+        
+        if max_timestamp > 0:
+            asset_max_timestamps[asset] = max_timestamp
+            from datetime import datetime
+            latest_str = datetime.fromtimestamp(max_timestamp).strftime("%Y-%m-%d %H:%M:%S")
+            print(f"   {asset.upper()}: Latest timestamp {latest_str} (filtering to last {hours_window}h)")
+        else:
+            print(f"   {asset.upper()}: No timestamps found")
+    
+    # Filter markets: only keep those with ticks within the window
+    filtered_markets: dict[str, list[str]] = {}
+    cutoff_timestamps: dict[str, float] = {}
+    
+    for asset in asset_max_timestamps:
+        cutoff_timestamps[asset] = asset_max_timestamps[asset] - window_seconds
+    
+    print(f"\n🔍 Filtering markets to last {hours_window} hours per asset...")
+    total_markets = len(markets)
+    filtered_count = 0
+    
+    filtered_markets_with_cutoff: dict[str, tuple[list[str], float]] = {}
+    
+    for market_id, csv_files in markets.items():
+        asset = extract_asset_from_market_id(market_id)
+        
+        if asset not in cutoff_timestamps:
+            # Asset has no valid timestamps, skip
+            continue
+        
+        cutoff = cutoff_timestamps[asset]
+        
+        # Check if any tick in this market is within the time window
+        has_recent_ticks = False
+        for csv_file in csv_files:
+            try:
+                ticks = load_ticks_from_csv(csv_file)
+                if any(tick.ts >= cutoff for tick in ticks):
+                    has_recent_ticks = True
+                    break
+            except Exception as e:
+                continue
+        
+        if has_recent_ticks:
+            filtered_markets_with_cutoff[market_id] = (csv_files, cutoff)
+            filtered_count += 1
+    
+    print(f"   Kept {filtered_count} of {total_markets} markets (within last {hours_window}h)")
+    
+    # Convert back to normal format but store cutoffs separately
+    filtered_markets = {k: v[0] for k, v in filtered_markets_with_cutoff.items()}
+    market_cutoffs = {k: v[1] for k, v in filtered_markets_with_cutoff.items()}
+    
+    return filtered_markets, market_cutoffs
+
+
 def get_market_expiration_time(market_slug: str) -> float | None:
     """Extract expiration timestamp from market slug.
     
@@ -129,6 +280,7 @@ def backtest_market(
     strategy_name: str,
     initial_balance: float,
     timestamp_tolerance: float = 0.1,
+    timestamp_cutoff: float | None = None,
 ) -> BacktestResult:
     """Backtest a strategy on a single market.
     
@@ -138,6 +290,7 @@ def backtest_market(
         strategy_name: Name of strategy to use
         initial_balance: Starting balance in USDC
         timestamp_tolerance: Maximum timestamp difference for matching UP/DOWN ticks
+        timestamp_cutoff: Only include ticks with timestamp >= this value (for filtering to time window)
         
     Returns:
         BacktestResult with performance metrics
@@ -147,6 +300,13 @@ def backtest_market(
     for csv_file in csv_files:
         ticks = load_ticks_from_csv(csv_file)
         all_ticks.extend(ticks)
+    
+    # Extract asset from market_id
+    asset = extract_asset_from_market_id(market_id)
+    
+    # Filter ticks to only include those within the time window (if cutoff provided)
+    if timestamp_cutoff is not None:
+        all_ticks = [tick for tick in all_ticks if tick.ts >= timestamp_cutoff]
     
     if not all_ticks:
         return BacktestResult(
@@ -162,6 +322,7 @@ def backtest_market(
             profit_pct=0.0,
             guaranteed_profit=0.0,
             actual_profit=0.0,
+            asset=asset,
         )
     
     # Sort all ticks by timestamp
@@ -365,6 +526,7 @@ def backtest_market(
         profit_pct=profit_pct,
         guaranteed_profit=guaranteed_profit_before_settlement,
         actual_profit=actual_profit,
+        asset=asset,
     )
 
 
@@ -409,6 +571,32 @@ def print_results(results: list[BacktestResult]) -> None:
     
     print(f"{'TOTAL':<40} ${total_initial:<11.2f} ${total_final:<11.2f} ${total_actual_profit:<13.2f} ${total_guaranteed_profit:<11.2f} {total_profit_pct:<9.2f}% {total_trades:<8}")
     print("=" * 120)
+    
+    # Profit by asset
+    asset_results: dict[str, list[BacktestResult]] = defaultdict(list)
+    for result in results:
+        asset_results[result.asset].append(result)
+    
+    if len(asset_results) > 1:
+        print(f"\n💰 PROFIT BY ASSET:")
+        print("=" * 120)
+        print(f"{'Asset':<20} {'Markets':<10} {'Initial':<12} {'Final':<12} {'Actual Profit':<14} {'Guaranteed':<12} {'Profit %':<10} {'Trades':<8}")
+        print("-" * 120)
+        
+        for asset in sorted(asset_results.keys()):
+            asset_result_list = asset_results[asset]
+            asset_initial = sum(r.initial_balance for r in asset_result_list)
+            asset_final = sum(r.final_balance for r in asset_result_list)
+            asset_profit = asset_final - asset_initial
+            asset_actual_profit = sum(r.actual_profit for r in asset_result_list)
+            asset_guaranteed_profit = sum(r.guaranteed_profit for r in asset_result_list)
+            asset_profit_pct = (asset_profit / asset_initial * 100) if asset_initial > 0 else 0.0
+            asset_trades = sum(r.total_trades for r in asset_result_list)
+            
+            print(f"{asset.upper():<20} {len(asset_result_list):<10} ${asset_initial:<11.2f} ${asset_final:<11.2f} "
+                  f"${asset_actual_profit:<13.2f} ${asset_guaranteed_profit:<11.2f} {asset_profit_pct:<9.2f}% {asset_trades:<8}")
+        
+        print("=" * 120)
     
     # Additional metrics
     print(f"\n📊 SUMMARY STATISTICS:")
@@ -480,12 +668,20 @@ def main() -> None:
     print(f"📊 Found {len(markets)} markets")
     
     # Filter to specific market if requested
+    market_cutoffs: dict[str, float] = {}
     if args.market:
         if args.market in markets:
             markets = {args.market: markets[args.market]}
             print(f"🎯 Backtesting only market: {args.market}")
+            # No time filtering for specific market
         else:
             print(f"❌ Market '{args.market}' not found in data")
+            return
+    else:
+        # Filter to last 8 hours per asset (unless specific market requested)
+        markets, market_cutoffs = filter_markets_by_time_window(markets, hours_window=8.0)
+        if not markets:
+            print(f"❌ No markets found within the last 8 hours")
             return
     
     # Run backtests
@@ -495,12 +691,16 @@ def main() -> None:
         print(f"\n📈 Backtesting {market_id}...")
         print(f"   Found {len(csv_files)} data file(s)")
         
+        # Get cutoff timestamp for this market (if filtering is enabled)
+        timestamp_cutoff = market_cutoffs.get(market_id)
+        
         result = backtest_market(
             market_id=market_id,
             csv_files=csv_files,
             strategy_name=args.strategy,
             initial_balance=args.initial_balance,
             timestamp_tolerance=args.timestamp_tolerance,
+            timestamp_cutoff=timestamp_cutoff,
         )
         
         results.append(result)

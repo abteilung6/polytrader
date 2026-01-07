@@ -907,7 +907,7 @@ def main() -> None:
     market_group.add_argument("--market", help="Market slug (e.g., btc-updown-15m-1767709800)")
     market_group.add_argument(
         "--asset",
-        choices=["bitcoin", "btc", "ethereum", "eth"],
+        choices=["bitcoin", "btc", "ethereum", "eth", "solana", "sol", "xrp"],
         help="Asset name (requires --time-period)",
     )
     watch_parser.add_argument(

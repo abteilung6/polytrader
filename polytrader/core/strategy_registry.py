@@ -2,8 +2,6 @@
 
 from polytrader.core.strategy import (
     GabagoolStrategy,
-    GabagoolV2Strategy,
-    GabagoolV3Strategy,
     Strategy,
 )
 
@@ -26,55 +24,22 @@ def create_strategy(strategy_name: str = "gabagool") -> Strategy:
     if strategy_name_lower in ("gabagool", "gaba", "paircost", "asymmetric"):
         return GabagoolStrategy(
             accumulate_price=0.6,  # Buy whichever side hits 0.6 first
-            hedge_price=0.35,  # Buy the other side when it hits 0.33 or lower
-            max_accumulate_price=0.64,  # Maximum price to buy at when accumulating
+            hedge_price=0.3,  # Buy the other side when it hits 0.33 or lower
+            max_accumulate_price=0.7,  # Maximum price to buy at when accumulating
             max_buy_price=0.9,  # Maximum price to ever buy at (rejects prices >= 0.92)
-            max_ratio=1.6,  # Maximum ratio between sides (e.g., 2.5x)
+            max_ratio=1.4,  # Maximum ratio between sides (e.g., 2.5x)
             min_arbitrage_pair_cost=0.92,  # Minimum arbitrage condition: AVG_YES + AVG_NO must be < 0.95
-            max_order_size=20.0,  # Maximum shares to buy in one operation
-            min_trade_size=2.0,  # Minimum trade size in USDC
-            min_seconds_between_trades=20,  # Rate limiting
+            max_order_size=5.0,  # Maximum shares to buy in one operation
+            min_trade_size=1.0,  # Minimum trade size in USDC
+            min_seconds_between_trades=5,  # Rate limiting
             max_capital_per_market=150.0,  # Maximum capital per market
-            max_loss_threshold=10.0,  # Maximum acceptable loss in USDC (also stops if profit > this)
-        )
-    
-    # Gabagool V2 strategy (with laggard prioritization)
-    if strategy_name_lower in ("gabagoolv2", "gabav2", "gaba2", "laggard"):
-        return GabagoolV2Strategy(
-            accumulate_price=0.6,  # Buy whichever side hits 0.6 first
-            hedge_price=0.35,  # Buy the other side when it hits 0.33 or lower
-            max_accumulate_price=0.64,  # Maximum price to buy at when accumulating
-            max_buy_price=0.9,  # Maximum price to ever buy at (rejects prices >= 0.92)
-            max_ratio=1.6,  # Maximum ratio between sides (e.g., 2.5x)
-            min_arbitrage_pair_cost=0.92,  # Minimum arbitrage condition: AVG_YES + AVG_NO must be < 0.95
-            max_order_size=20.0,  # Maximum shares to buy in one operation
-            min_trade_size=2.0,  # Minimum trade size in USDC
-            min_seconds_between_trades=20,  # Rate limiting
-            max_capital_per_market=200.0,  # Maximum capital per market
-            max_loss_threshold=10.0,  # Maximum acceptable loss in USDC (also stops if profit > this)
-        )
-    
-    # Gabagool V3 strategy (confidence-based - buys more expensive option)
-    if strategy_name_lower in ("gabagoolv3", "gabav3", "gaba3", "confidence", "momentum"):
-        return GabagoolV3Strategy(
-            accumulate_price=0.6,  # Buy whichever side hits 0.6 first
-            hedge_price=0.35,  # Buy the other side when it hits 0.33 or lower
-            max_accumulate_price=0.64,  # Maximum price to buy at when accumulating
-            max_buy_price=0.9,  # Maximum price to ever buy at (rejects prices >= 0.92)
-            max_ratio=1.6,  # Maximum ratio between sides (e.g., 2.5x)
-            min_arbitrage_pair_cost=0.92,  # Minimum arbitrage condition: AVG_YES + AVG_NO must be < 0.95
-            max_order_size=20.0,  # Maximum shares to buy in one operation
-            min_trade_size=2.0,  # Minimum trade size in USDC
-            min_seconds_between_trades=20,  # Rate limiting
-            max_capital_per_market=150.0,  # Maximum capital per market
-            max_loss_threshold=10.0,  # Maximum acceptable loss in USDC (also stops if profit > this)
+            max_loss_threshold=10.0,  # Maximum acceptable loss in USDC
+            lock_profit_threshold=10.0,  # Lock profit when profit exceeds this threshold in USDC
         )
 
     raise ValueError(
         f"Unknown strategy: {strategy_name}. "
-        f"Available strategies: gabagool (aliases: gaba, paircost, asymmetric), "
-        f"gabagoolv2 (aliases: gabav2, gaba2, laggard), "
-        f"gabagoolv3 (aliases: gabav3, gaba3, confidence, momentum)"
+        f"Available strategies: gabagool (aliases: gaba, paircost, asymmetric)"
     )
 
 
@@ -88,13 +53,8 @@ def get_strategy_info(strategy_name: str) -> dict[str, str | float]:
         Dictionary with strategy information
     """
     strategy = create_strategy(strategy_name)
-    if isinstance(strategy, (GabagoolStrategy, GabagoolV2Strategy, GabagoolV3Strategy)):
-        if isinstance(strategy, GabagoolV3Strategy):
-            strategy_type = "Gabagool V3 (Confidence-Based)"
-        elif isinstance(strategy, GabagoolV2Strategy):
-            strategy_type = "Gabagool V2 (Laggard Prioritization)"
-        else:
-            strategy_type = "Gabagool (Asymmetric Hedge)"
+    if isinstance(strategy, GabagoolStrategy):
+        strategy_type = "Gabagool (Asymmetric Hedge)"
         return {
             "name": strategy_name,
             "type": strategy_type,
@@ -109,5 +69,6 @@ def get_strategy_info(strategy_name: str) -> dict[str, str | float]:
             "min_seconds_between_trades": strategy.min_seconds_between_trades,
             "max_capital_per_market": strategy.max_capital_per_market,
             "max_loss_threshold": strategy.max_loss_threshold,
+            "lock_profit_threshold": strategy.lock_profit_threshold,
         }
     return {"name": strategy_name, "type": "Unknown"}
