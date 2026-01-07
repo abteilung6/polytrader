@@ -206,9 +206,9 @@ def backtest_market(
     trade_number = 0
     
     print(f"\n📊 Trade-by-Trade Details for {market_id}:")
-    print("-" * 120)
-    print(f"{'#':<5} {'Outcome':<8} {'Amount':<12} {'Price':<10} {'Profit Before':<15} {'Profit After':<15} {'Balance':<12}")
-    print("-" * 120)
+    print("-" * 140)
+    print(f"{'#':<5} {'Timestamp':<12} {'Outcome':<8} {'Amount':<12} {'Shares':<10} {'Price':<10} {'Profit Before':<15} {'Profit After':<15} {'Balance':<12}")
+    print("-" * 140)
     
     for ts in processed_timestamps:
         group = tick_groups[ts]
@@ -227,11 +227,12 @@ def backtest_market(
                 # Calculate profit before trade
                 profit_before = calculate_guaranteed_profit(market_id)
                 
-                # Process prices for trading decision
+                # Process prices for trading decision (use the timestamp from ticks)
                 decision = portfolio_manager.process_prices(
                     market_id=market_id,
                     up_price=latest_up_tick.best_ask,
                     down_price=latest_down_tick.best_ask,
+                    timestamp=ts,  # Pass the backtest timestamp
                 )
                 
                 # If trades were executed, print details
@@ -244,27 +245,34 @@ def backtest_market(
                     profit_after = calculate_guaranteed_profit(market_id)
                     balance = portfolio_manager.get_balance()
                     
+                    # Format timestamp for display
+                    from datetime import datetime
+                    timestamp_str = datetime.fromtimestamp(ts).strftime("%H:%M:%S.%f")[:-3] if ts > 0 else "N/A"
+                    
                     # Print trade details
                     if len(trades) > 1:
                         # Multiple trades (arbitrage - buying both sides)
-                        print(f"{trade_number:<5} {'BOTH':<8} ${total_amount:<11.2f} "
-                              f"{'N/A':<10} ${profit_before:<14.2f} ${profit_after:<14.2f} ${balance:<11.2f}")
+                        total_shares = sum(t.amount / t.price for t in trades)
+                        print(f"{trade_number:<5} {timestamp_str:<12} {'BOTH':<8} ${total_amount:<11.2f} "
+                              f"{total_shares:<10.2f} {'N/A':<10} ${profit_before:<14.2f} ${profit_after:<14.2f} ${balance:<11.2f}")
                         # Print individual trades
                         for t in trades:
-                            print(f"     → {t.outcome:<6} ${t.amount:<11.2f} ${t.price:<9.4f}")
+                            shares = t.amount / t.price if t.price > 0 else 0
+                            print(f"     → {'':<12} {t.outcome:<6} ${t.amount:<11.2f} {shares:<10.2f} ${t.price:<9.4f}")
                     else:
                         # Single trade
                         trade = trades[0]
-                        print(f"{trade_number:<5} {trade.outcome:<8} ${trade.amount:<11.2f} "
-                              f"${trade.price:<9.4f} ${profit_before:<14.2f} ${profit_after:<14.2f} ${balance:<11.2f}")
+                        shares = trade.amount / trade.price if trade.price > 0 else 0
+                        print(f"{trade_number:<5} {timestamp_str:<12} {trade.outcome:<8} ${trade.amount:<11.2f} "
+                              f"{shares:<10.2f} ${trade.price:<9.4f} ${profit_before:<14.2f} ${profit_after:<14.2f} ${balance:<11.2f}")
     
     # Print summary after all trades
     if trade_number > 0:
         final_profit = calculate_guaranteed_profit(market_id)
         final_balance = portfolio_manager.get_balance()
-        print("-" * 120)
-        print(f"{'SUMMARY':<5} {'-':<8} ${portfolio_manager.total_spent:<11.2f} "
-              f"{'Total':<10} {'-':<15} ${final_profit:<14.2f} ${final_balance:<11.2f}")
+        print("-" * 140)
+        print(f"{'SUMMARY':<5} {'-':<12} {'-':<8} ${portfolio_manager.total_spent:<11.2f} "
+              f"{'Total':<10} {'-':<10} ${final_profit:<14.2f} ${final_balance:<11.2f}")
         print()
     
     # Settle positions at market expiration

@@ -117,15 +117,55 @@ async def watch_mode(args: argparse.Namespace) -> None:
     
     # Initialize portfolio manager if trading is enabled
     portfolio_manager: PortfolioManager | None = None
+    clob_client: ClobClient | None = None
+    gamma_client: GammaClient | None = None
+    
     if args.trade:
+        if args.money:
+            # Validate that we have secrets for real trading
+            if not secrets.private_key:
+                raise ValueError("--money requires private key to be configured in secrets")
+            
+            # Initialize ClobClient for real order execution
+            clob_client = ClobClient(
+                host=CLOB_API_URL,
+                key=secrets.private_key.get_secret_value(),
+                chain_id=CHAIN_ID,
+                signature_type=secrets.signature_type,
+                funder=secrets.funder,
+            )
+            
+            try:
+                creds = clob_client.create_or_derive_api_creds()
+                clob_client.set_api_creds(creds)
+            except Exception as e:
+                print(f"⚠️  Warning: Could not set API credentials: {e}")
+            
+            # Initialize GammaClient for getting token IDs
+            gamma_client = GammaClient()
+            
+            # Verify balance
+            try:
+                balance = verify_usdc_balance(clob_client, required_amount=0.01)
+                print(f"✅ Real trading enabled - Current balance: ${balance:.2f} USDC")
+            except Exception as e:
+                print(f"⚠️  Warning: Could not verify balance: {e}")
+        
         strategy = create_strategy(args.strategy)
         portfolio_manager = PortfolioManager(
             initial_balance=args.initial_balance or 1000.0,
             strategy=strategy,
+            execute_real_orders=args.money,
+            clob_client=clob_client,
+            gamma_client=gamma_client,
         )
         print(f"💰 Trading enabled:")
         print(f"   Initial balance: ${portfolio_manager.get_balance():.2f} USDC")
         print(f"   Strategy: {strategy}")
+        if args.money:
+            print(f"   ⚠️  REAL MONEY MODE: Orders will be executed on Polymarket!")
+        else:
+            print(f"   Simulated trading mode (use --money to execute real orders)")
         print()
     
     # Create initial observers
@@ -411,6 +451,19 @@ async def watch_mode(args: argparse.Namespace) -> None:
                         print(f"\n💼 Portfolio: Cash=${stats['balance']:.2f} | Total Value=${total_portfolio_value:.2f} | Profit=${total_profit:+.2f} | Trades={stats['total_trades']} | Positions={stats['num_positions']}")
                         print(f"   Profit if UP: ${profit_if_up:+.2f}")
                         print(f"   Profit if DOWN: ${profit_if_down:+.2f}")
+                        
+                        # Show gabagool-specific metrics if using GabagoolStrategy
+                        from polytrader.core.strategy import GabagoolStrategy
+                        if isinstance(portfolio_manager.strategy, GabagoolStrategy):
+                            metrics = portfolio_manager.strategy.get_metrics(portfolio, tick.market_id)
+                            pair_cost = metrics["pair_cost"]
+                            locked = "🔒 LOCKED" if metrics["locked_profit"] else ""
+                            print(f"\n📊 Gabagool Metrics: Pair Cost={pair_cost:.4f} {locked}")
+                            print(f"   Qty YES: {metrics['qty_yes']:.2f} (Cost: ${metrics['cost_yes']:.2f})")
+                            print(f"   Qty NO: {metrics['qty_no']:.2f} (Cost: ${metrics['cost_no']:.2f})")
+                            if metrics['estimated_profit'] > 0:
+                                print(f"   Estimated Profit: ${metrics['estimated_profit']:.2f}")
+                            print(f"   Trades Executed: {metrics['trade_count']}")
                         
                         # Show positions for current market
                         if up_tick and down_tick:
@@ -879,14 +932,19 @@ def main() -> None:
         help="Enable automated trading with portfolio manager",
     )
     watch_parser.add_argument(
+        "--money",
+        action="store_true",
+        help="Execute real orders on Polymarket (requires --trade). WARNING: This will spend real money!",
+    )
+    watch_parser.add_argument(
         "--initial-balance",
         type=float,
         help="Initial USDC balance for trading (default: 1000.0)",
     )
     watch_parser.add_argument(
         "--strategy",
-        default="random",
-        help="Trading strategy (default: random) - 'random' or 'balancedpair' (aliases: balanced, lockprofit, gabagool)",
+        default="gabagool",
+        help="Trading strategy (default: gabagool). Options: gabagool (aliases: gaba, paircost, asymmetric)",
     )
 
     buy_parser = subparsers.add_parser("buy", help="Place a buy order")
@@ -938,6 +996,10 @@ def main() -> None:
         parser.error("--time-period is required when --asset is specified")
     if args.mode == "scrape" and args.asset and not args.time_period:
         parser.error("--time-period is required when --asset is specified")
+    
+    # Validate that --money requires --trade
+    if args.mode == "watch" and args.money and not args.trade:
+        parser.error("--money requires --trade to be enabled")
 
     if args.mode == "watch":
         asyncio.run(watch_mode(args))

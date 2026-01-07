@@ -1,25 +1,53 @@
 """Portfolio manager for executing trades."""
 
+from typing import TYPE_CHECKING
+
+from py_clob_client.order_builder.constants import BUY  # type: ignore[import-untyped]
+
+from polytrader.clob import place_market_order
 from polytrader.core.portfolio import Portfolio
-from polytrader.core.strategy import RandomStrategy, Strategy
+from polytrader.core.strategy import Strategy
 from polytrader.core.trade import TradeDecision
 from polytrader.types import MarketTick, Outcome
+
+if TYPE_CHECKING:
+    from py_clob_client.client import ClobClient  # type: ignore[import-untyped]
+    from polytrader.gamma import GammaClient
 
 
 class PortfolioManager:
     """Manages portfolio and executes trades based on strategy."""
 
-    def __init__(self, initial_balance: float = 1000.0, strategy: Strategy | None = None) -> None:
+    def __init__(
+        self,
+        initial_balance: float = 1000.0,
+        strategy: Strategy | None = None,
+        execute_real_orders: bool = False,
+        clob_client: "ClobClient | None" = None,
+        gamma_client: "GammaClient | None" = None,
+    ) -> None:
         """Initialize portfolio manager.
 
         Args:
             initial_balance: Starting USDC balance
-            strategy: Trading strategy to use (defaults to RandomStrategy)
+            strategy: Trading strategy to use (required)
+            execute_real_orders: If True, execute real orders on Polymarket
+            clob_client: ClobClient instance for real order execution (required if execute_real_orders=True)
+            gamma_client: GammaClient instance for getting token IDs (required if execute_real_orders=True)
         """
         self.portfolio = Portfolio(balance=initial_balance)
-        self.strategy = strategy or RandomStrategy()
+        self.strategy = strategy
         self.total_trades = 0
         self.total_spent = 0.0
+        self.execute_real_orders = execute_real_orders
+        self.clob_client = clob_client
+        self.gamma_client = gamma_client
+        
+        if execute_real_orders:
+            if clob_client is None:
+                raise ValueError("clob_client is required when execute_real_orders=True")
+            if gamma_client is None:
+                raise ValueError("gamma_client is required when execute_real_orders=True")
 
     def get_balance(self) -> float:
         """Get current USDC balance."""
@@ -69,6 +97,7 @@ class PortfolioManager:
         market_id: str,
         up_price: float,
         down_price: float,
+        timestamp: float | None = None,
     ) -> TradeDecision | list[TradeDecision] | None:
         """Process prices for both outcomes and potentially execute a trade.
 
@@ -78,6 +107,7 @@ class PortfolioManager:
             market_id: Market identifier
             up_price: Current mid price for UP outcome
             down_price: Current mid price for DOWN outcome
+            timestamp: Optional timestamp for backtesting (defaults to None)
 
         Returns:
             TradeDecision or list of TradeDecisions if trades were made, None otherwise
@@ -88,6 +118,7 @@ class PortfolioManager:
             market_id=market_id,
             up_price=up_price,
             down_price=down_price,
+            timestamp=timestamp,
         )
 
         if decision is None:
@@ -105,15 +136,124 @@ class PortfolioManager:
             return decision
 
     def _execute_trade(self, decision: TradeDecision) -> None:
-        """Execute a trade (simulated).
+        """Execute a trade (simulated or real).
 
         Args:
             decision: Trade decision to execute
         """
-        # Calculate quantity based on amount and price
+        # Validate price to prevent division by zero
+        if decision.price <= 0:
+            raise ValueError(f"Invalid trade price: {decision.price}. Price must be > 0.")
+        
+        # Execute real order on Polymarket if enabled
+        order_successful = False
+        taking_amount_str = ""
+        making_amount_str = ""
+        if self.execute_real_orders and self.clob_client and self.gamma_client:
+            # Try to place order, with one retry if it fails
+            for attempt in range(2):  # Try twice
+                try:
+                    # Get token ID for this market/outcome
+                    market = self.gamma_client.get_market_by_slug(decision.market_id)
+                    # Convert internal format ("UP"/"DOWN") to API format ("Up"/"Down")
+                    outcome_api = "Up" if decision.outcome == "UP" else "Down"
+                    token_id = market.get_token_id(outcome_api)
+                    
+                    # Place real order on Polymarket
+                    if attempt == 0:
+                        print(f"\n💸 Executing REAL order:")
+                    else:
+                        print(f"\n🔄 Retrying REAL order (attempt {attempt + 1}):")
+                    print(f"   Market: {decision.market_id}")
+                    print(f"   Outcome: {decision.outcome}")
+                    print(f"   Amount: ${decision.amount:.2f} USDC")
+                    print(f"   Price: ${decision.price:.4f}")
+                    print(f"   Token ID: {token_id}")
+                    
+                    response = place_market_order(
+                        client=self.clob_client,
+                        token_id=token_id,
+                        amount=decision.amount,
+                        side=BUY,
+                    )
+                    
+                    # Check if order was successful
+                    success = response.get("success", False)
+                    error_msg = response.get("errorMsg", "")
+                    order_id = response.get("orderID", "")
+                    status = response.get("status", "")
+                    taking_amount_str = response.get("takingAmount", "")
+                    making_amount_str = response.get("makingAmount", "")
+                    
+                    if success:
+                        order_successful = True
+                        print(f"   ✅ Order executed successfully!")
+                        print(f"   Order ID: {order_id}")
+                        print(f"   Status: {status}")
+                        if taking_amount_str:
+                            print(f"   Shares received: {taking_amount_str}")
+                        if making_amount_str:
+                            print(f"   USDC spent: {making_amount_str}")
+                        break  # Success, exit retry loop
+                    else:
+                        print(f"   ❌ Order failed!")
+                        if error_msg:
+                            print(f"   Error: {error_msg}")
+                        if order_id:
+                            print(f"   Order ID: {order_id}")
+                        if status:
+                            print(f"   Status: {status}")
+                        # Continue to retry if this was first attempt
+                        if attempt == 0:
+                            print(f"   Will retry once...")
+                        else:
+                            print(f"   Max retries reached. Skipping this trade.")
+                
+                except Exception as e:
+                    print(f"   ❌ Error executing real order: {e}")
+                    if attempt == 0:
+                        print(f"   Will retry once...")
+                    else:
+                        print(f"   Max retries reached. Skipping this trade.")
+            
+            # If real order failed after retries, don't update portfolio
+            if not order_successful:
+                print(f"   ⚠️  Order not successful. Portfolio not updated. Waiting for next opportunity.")
+                return
+            
+            # Extract actual values from successful order response
+            if order_successful:
+                # Get actual shares received and USDC spent from response
+                actual_quantity = float(taking_amount_str) if taking_amount_str else None
+                actual_amount_spent = float(making_amount_str) if making_amount_str else None
+                
+                if actual_quantity is None or actual_amount_spent is None:
+                    print(f"   ⚠️  Warning: Could not parse response values. Using estimated values.")
+                    actual_quantity = decision.amount / decision.price
+                    actual_amount_spent = decision.amount
+                    actual_price = decision.price
+                else:
+                    # Calculate actual price per share based on what we actually paid
+                    actual_price = actual_amount_spent / actual_quantity if actual_quantity > 0 else decision.price
+                
+                # Update portfolio with actual values from order
+                self.portfolio.balance -= actual_amount_spent
+                self.portfolio.add_position(
+                    market_id=decision.market_id,
+                    outcome=decision.outcome,
+                    quantity=actual_quantity,
+                    price=actual_price,
+                )
+                
+                # Track statistics
+                self.total_trades += 1
+                self.total_spent += actual_amount_spent
+                return
+        
+        # Simulated trading: calculate quantity based on amount and price
         quantity = decision.amount / decision.price
 
-        # Update portfolio
+        # Update portfolio (simulated trading)
         self.portfolio.balance -= decision.amount
         self.portfolio.add_position(
             market_id=decision.market_id,
