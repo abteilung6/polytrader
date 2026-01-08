@@ -63,6 +63,20 @@ class Observer(IObserver):
     async def publish_market_tick(self, tick: MarketTick) -> None:
         self.store.add(tick)
         await self.bus.publish(TICKS, tick)
+        logger.bind(
+            market_slug=tick.market_slug,
+            outcome=tick.outcome,
+            bid=tick.best_bid,
+            ask=tick.best_ask,
+            mid=tick.mid,
+        ).info(
+            "📊 {market_slug}/{outcome} bid={bid:.4f} ask={ask:.4f} mid={mid:.4f}",
+            market_slug=tick.market_slug,
+            outcome=tick.outcome,
+            bid=tick.best_bid,
+            ask=tick.best_ask,
+            mid=tick.mid,
+        )
 
     def stop(self) -> None:
         self._running = False

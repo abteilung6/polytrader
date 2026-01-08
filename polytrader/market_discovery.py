@@ -96,8 +96,10 @@ class MarketPattern:
             Unix timestamp (seconds) for the end of the current window
         """
         now = int(time.time())
-        # Round up to the next interval boundary
-        window_end = ((now // self.interval_seconds) + 1) * self.interval_seconds
+        # Round down to current interval boundary, then add interval to get end
+        # This finds the market that's currently active (not future)
+        window_start = (now // self.interval_seconds) * self.interval_seconds
+        window_end = window_start + self.interval_seconds
         return window_end
 
     def get_next_window_end(self) -> int:
@@ -141,7 +143,7 @@ class MarketDiscoveryService:
     def __init__(self, gamma_client: GammaClient | None = None) -> None:
         self.gamma = gamma_client or GammaClient()
         self._cache: dict[str, tuple[str, float]] = {}  # pattern -> (slug, expiry_time)
-        self._cache_ttl = 60.0  # Cache for 60 seconds
+        self._cache_ttl = 30.0  # Cache for 30 seconds (shorter for faster market transitions)
 
     async def get_current_market(self, pattern: str) -> str | None:
         """Get the current active market slug for a pattern.
@@ -157,6 +159,11 @@ class MarketDiscoveryService:
         # Check cache first
         cached = self._get_from_cache(pattern)
         if cached:
+            logger.debug(
+                "Using cached market: {market} for pattern: {pattern}",
+                market=cached,
+                pattern=pattern,
+            )
             return cached
 
         try:
@@ -165,27 +172,45 @@ class MarketDiscoveryService:
             logger.error("Invalid market pattern: {error}", error=e)
             return None
 
-        # Try current window
+        # Calculate window boundaries
         current_end = market_pattern.get_current_window_end()
-        current_slug = market_pattern.generate_slug(current_end)
-
-        if await self._market_exists(current_slug):
-            self._cache_result(pattern, current_slug)
-            return current_slug
-
-        # Try previous window (in case we're at the boundary)
         prev_end = current_end - market_pattern.interval_seconds
-        prev_slug = market_pattern.generate_slug(prev_end)
+        next_end = current_end + market_pattern.interval_seconds
 
+        # Try previous window first (most likely to be the active market)
+        # Markets often remain active/tradeable even after their "end time"
+        prev_slug = market_pattern.generate_slug(prev_end)
+        logger.debug(
+            "Checking previous window market: {market} (end: {end})",
+            market=prev_slug,
+            end=prev_end,
+        )
         if await self._market_exists(prev_slug):
+            logger.info("Found active market: {market} (previous window)", market=prev_slug)
             self._cache_result(pattern, prev_slug)
             return prev_slug
 
-        # Try next window (in case market not yet created)
-        next_end = current_end + market_pattern.interval_seconds
-        next_slug = market_pattern.generate_slug(next_end)
+        # Try current window
+        current_slug = market_pattern.generate_slug(current_end)
+        logger.debug(
+            "Checking current window market: {market} (end: {end})",
+            market=current_slug,
+            end=current_end,
+        )
+        if await self._market_exists(current_slug):
+            logger.info("Found active market: {market} (current window)", market=current_slug)
+            self._cache_result(pattern, current_slug)
+            return current_slug
 
+        # Try next window last (only if others don't exist)
+        next_slug = market_pattern.generate_slug(next_end)
+        logger.debug(
+            "Checking next window market: {market} (end: {end})",
+            market=next_slug,
+            end=next_end,
+        )
         if await self._market_exists(next_slug):
+            logger.info("Found active market: {market} (next window)", market=next_slug)
             self._cache_result(pattern, next_slug)
             return next_slug
 
@@ -238,6 +263,9 @@ class MarketDiscoveryService:
     def _get_from_cache(self, pattern: str) -> str | None:
         """Get cached result if still valid.
 
+        Also validates that the cached market is still in the correct time window.
+        This prevents using stale markets when markets transition.
+
         Args:
             pattern: Market pattern
 
@@ -248,12 +276,38 @@ class MarketDiscoveryService:
             return None
 
         slug, expiry = self._cache[pattern]
-        if time.time() < expiry:
-            return slug
+        if time.time() >= expiry:
+            # Cache expired
+            del self._cache[pattern]
+            return None
 
-        # Cache expired
-        del self._cache[pattern]
-        return None
+        # Additional validation: check if cached market is still in the correct window
+        try:
+            market_pattern = MarketPattern.parse(pattern)
+            # Extract timestamp from slug (last part after final dash)
+            if "-" in slug:
+                cached_timestamp = int(slug.split("-")[-1])
+                # Calculate what the current market should be
+                current_end = market_pattern.get_current_window_end()
+                prev_end = current_end - market_pattern.interval_seconds
+
+                # Cached market should be either current or previous window
+                if cached_timestamp not in (current_end, prev_end):
+                    # Cached market is from wrong window, invalidate cache
+                    logger.debug(
+                        "Invalidating cache: cached market {cached} not in current window "
+                        "(current: {current}, prev: {prev})",
+                        cached=slug,
+                        current=f"{pattern}-{current_end}",
+                        prev=f"{pattern}-{prev_end}",
+                    )
+                    del self._cache[pattern]
+                    return None
+        except (ValueError, IndexError):
+            # If we can't parse, just use the cache (fallback)
+            pass
+
+        return slug
 
     def _cache_result(self, pattern: str, slug: str) -> None:
         """Cache a discovery result.

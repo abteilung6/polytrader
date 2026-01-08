@@ -209,6 +209,8 @@ def place_market_order(
 
     logger.bind(side=side, amount=amount).info(
         "Placing market order: {amount} USDC, side={side}, token_id={token_id}...",
+        amount=amount,
+        side=side,
         token_id=token_id[:20],
     )
     market_order = MarketOrderArgs(
@@ -225,7 +227,11 @@ def place_market_order(
     order_id = response.get("order_id") or response.get("id", "unknown")
     status = response.get("status") or response.get("state", "unknown")
     logger.bind(order_id=order_id, status=status, side=side, amount=amount).info(
-        "Order submitted: ID={order_id}, status={status}, side={side}, amount={amount} USDC"
+        "Order submitted: ID={order_id}, status={status}, side={side}, amount={amount} USDC",
+        order_id=order_id,
+        status=status,
+        side=side,
+        amount=amount,
     )
     logger.debug("Full order response: {response}", response=response)
     return response

@@ -62,8 +62,13 @@ class SimpleThresholdModel(ITradingModel):
         # Check history requirement
         history = self.store.history(tick.market_slug, tick.outcome)
         if len(history) < self.min_history:
-            logger.debug(
-                "Insufficient history: {current}/{required} ticks",
+            logger.bind(
+                market_slug=tick.market_slug,
+                outcome=tick.outcome,
+                current=len(history),
+                required=self.min_history,
+            ).info(
+                "⏳ Building history: {current}/{required} ticks (need {required} before trading)",
                 current=len(history),
                 required=self.min_history,
             )
@@ -109,9 +114,15 @@ class SimpleThresholdModel(ITradingModel):
                 "Published SELL proposal: {reason}", reason=proposal.reason
             )
         else:
-            logger.debug(
-                "No proposal: price {price:.4f} between thresholds "
-                "(buy: {buy_thresh}, sell: {sell_thresh})",
+            logger.bind(
+                market_slug=tick.market_slug,
+                outcome=tick.outcome,
+                price=mid_price,
+                buy_thresh=buy_thresh,
+                sell_thresh=sell_thresh,
+            ).info(
+                "⏸️  No trade: price {price:.4f} between thresholds "
+                "(buy < {buy_thresh:.4f}, sell > {sell_thresh:.4f})",
                 price=mid_price,
                 buy_thresh=buy_thresh,
                 sell_thresh=sell_thresh,
