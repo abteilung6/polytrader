@@ -2,3 +2,5 @@ py-clob-client>=0.34.0
 pydantic>=2.12.5
 pydantic-settings>=2.12.0
 requests>=2.31.0
+streamlit>=1.28.0
+pandas>=2.0.0

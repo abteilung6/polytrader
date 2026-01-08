@@ -10,8 +10,12 @@ from polytrader.core.strategy import (
 from polytrader.core.strategy_registry import create_strategy, get_strategy_info
 from polytrader.core.trade import TradeDecision
 
+# Import V2 strategy (optional, may not be available)
+from polytrader.core.strategies.gabagool.v2 import GabagoolV2Strategy
+
 __all__ = [
     "GabagoolStrategy",
+    "GabagoolV2Strategy",
     "Portfolio",
     "PortfolioManager",
     "Position",

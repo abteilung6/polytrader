@@ -1,5 +1,7 @@
 """Portfolio manager for executing trades."""
 
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import TYPE_CHECKING
 
 from py_clob_client.order_builder.constants import BUY  # type: ignore[import-untyped]
@@ -42,6 +44,7 @@ class PortfolioManager:
         self.execute_real_orders = execute_real_orders
         self.clob_client = clob_client
         self.gamma_client = gamma_client
+        self._portfolio_lock = threading.Lock()  # Lock for thread-safe portfolio updates
         
         if execute_real_orders:
             if clob_client is None:
@@ -126,9 +129,19 @@ class PortfolioManager:
 
         # Handle both single decision and list of decisions (for arbitrage)
         if isinstance(decision, list):
-            # Execute all trades in the list
-            for trade in decision:
-                self._execute_trade(trade, timestamp=timestamp)
+            # Execute all trades in parallel
+            with ThreadPoolExecutor(max_workers=len(decision)) as executor:
+                futures = {
+                    executor.submit(self._execute_trade, trade, timestamp): trade
+                    for trade in decision
+                }
+                # Wait for all trades to complete
+                for future in as_completed(futures):
+                    try:
+                        future.result()  # This will raise any exceptions that occurred
+                    except Exception as e:
+                        trade = futures[future]
+                        print(f"   ⚠️  Error executing trade for {trade.outcome}: {e}")
             return decision
         else:
             # Execute single trade
@@ -220,6 +233,14 @@ class PortfolioManager:
             # If real order failed after retries, don't update portfolio
             if not order_successful:
                 print(f"   ⚠️  Order not successful. Portfolio not updated. Waiting for next opportunity.")
+                # Notify strategy that trade failed
+                if hasattr(self.strategy, 'on_trade_failed'):
+                    self.strategy.on_trade_failed(
+                        market_id=decision.market_id,
+                        outcome=decision.outcome,
+                        price=decision.price,
+                        timestamp=timestamp,
+                    )
                 return
             
             # Extract actual values from successful order response
@@ -237,18 +258,19 @@ class PortfolioManager:
                     # Calculate actual price per share based on what we actually paid
                     actual_price = actual_amount_spent / actual_quantity if actual_quantity > 0 else decision.price
                 
-                # Update portfolio with actual values from order
-                self.portfolio.balance -= actual_amount_spent
-                self.portfolio.add_position(
-                    market_id=decision.market_id,
-                    outcome=decision.outcome,
-                    quantity=actual_quantity,
-                    price=actual_price,
-                )
-                
-                # Track statistics
-                self.total_trades += 1
-                self.total_spent += actual_amount_spent
+                # Update portfolio with actual values from order (thread-safe)
+                with self._portfolio_lock:
+                    self.portfolio.balance -= actual_amount_spent
+                    self.portfolio.add_position(
+                        market_id=decision.market_id,
+                        outcome=decision.outcome,
+                        quantity=actual_quantity,
+                        price=actual_price,
+                    )
+                    
+                    # Track statistics
+                    self.total_trades += 1
+                    self.total_spent += actual_amount_spent
                 
                 # Notify strategy that trade was executed successfully
                 if hasattr(self.strategy, 'on_trade_executed'):
@@ -263,18 +285,19 @@ class PortfolioManager:
         # Simulated trading: calculate quantity based on amount and price
         quantity = decision.amount / decision.price
 
-        # Update portfolio (simulated trading)
-        self.portfolio.balance -= decision.amount
-        self.portfolio.add_position(
-            market_id=decision.market_id,
-            outcome=decision.outcome,
-            quantity=quantity,
-            price=decision.price,
-        )
+        # Update portfolio (simulated trading, thread-safe)
+        with self._portfolio_lock:
+            self.portfolio.balance -= decision.amount
+            self.portfolio.add_position(
+                market_id=decision.market_id,
+                outcome=decision.outcome,
+                quantity=quantity,
+                price=decision.price,
+            )
 
-        # Track statistics
-        self.total_trades += 1
-        self.total_spent += decision.amount
+            # Track statistics
+            self.total_trades += 1
+            self.total_spent += decision.amount
         
         # Notify strategy that trade was executed successfully
         if hasattr(self.strategy, 'on_trade_executed'):
