@@ -2,15 +2,11 @@ import asyncio
 from collections.abc import Callable
 
 from polytrader.adapters import create_adapter_factory
-from polytrader.clob import create_clob_client_factory
 from polytrader.config import PolymarketSecrets
 from polytrader.events import MARKET_CHANGE, TICKS, EventBus
 from polytrader.market_discovery import MarketDiscoveryService
-from polytrader.models import create_model_factory
 from polytrader.observer import create_observer_factory
-from polytrader.order_manager import create_order_manager_factory
 from polytrader.store import MemoryTickStore
-from polytrader.supervisor import MarketSupervisor
 from polytrader.tasks.formatters import MarketChangeFormatter, TickFormatter
 from polytrader.types import MarketChangeEvent, MarketTick
 
@@ -56,29 +52,25 @@ async def watch_task(
     store = MemoryTickStore()
     discovery = MarketDiscoveryService()
 
+    # For watch mode, we only need adapter and observer - no model or order manager
     adapter_factory = create_adapter_factory(secrets, polling_frequency_hz=frequency)
     observer_factory = create_observer_factory(bus, store)
-    model_factory = create_model_factory(bus, store)
-    clob_client_factory = create_clob_client_factory(secrets)
-    order_manager_factory = create_order_manager_factory(
-        bus, clob_client_factory, max_trades_per_market=1
-    )
 
-    supervisor = MarketSupervisor(
-        pattern=market_pattern,
-        discovery_service=discovery,
-        adapter_factory=adapter_factory,
-        observer_factory=observer_factory,
-        model_factory=model_factory,
-        order_manager_factory=order_manager_factory,
-        bus=bus,
-        store=store,
-    )
+    # Get initial market
+    market = await discovery.get_current_market(market_pattern)
+    if not market:
+        # If pattern doesn't match, try using it as a direct market slug
+        market = market_pattern
+
+    # Create adapter and observer
+    adapter = adapter_factory(market)
+    observer = observer_factory(adapter)
 
     tick_queue = bus.subscribe(TICKS)
     market_change_queue = bus.subscribe(MARKET_CHANGE)
 
-    supervisor_task = asyncio.create_task(supervisor.run())
+    # Start observer (this will fetch ticks and publish them)
+    observer_task = asyncio.create_task(observer.run())
 
     async def handle_ticks() -> None:
         """Handle tick events."""
@@ -89,7 +81,7 @@ async def watch_task(
             tick_handler(tick, count)
 
             if limit and count >= limit:
-                supervisor.stop()
+                observer.stop()
                 break
 
     async def handle_market_changes() -> None:
@@ -102,15 +94,15 @@ async def watch_task(
     market_changes_task = asyncio.create_task(handle_market_changes())
 
     try:
-        await asyncio.gather(supervisor_task, ticks_task, market_changes_task)
+        await asyncio.gather(observer_task, ticks_task, market_changes_task)
     except KeyboardInterrupt:
-        supervisor.stop()
+        observer.stop()
     finally:
-        supervisor_task.cancel()
+        observer_task.cancel()
         ticks_task.cancel()
         market_changes_task.cancel()
         try:
-            await supervisor_task
+            await observer_task
             await ticks_task
             await market_changes_task
         except asyncio.CancelledError:
