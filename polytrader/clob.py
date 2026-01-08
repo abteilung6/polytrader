@@ -1,4 +1,4 @@
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Protocol, cast
 
 from py_clob_client.client import ClobClient  # type: ignore[import-untyped]
 from py_clob_client.clob_types import (  # type: ignore[import-untyped]
@@ -63,8 +63,16 @@ class ExternalOrder(BaseModel):
         # Extract status (could be 'status' or 'state')
         status_raw = (data.get("status") or data.get("state") or "UNKNOWN").upper()
         # Validate status
-        valid_statuses: list[OrderStatus] = ["FILLED", "CANCELLED", "OPEN", "PENDING", "UNKNOWN"]
-        status: OrderStatus = status_raw if status_raw in valid_statuses else "UNKNOWN"
+        valid_statuses: tuple[OrderStatus, ...] = (
+            "FILLED",
+            "CANCELLED",
+            "OPEN",
+            "PENDING",
+            "UNKNOWN",
+        )
+        status: OrderStatus = (
+            cast(OrderStatus, status_raw) if status_raw in valid_statuses else "UNKNOWN"
+        )
 
         # Extract side
         side_raw = (data.get("side") or "").upper()

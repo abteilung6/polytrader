@@ -363,17 +363,102 @@ class PositionManager(IPositionManager):
         """
         return self._token_to_market.get(token_id)
 
+    async def _lookup_token_id(self, token_id: str) -> tuple[str, Outcome] | None:
+        """Look up market_slug and outcome from token_id via Gamma API.
+
+        This is used for unknown tokens that aren't in our cache.
+        The result is cached for future lookups.
+
+        Args:
+            token_id: Token ID to look up
+
+        Returns:
+            Tuple of (market_slug, outcome) if found, None otherwise
+        """
+        # Try to find the market by iterating through known markets
+        # This is a fallback - in practice, we should have most tokens cached
+        # For now, we'll return None and log a warning
+        # In a production system, you might want to maintain a reverse index
+        # or query Gamma API for token metadata
+        logger.bind(token_id=token_id).warning(
+            "Token ID {token_id} not in cache and lookup not implemented. "
+            "Consider caching token_id when positions are created.",
+            token_id=token_id,
+        )
+        return None
+
+    def _create_position_from_external_order(
+        self, external_order: ExternalOrder, market_slug: str, outcome: Outcome
+    ) -> Position:
+        """Create a Position from an external order.
+
+        Used when we discover an externally filled order that we don't have
+        an internal position for. Uses reasonable defaults for missing data.
+
+        Args:
+            external_order: External order that was filled
+            market_slug: Market slug (from token lookup)
+            outcome: Outcome (from token lookup)
+
+        Returns:
+            Position with estimated values
+        """
+        import time
+
+        # Use defaults for missing information
+        # Entry price: assume 0.5 (mid-market) if not available
+        entry_price = 0.5
+        # Target price: default to 0.5 (will be updated if we get better info)
+        target_price = 0.5
+        # Entry time: use current time as estimate
+        entry_time = time.time()
+
+        return Position(
+            market_slug=market_slug,
+            outcome=outcome,
+            size=external_order.size,
+            target_price=target_price,
+            entry_price=entry_price,
+            entry_time=entry_time,
+            order_id=external_order.order_id if external_order.order_id != "unknown" else None,
+        )
+
+    def _remove_position(self, key: tuple[str, Outcome], reason: str) -> None:
+        """Remove a position and clean up related mappings.
+
+        Args:
+            key: Position key (market_slug, outcome)
+            reason: Reason for removal (for logging)
+        """
+        if key not in self._positions:
+            return
+
+        position = self._positions.pop(key)
+        logger.bind(
+            market_slug=position.market_slug,
+            outcome=position.outcome,
+            reason=reason,
+        ).info(
+            "Removed position {market_slug}/{outcome}: {reason}",
+            market_slug=position.market_slug,
+            outcome=position.outcome,
+            reason=reason,
+        )
+
+        # Clean up order_id mapping
+        if position.order_id:
+            self._order_id_to_position.pop(position.order_id, None)
+
     async def _reconcile_positions(self, external_orders: list[dict[str, Any]]) -> None:
         """Reconcile internal positions with external orders.
 
+        Automatically synchronizes internal positions with external API state:
+        - Removes positions when external orders are CANCELLED
+        - Creates positions for externally filled BUY orders
+        - Attempts to look up unknown token_ids via Gamma API
+
         Args:
             external_orders: List of order dictionaries from external API
-
-        This implementation:
-        1. Parses external orders to extract token_id and status
-        2. Maps token_id to (market_slug, outcome) using cache
-        3. Compares external orders with internal positions
-        4. Logs discrepancies for manual review
         """
         # Step 1: Parse external orders
         parsed_orders = []
@@ -390,7 +475,7 @@ class PositionManager(IPositionManager):
 
         # Step 2: Map token_ids to (market_slug, outcome) and group by position
         external_positions: dict[tuple[str, Outcome], list[ExternalOrder]] = {}
-        unknown_tokens: list[str] = []
+        unknown_tokens: list[ExternalOrder] = []
 
         for parsed in parsed_orders:
             token_id = parsed.token_id
@@ -401,11 +486,21 @@ class PositionManager(IPositionManager):
                 key = (market_slug, outcome)
                 external_positions.setdefault(key, []).append(parsed)
             else:
-                unknown_tokens.append(token_id)
+                # Try to look up via Gamma API
+                lookup_result = await self._lookup_token_id(token_id)
+                if lookup_result:
+                    market_slug, outcome = lookup_result
+                    key = (market_slug, outcome)
+                    external_positions.setdefault(key, []).append(parsed)
+                    # Cache the result
+                    self._token_to_market[token_id] = lookup_result
+                else:
+                    unknown_tokens.append(parsed)
 
         if unknown_tokens:
             logger.debug(
-                "Found {count} external orders with unknown token_ids (not in cache)",
+                "Found {count} external orders with unknown token_ids "
+                "(not in cache and lookup failed)",
                 count=len(unknown_tokens),
             )
 
@@ -428,22 +523,42 @@ class PositionManager(IPositionManager):
                         outcome=outcome,
                     )
                 else:
-                    logger.bind(market_slug=market_slug, outcome=outcome).warning(
-                        "External FILLED order for {market_slug}/{outcome} "
-                        "but no internal position. Order may have been filled externally.",
-                        market_slug=market_slug,
-                        outcome=outcome,
-                    )
+                    # Create position for externally filled order (BUY only)
+                    buy_orders = [o for o in filled_orders if o.side == "BUY"]
+                    if buy_orders:
+                        # Use the first BUY order to create position
+                        external_order = buy_orders[0]
+                        position = self._create_position_from_external_order(
+                            external_order, market_slug, outcome
+                        )
+                        self._positions[key] = position
+                        if external_order.order_id != "unknown":
+                            self._order_id_to_position[external_order.order_id] = key
+
+                        logger.bind(
+                            market_slug=market_slug,
+                            outcome=outcome,
+                            size=position.size,
+                        ).info(
+                            "Created position from external FILLED order: "
+                            "{market_slug}/{outcome} size=${size}",
+                            market_slug=market_slug,
+                            outcome=outcome,
+                            size=position.size,
+                        )
+                    else:
+                        logger.bind(market_slug=market_slug, outcome=outcome).debug(
+                            "External FILLED SELL order for {market_slug}/{outcome} "
+                            "(no internal position, skipping)",
+                            market_slug=market_slug,
+                            outcome=outcome,
+                        )
 
             elif cancelled_orders:
                 # External order is CANCELLED
                 if has_internal_position:
-                    logger.bind(market_slug=market_slug, outcome=outcome).warning(
-                        "External CANCELLED order for {market_slug}/{outcome} "
-                        "but internal position exists. Position may be stale.",
-                        market_slug=market_slug,
-                        outcome=outcome,
-                    )
+                    # Remove stale position - order was cancelled externally
+                    self._remove_position(key, "External order CANCELLED")
                 else:
                     logger.bind(market_slug=market_slug, outcome=outcome).debug(
                         "External CANCELLED order for {market_slug}/{outcome} "

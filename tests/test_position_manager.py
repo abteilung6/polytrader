@@ -441,9 +441,115 @@ async def test_position_manager_reconciles_with_external_orders() -> None:
     # Reconcile
     await manager._reconcile_positions(external_orders)
 
-    # Verify position still exists (reconciliation only logs, doesn't modify yet)
+    # Verify position still exists (confirmed by external order)
     positions = manager.get_positions()
     assert ("test-market", "UP") in positions
+
+
+@pytest.mark.asyncio
+async def test_position_manager_removes_stale_positions() -> None:
+    """Test that PositionManager removes positions when external orders are CANCELLED."""
+    bus = EventBus()
+    clob_factory = create_fake_clob_factory()
+    gamma_client = MagicMock(spec=GammaClient)
+
+    manager = PositionManager(
+        bus=bus,
+        clob_client_factory=clob_factory,
+        gamma_client=gamma_client,
+        sync_interval=0,
+    )
+
+    # Create a position
+    buy_order = Order(
+        ts=time.time(),
+        market_slug="test-market",
+        outcome="UP",
+        side="BUY",
+        size=1.0,
+        target_price=0.50,
+        proposal_reason="Test buy",
+        response={"order_id": "123", "status": "filled"},
+    )
+    await manager._handle_order(buy_order)
+
+    # Mock market for token_id lookup
+    market = MagicMock()
+    market.get_token_id.return_value = "token-123"
+    gamma_client.get_market_by_slug.return_value = market
+
+    # Cache the token_id
+    await manager._cache_token_id("test-market", "UP")
+
+    # Verify position exists
+    positions = manager.get_positions()
+    assert ("test-market", "UP") in positions
+
+    # Create external CANCELLED order
+    external_orders = [
+        {
+            "token_id": "token-123",
+            "status": "CANCELLED",
+            "side": "BUY",
+            "size": "1.0",
+            "order_id": "123",
+        },
+    ]
+
+    # Reconcile
+    await manager._reconcile_positions(external_orders)
+
+    # Verify position was removed
+    positions = manager.get_positions()
+    assert ("test-market", "UP") not in positions
+
+
+@pytest.mark.asyncio
+async def test_position_manager_creates_position_from_external_order() -> None:
+    """Test that PositionManager creates positions for externally filled orders."""
+    bus = EventBus()
+    clob_factory = create_fake_clob_factory()
+    gamma_client = MagicMock(spec=GammaClient)
+
+    manager = PositionManager(
+        bus=bus,
+        clob_client_factory=clob_factory,
+        gamma_client=gamma_client,
+        sync_interval=0,
+    )
+
+    # Mock market for token_id lookup
+    market = MagicMock()
+    market.get_token_id.return_value = "token-123"
+    gamma_client.get_market_by_slug.return_value = market
+
+    # Cache the token_id (simulating a previous trade or lookup)
+    await manager._cache_token_id("test-market", "UP")
+
+    # Verify no position exists
+    positions = manager.get_positions()
+    assert ("test-market", "UP") not in positions
+
+    # Create external FILLED BUY order
+    external_orders = [
+        {
+            "token_id": "token-123",
+            "status": "FILLED",
+            "side": "BUY",
+            "size": "2.0",
+            "order_id": "456",
+        },
+    ]
+
+    # Reconcile
+    await manager._reconcile_positions(external_orders)
+
+    # Verify position was created
+    positions = manager.get_positions()
+    assert ("test-market", "UP") in positions
+    position = positions[("test-market", "UP")]
+    assert position.size == 2.0
+    assert position.order_id == "456"
 
 
 @pytest.mark.asyncio
