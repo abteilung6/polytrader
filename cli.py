@@ -10,11 +10,20 @@ from polytrader.tasks import auto_buy_task, buy_task, predict_task, watch_task
 
 app = typer.Typer(help="Polymarket trading system")
 
+# Create sub-apps for command groups
+market_app = typer.Typer(help="Market operations")
+order_app = typer.Typer(help="Order operations")
+model_app = typer.Typer(help="Trading model operations")
 
-@app.command("watch")
-def watch(
-    market: str = typer.Option(
-        ..., "--market", "-m", help="Market pattern (e.g., 'btc-updown-15m') or market slug"
+app.add_typer(market_app, name="market")
+app.add_typer(order_app, name="order")
+app.add_typer(model_app, name="model")
+
+
+@market_app.command("watch")
+def market_watch(
+    pattern: str = typer.Option(
+        ..., "--pattern", "-p", help="Market pattern (e.g., 'btc-updown-15m') or market slug"
     ),
     frequency: float = typer.Option(1.0, "--frequency", "-f", help="Polling frequency in Hz"),
     limit: int | None = typer.Option(
@@ -25,17 +34,17 @@ def watch(
     """Watch market prices/ticks."""
     _setup_logging(log_file)
 
-    logger.info("Watching market pattern: {market}", market=market)
+    logger.info("Watching market pattern: {pattern}", pattern=pattern)
     logger.info("Outcomes: UP, DOWN (both)")
     logger.info("Frequency: {frequency} Hz", frequency=frequency)
     if limit:
         logger.info("Limit: {limit} ticks", limit=limit)
     logger.info("Press Ctrl+C to stop")
-    asyncio.run(watch_task(market, frequency, limit))
+    asyncio.run(watch_task(pattern, frequency, limit))
 
 
-@app.command("buy")
-def buy(
+@order_app.command("buy")
+def order_buy(
     market: str = typer.Option(..., "--market", "-m", help="Market slug"),
     outcome: str = typer.Option(..., "--outcome", "-o", help="Outcome name (e.g., 'Up', 'Down')"),
     amount: float = typer.Option(..., "--amount", "-a", help="Order amount in USDC"),
@@ -61,8 +70,8 @@ def buy(
     )
 
 
-@app.command("predict")
-def predict(
+@model_app.command("predict")
+def model_predict(
     market: str = typer.Option(
         ..., "--market", "-m", help="Market pattern (e.g., 'btc-updown-15m') or market slug"
     ),
@@ -73,7 +82,7 @@ def predict(
     min_history: int = typer.Option(30, "--min-history", help="Minimum history ticks required"),
     log_file: str | None = typer.Option(None, "--log-file", help="Optional file path to save logs"),
 ) -> None:
-    """Run trading model predictions."""
+    """Run trading model predictions (no order execution)."""
     _setup_logging(log_file)
 
     logger.info("Predicting trades for market pattern: {market}", market=market)
@@ -96,8 +105,8 @@ def predict(
     )
 
 
-@app.command("auto-buy")
-def auto_buy(
+@model_app.command("run")
+def model_run(
     market: str = typer.Option(
         ..., "--market", "-m", help="Market pattern (e.g., 'btc-updown-15m') or market slug"
     ),
@@ -109,10 +118,10 @@ def auto_buy(
     max_trades: int = typer.Option(1, "--max-trades", help="Maximum trades per market"),
     log_file: str | None = typer.Option(None, "--log-file", help="Optional file path to save logs"),
 ) -> None:
-    """Automatically execute trades based on model predictions."""
+    """Run trading model with automatic order execution."""
     _setup_logging(log_file)
 
-    logger.info("Auto-buy mode for market pattern: {market}", market=market)
+    logger.info("Running model for market pattern: {market}", market=market)
     logger.info("Outcomes: UP, DOWN (both)")
     logger.info("Frequency: {frequency} Hz", frequency=frequency)
     logger.info("Buy threshold: {threshold}", threshold=buy_threshold)
