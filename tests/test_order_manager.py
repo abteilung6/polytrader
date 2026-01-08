@@ -30,6 +30,9 @@ class FakeClobClient(IClobClient):
     def set_api_creds(self, creds) -> None:
         pass
 
+    def get_orders(self, params) -> list[dict]:
+        return []
+
 
 async def test_order_manager_executes_valid_proposal() -> None:
     bus = EventBus()
@@ -78,6 +81,7 @@ async def test_order_manager_executes_valid_proposal() -> None:
     assert order.outcome == "UP"
     assert order.side == "BUY"
     assert order.size == 1.0
+    assert order.target_price == 0.50
     assert order.response == {"order_id": "123"}
 
 

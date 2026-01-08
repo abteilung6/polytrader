@@ -153,6 +153,7 @@ class OrderManager(IOrderManager):
                 outcome=proposal.outcome,
                 side=proposal.side,
                 size=proposal.size,
+                target_price=proposal.target_price if proposal.side == "BUY" else None,
                 proposal_reason=proposal.reason,
                 response=response,
             )

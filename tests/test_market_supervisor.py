@@ -1,14 +1,17 @@
 import asyncio
 
 from polytrader.adapters import IMarketDataAdapter
-from polytrader.events import MARKET_CHANGE, ORDERS, PROPOSALS, EventBus
+from polytrader.clob import IClobClient
+from polytrader.events import MARKET_CHANGE, ORDERS, PROPOSALS, TICKS, EventBus
+from polytrader.gamma import GammaClient
 from polytrader.market_discovery import IMarketDiscoveryService
 from polytrader.models.protocol import ITradingModel
 from polytrader.observer import IObserver
 from polytrader.order_manager import IOrderManager, NoOpOrderManager
+from polytrader.position_manager import IPositionManager, PositionManager
 from polytrader.store import MemoryTickStore
 from polytrader.supervisor import MarketSupervisor
-from polytrader.types import MarketChangeEvent, TradeProposal
+from polytrader.types import MarketChangeEvent, MarketTick, Order, Outcome, TradeProposal
 
 
 class FakeAdapter(IMarketDataAdapter):
@@ -390,5 +393,282 @@ async def test_supervisor_with_noop_order_manager_does_not_execute_orders() -> N
 
     try:
         await collect_task
+    except asyncio.CancelledError:
+        pass
+
+
+async def test_supervisor_with_position_manager_end_to_end() -> None:
+    """End-to-end test: Supervisor with PositionManager tracks positions.
+
+    Verifies that PositionManager creates positions from BUY orders,
+    monitors ticks, generates SELL proposals when target is reached,
+    and removes positions after SELL orders.
+    """
+    import time
+    from unittest.mock import MagicMock
+
+    bus = EventBus()
+    store = MemoryTickStore()
+    market_slug = "test-market-1"
+    discovery = FakeDiscoveryService(initial_market=market_slug)
+
+    # Fake CLOB client
+    class FakeClobClient(IClobClient):
+        def get_balance_allowance(self, params) -> dict:
+            return {"balance": "1000000"}
+
+        def create_market_order(self, order_args) -> dict:
+            return {"signed_order": "fake"}
+
+        def post_order(self, signed_order, order_type) -> dict:
+            return {"order_id": "123", "status": "filled"}
+
+        def create_or_derive_api_creds(self) -> dict:
+            return {"api_key": "fake", "api_secret": "fake", "api_passphrase": "fake"}
+
+        def set_api_creds(self, creds) -> None:
+            pass
+
+        def get_orders(self, params) -> list[dict]:
+            return []
+
+    def clob_factory() -> IClobClient:
+        return FakeClobClient()
+
+    # Fake adapter that emits ticks
+    class TickEmittingAdapter(IMarketDataAdapter):
+        def __init__(self, market_slug: str) -> None:
+            self.market_slug = market_slug
+            self._running = False
+
+        async def ticks(self):
+            self._running = True
+            tick_count = 0
+            while self._running:
+                await asyncio.sleep(0.05)
+                # Emit ticks for both UP and DOWN
+                for outcome_str in ["UP", "DOWN"]:
+                    outcome: Outcome = outcome_str  # type: ignore[assignment]
+                    # Start with price below target (0.40), then above target (0.55)
+                    price = 0.40 if tick_count < 2 else 0.55
+                    tick = MarketTick(
+                        ts=time.time(),
+                        market_slug=self.market_slug,
+                        outcome=outcome,
+                        best_bid=price - 0.01,
+                        best_ask=price + 0.01,
+                    )
+                    yield tick
+                tick_count += 1
+                if tick_count >= 3:
+                    break
+
+        def stop(self) -> None:
+            self._running = False
+
+    # Fake observer that just passes ticks through
+    class PassThroughObserver(IObserver):
+        def __init__(self, bus: EventBus, adapter: IMarketDataAdapter, store) -> None:
+            self.bus = bus
+            self.adapter = adapter
+            self._running = False
+
+        async def run(self) -> None:
+            self._running = True
+            async for tick in self.adapter.ticks():
+                await self.bus.publish(TICKS, tick)
+                store.add(tick)
+
+        def stop(self) -> None:
+            self._running = False
+
+    # Fake model that publishes a BUY proposal
+    class ProposalPublishingModel(ITradingModel):
+        def __init__(self, market_slug: str, bus: EventBus) -> None:
+            self.market_slug = market_slug
+            self.bus = bus
+            self._running = False
+            self._proposal_sent = False
+
+        async def run(self) -> None:
+            self._running = True
+            # Subscribe to ticks and publish a proposal on first tick
+            tick_queue = self.bus.subscribe(TICKS)
+            while self._running:
+                try:
+                    tick = await asyncio.wait_for(tick_queue.get(), timeout=0.1)
+                    if not self._proposal_sent and tick.outcome == "UP":
+                        # Publish BUY proposal with target_price
+                        proposal = TradeProposal(
+                            ts=tick.ts,
+                            market_slug=tick.market_slug,
+                            outcome=tick.outcome,
+                            side="BUY",
+                            target_price=0.50,
+                            limit_price=tick.best_ask,
+                            size=1.0,
+                            reason="Test BUY proposal",
+                            ttl_s=10.0,
+                        )
+                        await self.bus.publish(PROPOSALS, proposal)
+                        self._proposal_sent = True
+                except TimeoutError:
+                    continue
+
+        async def on_tick(self, tick) -> None:
+            pass
+
+        def stop(self) -> None:
+            self._running = False
+
+    # Fake order manager that executes orders
+    class ExecutingOrderManager(IOrderManager):
+        def __init__(self, bus: EventBus) -> None:
+            self.bus = bus
+            self._running = False
+
+        async def run(self) -> None:
+            self._running = True
+            proposal_queue = self.bus.subscribe(PROPOSALS)
+            while self._running:
+                try:
+                    proposal = await asyncio.wait_for(proposal_queue.get(), timeout=0.1)
+                    # Execute order immediately
+                    order = Order(
+                        ts=time.time(),
+                        market_slug=proposal.market_slug,
+                        outcome=proposal.outcome,
+                        side=proposal.side,
+                        size=proposal.size,
+                        target_price=proposal.target_price if proposal.side == "BUY" else None,
+                        proposal_reason=proposal.reason,
+                        response={"order_id": f"order-{proposal.side}", "status": "filled"},
+                    )
+                    await self.bus.publish(ORDERS, order)
+                except TimeoutError:
+                    continue
+
+        def stop(self) -> None:
+            self._running = False
+
+    def adapter_factory(slug: str) -> IMarketDataAdapter:
+        return TickEmittingAdapter(slug)
+
+    def observer_factory(adapter: IMarketDataAdapter) -> IObserver:
+        return PassThroughObserver(bus, adapter, store)
+
+    def model_factory(slug: str) -> ITradingModel:
+        return ProposalPublishingModel(slug, bus)
+
+    def order_manager_factory() -> IOrderManager:
+        return ExecutingOrderManager(bus)
+
+    gamma_client = MagicMock(spec=GammaClient)
+
+    def position_manager_factory() -> IPositionManager:
+        return PositionManager(
+            bus=bus,
+            clob_client_factory=clob_factory,
+            gamma_client=gamma_client,
+            sync_interval=0,  # Disable sync for test
+        )
+
+    supervisor = MarketSupervisor(
+        pattern="test-pattern",
+        discovery_service=discovery,
+        adapter_factory=adapter_factory,
+        observer_factory=observer_factory,
+        model_factory=model_factory,
+        order_manager_factory=order_manager_factory,
+        bus=bus,
+        store=store,
+        position_manager_factory=position_manager_factory,
+        monitor_interval=0.1,
+    )
+
+    # Track orders and proposals
+    orders_published = []
+    proposals_published = []
+    order_queue = bus.subscribe(ORDERS)
+    proposal_queue = bus.subscribe(PROPOSALS)
+
+    async def collect_orders() -> None:
+        """Collect orders."""
+        try:
+            while True:
+                order = await asyncio.wait_for(order_queue.get(), timeout=0.5)
+                orders_published.append(order)
+        except TimeoutError:
+            pass
+
+    async def collect_proposals() -> None:
+        """Collect proposals."""
+        try:
+            while True:
+                proposal = await asyncio.wait_for(proposal_queue.get(), timeout=0.5)
+                proposals_published.append(proposal)
+        except TimeoutError:
+            pass
+
+    collect_orders_task = asyncio.create_task(collect_orders())
+    collect_proposals_task = asyncio.create_task(collect_proposals())
+
+    supervisor_task = asyncio.create_task(supervisor.run())
+
+    # Wait for the flow to complete
+    # Give enough time for ticks to be emitted, proposals to be generated,
+    # orders to be executed, and positions to be created
+    await asyncio.sleep(1.0)
+
+    # Verify PositionManager was created
+    assert supervisor.position_manager is not None
+    assert isinstance(supervisor.position_manager, PositionManager)
+
+    # Verify BUY order was executed
+    assert len(orders_published) >= 1, "Expected at least one order (BUY)"
+    buy_order = next((o for o in orders_published if o.side == "BUY"), None)
+    assert buy_order is not None, "Expected BUY order"
+    assert buy_order.target_price == 0.50, "BUY order should have target_price"
+
+    # Verify SELL proposal was generated when target price reached
+    sell_proposals = [p for p in proposals_published if p.side == "SELL"]
+    assert len(sell_proposals) > 0, "Expected SELL proposal when target price reached"
+
+    # Verify SELL order was executed
+    sell_orders = [o for o in orders_published if o.side == "SELL"]
+    assert len(sell_orders) > 0, "Expected SELL order to be executed"
+
+    # Verify position lifecycle: The position was created (evidenced by SELL order)
+    # and then removed after SELL. Since the flow is fast, we verify the end state.
+    final_positions = supervisor.position_manager.get_positions()
+    assert ("test-market-1", "UP") not in final_positions, (
+        "Position should be removed after SELL order. "
+        f"Current positions: {list(final_positions.keys())}"
+    )
+
+    # Verify the complete flow: BUY → Position created → SELL proposal → SELL order
+    # The fact that we have both BUY and SELL orders proves the position existed
+    # and was managed correctly
+    assert len(orders_published) >= 2, (
+        f"Expected at least 2 orders (BUY and SELL), got {len(orders_published)}"
+    )
+
+    supervisor.stop()
+    supervisor_task.cancel()
+    collect_orders_task.cancel()
+    collect_proposals_task.cancel()
+
+    try:
+        await supervisor_task
+    except asyncio.CancelledError:
+        pass
+
+    try:
+        await collect_orders_task
+    except asyncio.CancelledError:
+        pass
+
+    try:
+        await collect_proposals_task
     except asyncio.CancelledError:
         pass

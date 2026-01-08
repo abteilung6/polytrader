@@ -71,6 +71,7 @@ class Order:
         outcome: Market outcome ("UP" or "DOWN")
         side: Trade side ("BUY" or "SELL")
         size: Trade size in USD
+        target_price: Target price for position (from proposal, None for SELL orders)
         proposal_reason: Original reason from the trade proposal
         response: Order response from the CLOB API
     """
@@ -80,8 +81,32 @@ class Order:
     outcome: Outcome
     side: Side
     size: float
+    target_price: float | None
     proposal_reason: str
     response: dict
+
+
+@dataclass(frozen=True)
+class Position:
+    """Active trading position.
+
+    Attributes:
+        market_slug: Market identifier
+        outcome: Outcome ("UP" or "DOWN")
+        size: Position size in USD
+        target_price: Target price to sell at
+        entry_price: Price when position was opened
+        entry_time: Timestamp when position was opened
+        order_id: ID of the BUY order that opened this position
+    """
+
+    market_slug: str
+    outcome: Outcome
+    size: float
+    target_price: float
+    entry_price: float
+    entry_time: float
+    order_id: str | None = None
 
 
 @dataclass(frozen=True)

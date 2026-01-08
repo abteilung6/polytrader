@@ -5,6 +5,7 @@ from py_clob_client.clob_types import (  # type: ignore[import-untyped]
     AssetType,
     BalanceAllowanceParams,
     MarketOrderArgs,
+    OpenOrderParams,
     OrderType,
 )
 
@@ -32,6 +33,19 @@ class IClobClient(Protocol):
 
     def set_api_creds(self, creds: Any) -> None:
         """Set API credentials on the client."""
+        ...
+
+    def get_orders(self, params: Any) -> list[dict[str, Any]]:
+        """Get active orders from Polymarket CLOB.
+
+        Args:
+            params: OpenOrderParams with optional filters:
+                - market: condition_id
+                - id: order_id
+                - asset_id: token_id
+        Returns:
+            List of open order dictionaries
+        """
         ...
 
 
@@ -139,3 +153,26 @@ def create_clob_client_factory(secrets: PolymarketSecrets) -> IClobClientFactory
         return client
 
     return factory
+
+
+def get_active_orders(
+    client: IClobClient,
+    *,
+    market: str | None = None,
+    asset_id: str | None = None,
+) -> list[dict[str, Any]]:
+    """Get active orders from Polymarket.
+
+    Args:
+        client: CLOB client instance
+        market: Condition ID (optional filter)
+        asset_id: Token ID (optional filter)
+
+    Returns:
+        List of active orders from the API
+    """
+    params = OpenOrderParams(
+        market=market,
+        asset_id=asset_id,
+    )
+    return client.get_orders(params)

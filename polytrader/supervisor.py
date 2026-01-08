@@ -11,6 +11,7 @@ from polytrader.market_discovery import IMarketDiscoveryService
 from polytrader.models.protocol import ITradingModel
 from polytrader.observer import IObserver
 from polytrader.order_manager import IOrderManager
+from polytrader.position_manager import IPositionManager
 from polytrader.store import ITickStore
 from polytrader.types import MarketChangeEvent
 
@@ -32,6 +33,7 @@ class MarketSupervisor:
         order_manager_factory: Callable[[], IOrderManager],
         bus: EventBus,
         store: ITickStore,
+        position_manager_factory: Callable[[], IPositionManager] | None = None,
         monitor_interval: float = 30.0,
     ) -> None:
         """Initialize the market supervisor.
@@ -45,6 +47,7 @@ class MarketSupervisor:
             order_manager_factory: Factory function to create order managers
             bus: Event bus for communication
             store: Tick store for historical data
+            position_manager_factory: Factory function to create position managers (optional)
             monitor_interval: How often to check for market changes (seconds)
         """
         self.pattern = pattern
@@ -53,6 +56,7 @@ class MarketSupervisor:
         self.observer_factory = observer_factory
         self.model_factory = model_factory
         self.order_manager_factory = order_manager_factory
+        self.position_manager_factory = position_manager_factory
         self.bus = bus
         self.store = store
         self.monitor_interval = monitor_interval
@@ -63,12 +67,14 @@ class MarketSupervisor:
         self.observer: IObserver | None = None
         self.model: ITradingModel | None = None
         self.order_manager: IOrderManager | None = None
+        self.position_manager: IPositionManager | None = None
 
         # Tasks
         self._running = False
         self._observer_task: asyncio.Task | None = None
         self._model_task: asyncio.Task | None = None
         self._order_manager_task: asyncio.Task | None = None
+        self._position_manager_task: asyncio.Task | None = None
         self._monitor_task: asyncio.Task | None = None
 
     async def run(self) -> None:
@@ -94,6 +100,7 @@ class MarketSupervisor:
                     self._observer_task,
                     self._model_task,
                     self._order_manager_task,
+                    self._position_manager_task,
                     self._monitor_task,
                 ]
                 if t is not None
@@ -133,10 +140,17 @@ class MarketSupervisor:
         self.model = self.model_factory(new_market)
         self.order_manager = self.order_manager_factory()
 
+        # Create position manager if factory provided
+        if self.position_manager_factory:
+            self.position_manager = self.position_manager_factory()
+
         # Start new components
         self._observer_task = asyncio.create_task(self.observer.run())
         self._model_task = asyncio.create_task(self.model.run())
         self._order_manager_task = asyncio.create_task(self.order_manager.run())
+
+        if self.position_manager:
+            self._position_manager_task = asyncio.create_task(self.position_manager.run())
 
         # Publish market change event
         event = MarketChangeEvent(
@@ -158,12 +172,15 @@ class MarketSupervisor:
             self.model.stop()
         if self.order_manager:
             self.order_manager.stop()
+        if self.position_manager:
+            self.position_manager.stop()
 
         # Cancel tasks
         tasks = [
             self._observer_task,
             self._model_task,
             self._order_manager_task,
+            self._position_manager_task,
         ]
 
         for task in tasks:
@@ -178,6 +195,7 @@ class MarketSupervisor:
         self._observer_task = None
         self._model_task = None
         self._order_manager_task = None
+        self._position_manager_task = None
 
     async def _monitor_market(self) -> None:
         """Monitor current market and detect expiration/transitions."""

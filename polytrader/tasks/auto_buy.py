@@ -10,6 +10,7 @@ from polytrader.market_discovery import MarketDiscoveryService
 from polytrader.models import create_model_factory
 from polytrader.observer import create_observer_factory
 from polytrader.order_manager import create_order_manager_factory
+from polytrader.position_manager import create_position_manager_factory
 from polytrader.store import MemoryTickStore
 from polytrader.supervisor import MarketSupervisor
 from polytrader.types import MarketChangeEvent, Order
@@ -142,6 +143,9 @@ async def auto_buy_task(
     order_manager_factory = create_order_manager_factory(
         bus, clob_client_factory, max_trades_per_market=max_trades
     )
+    position_manager_factory = create_position_manager_factory(
+        bus, clob_client_factory, sync_interval=60.0
+    )
 
     supervisor = MarketSupervisor(
         pattern=market_pattern,
@@ -152,6 +156,7 @@ async def auto_buy_task(
         order_manager_factory=order_manager_factory,
         bus=bus,
         store=store,
+        position_manager_factory=position_manager_factory,
     )
 
     order_queue = bus.subscribe(ORDERS)
