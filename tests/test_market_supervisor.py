@@ -1,14 +1,14 @@
 import asyncio
 
 from polytrader.adapters import IMarketDataAdapter
-from polytrader.events import MARKET_CHANGE, EventBus
+from polytrader.events import MARKET_CHANGE, ORDERS, PROPOSALS, EventBus
 from polytrader.market_discovery import IMarketDiscoveryService
 from polytrader.models.protocol import ITradingModel
 from polytrader.observer import IObserver
-from polytrader.order_manager import IOrderManager
+from polytrader.order_manager import IOrderManager, NoOpOrderManager
 from polytrader.store import MemoryTickStore
 from polytrader.supervisor import MarketSupervisor
-from polytrader.types import MarketChangeEvent
+from polytrader.types import MarketChangeEvent, TradeProposal
 
 
 class FakeAdapter(IMarketDataAdapter):
@@ -301,5 +301,94 @@ async def test_supervisor_stops_components_on_transition() -> None:
     task.cancel()
     try:
         await task
+    except asyncio.CancelledError:
+        pass
+
+
+async def test_supervisor_with_noop_order_manager_does_not_execute_orders() -> None:
+    """Test that supervisor with NoOpOrderManager consumes proposals but doesn't execute orders."""
+    bus = EventBus()
+    store = MemoryTickStore()
+    discovery = FakeDiscoveryService(initial_market="test-market-1")
+
+    def adapter_factory(slug: str) -> FakeAdapter:
+        return FakeAdapter(slug)
+
+    def observer_factory(adapter: IMarketDataAdapter) -> FakeObserver:
+        return FakeObserver(bus, adapter, store)
+
+    def model_factory(slug: str) -> FakeModel:
+        return FakeModel(slug)
+
+    def noop_order_manager_factory() -> NoOpOrderManager:
+        return NoOpOrderManager(bus=bus)
+
+    supervisor = MarketSupervisor(
+        pattern="test-pattern",
+        discovery_service=discovery,
+        adapter_factory=adapter_factory,
+        observer_factory=observer_factory,
+        model_factory=model_factory,
+        order_manager_factory=noop_order_manager_factory,
+        bus=bus,
+        store=store,
+        monitor_interval=0.1,
+    )
+
+    # Track orders published
+    orders_published = []
+    order_queue = bus.subscribe(ORDERS)
+
+    async def collect_orders() -> None:
+        """Collect any orders that are published."""
+        try:
+            while True:
+                order = await asyncio.wait_for(order_queue.get(), timeout=0.2)
+                orders_published.append(order)
+        except TimeoutError:
+            pass
+
+    collect_task = asyncio.create_task(collect_orders())
+
+    task = asyncio.create_task(supervisor.run())
+    await asyncio.sleep(0.05)
+
+    # Verify NoOpOrderManager was created
+    assert supervisor.order_manager is not None
+    assert isinstance(supervisor.order_manager, NoOpOrderManager)
+
+    # Publish a proposal (simulating what the model would do)
+    proposal = TradeProposal(
+        ts=1000.0,
+        market_slug="test-market-1",
+        outcome="UP",
+        side="BUY",
+        target_price=0.50,
+        limit_price=0.30,
+        size=1.0,
+        reason="Test proposal",
+        ttl_s=10.0,
+    )
+    await bus.publish(PROPOSALS, proposal)
+
+    # Wait for processing
+    await asyncio.sleep(0.1)
+
+    # Verify no orders were published
+    assert len(orders_published) == 0, (
+        f"Expected no orders with NoOpOrderManager, but got {len(orders_published)} orders"
+    )
+
+    supervisor.stop()
+    task.cancel()
+    collect_task.cancel()
+
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+    try:
+        await collect_task
     except asyncio.CancelledError:
         pass

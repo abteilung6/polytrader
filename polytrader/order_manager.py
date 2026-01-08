@@ -51,6 +51,26 @@ def create_order_manager_factory(
     return factory
 
 
+def create_noop_order_manager_factory(bus: EventBus) -> Callable[[], IOrderManager]:
+    """Create a factory function for a no-op order manager (predict mode).
+
+    The no-op order manager consumes proposals but does not execute orders.
+    This is used in predict mode to prevent order execution while still
+    consuming proposals from the event bus.
+
+    Args:
+        bus: Event bus for subscribing to proposals
+
+    Returns:
+        Factory function that returns a no-op order manager
+    """
+
+    def factory() -> IOrderManager:
+        return NoOpOrderManager(bus=bus)
+
+    return factory
+
+
 class OrderManager(IOrderManager):
     def __init__(
         self,
@@ -231,3 +251,50 @@ class OrderManager(IOrderManager):
     def reset_owned_tokens(self) -> None:
         """Reset owned tokens tracking. Useful for testing."""
         self._owned_tokens.clear()
+
+
+class NoOpOrderManager(IOrderManager):
+    """No-op order manager that consumes proposals without executing orders.
+
+    Used in predict mode to prevent order execution while still consuming
+    proposals from the event bus so they don't accumulate.
+    """
+
+    def __init__(self, bus: EventBus) -> None:
+        """Initialize the no-op order manager.
+
+        Args:
+            bus: Event bus for subscribing to proposals
+        """
+        self.bus = bus
+        self._running = False
+
+    async def run(self) -> None:
+        """Start consuming proposals without executing orders."""
+        self._running = True
+        proposal_queue = self.bus.subscribe(PROPOSALS)
+
+        try:
+            while self._running:
+                proposal = await proposal_queue.get()
+                # Consume proposal but don't execute
+                logger.bind(
+                    market_slug=proposal.market_slug,
+                    outcome=proposal.outcome,
+                    side=proposal.side,
+                ).info(
+                    "Predict mode: consuming proposal (no execution) - "
+                    "{side} {outcome} for {market_slug}",
+                    side=proposal.side,
+                    outcome=proposal.outcome,
+                    market_slug=proposal.market_slug,
+                )
+        except Exception:
+            logger.exception("NoOpOrderManager error")
+            raise
+        finally:
+            self._running = False
+
+    def stop(self) -> None:
+        """Stop the no-op order manager."""
+        self._running = False

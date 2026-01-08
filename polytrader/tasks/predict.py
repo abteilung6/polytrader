@@ -2,14 +2,13 @@ import asyncio
 from collections.abc import Callable
 
 from polytrader.adapters import create_adapter_factory
-from polytrader.clob import create_clob_client_factory
 from polytrader.config import PolymarketSecrets
 from polytrader.events import MARKET_CHANGE, PROPOSALS, EventBus
 from polytrader.logging_config import logger
 from polytrader.market_discovery import MarketDiscoveryService
 from polytrader.models import create_model_factory
 from polytrader.observer import create_observer_factory
-from polytrader.order_manager import create_order_manager_factory
+from polytrader.order_manager import create_noop_order_manager_factory
 from polytrader.store import MemoryTickStore
 from polytrader.supervisor import MarketSupervisor
 from polytrader.types import MarketChangeEvent, TradeProposal
@@ -98,10 +97,8 @@ async def predict_task(
         size=size,
         min_history=min_history,
     )
-    clob_client_factory = create_clob_client_factory(secrets)
-    order_manager_factory = create_order_manager_factory(
-        bus, clob_client_factory, max_trades_per_market=1
-    )
+    # Use no-op order manager in predict mode - consumes proposals but doesn't execute orders
+    order_manager_factory = create_noop_order_manager_factory(bus)
 
     supervisor = MarketSupervisor(
         pattern=market_pattern,
