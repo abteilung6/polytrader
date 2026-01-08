@@ -4,7 +4,7 @@ import asyncio
 from collections.abc import Callable
 from typing import Any, Protocol
 
-from polytrader.clob import IClobClientFactory, get_active_orders
+from polytrader.clob import ExternalOrder, IClobClientFactory, get_active_orders
 from polytrader.events import ORDERS, PROPOSALS, TICKS, EventBus
 from polytrader.gamma import GammaClient
 from polytrader.logging_config import logger
@@ -85,6 +85,10 @@ class PositionManager(IPositionManager):
 
         # Track order IDs for reconciliation: order_id -> (market_slug, outcome)
         self._order_id_to_position: dict[str, tuple[str, Outcome]] = {}
+
+        # Token ID to market mapping for external order reconciliation
+        # token_id -> (market_slug, outcome)
+        self._token_to_market: dict[str, tuple[str, Outcome]] = {}
 
         self._running = False
 
@@ -189,6 +193,9 @@ class PositionManager(IPositionManager):
 
             self._positions[key] = position
             self._order_id_to_position[order_id] = key
+
+            # Store token_id mapping for external order reconciliation
+            await self._cache_token_id(order.market_slug, order.outcome)
 
             logger.bind(
                 market_slug=order.market_slug,
@@ -305,29 +312,170 @@ class PositionManager(IPositionManager):
         except Exception:
             logger.exception("Error syncing with external API")
 
+    async def _cache_token_id(self, market_slug: str, outcome: Outcome) -> None:
+        """Cache token_id for a market/outcome pair.
+
+        This enables reverse lookup from external orders (which have token_id)
+        to our internal positions (which use market_slug/outcome).
+
+        Args:
+            market_slug: Market slug
+            outcome: Outcome ("UP" or "DOWN")
+        """
+        try:
+            market = await asyncio.to_thread(self.gamma_client.get_market_by_slug, market_slug)
+            token_id = market.get_token_id(outcome)
+            self._token_to_market[token_id] = (market_slug, outcome)
+            logger.bind(market_slug=market_slug, outcome=outcome, token_id=token_id).debug(
+                "Cached token_id {token_id} for {market_slug}/{outcome}",
+                token_id=token_id,
+                market_slug=market_slug,
+                outcome=outcome,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to cache token_id for {market_slug}/{outcome}",
+                market_slug=market_slug,
+                outcome=outcome,
+            )
+
+    def _parse_external_order(self, order_data: dict[str, Any]) -> ExternalOrder | None:
+        """Parse external order and extract relevant information.
+
+        Args:
+            order_data: Raw order dictionary from Polymarket API
+
+        Returns:
+            ExternalOrder if parseable, None otherwise
+        """
+        return ExternalOrder.from_api_response(order_data)
+
+    def _get_market_from_token(self, token_id: str) -> tuple[str, Outcome] | None:
+        """Get market_slug and outcome from token_id.
+
+        Uses the internal cache. Returns None if token_id not found in cache.
+
+        Args:
+            token_id: Token ID from external order
+
+        Returns:
+            Tuple of (market_slug, outcome) if found, None otherwise
+        """
+        return self._token_to_market.get(token_id)
+
     async def _reconcile_positions(self, external_orders: list[dict[str, Any]]) -> None:
         """Reconcile internal positions with external orders.
 
         Args:
             external_orders: List of order dictionaries from external API
 
-        Note:
-            This is a placeholder implementation. Full reconciliation requires
-            parsing external order structure to extract market/outcome information.
+        This implementation:
+        1. Parses external orders to extract token_id and status
+        2. Maps token_id to (market_slug, outcome) using cache
+        3. Compares external orders with internal positions
+        4. Logs discrepancies for manual review
         """
+        # Step 1: Parse external orders
+        parsed_orders = []
         for order_data in external_orders:
-            # Extract market and outcome from external order
-            # This requires parsing the order structure
-            # For now, we'll skip detailed parsing and just log
-            logger.debug("External order: {order}", order=order_data)
+            parsed = self._parse_external_order(order_data)
+            if parsed:
+                parsed_orders.append(parsed)
 
-        # Check for positions we have but external doesn't show
-        # (could be filled, cancelled, or expired)
-        # For now, we'll keep the position and let it be handled by normal flow
+        if not parsed_orders:
+            logger.debug("No parseable external orders found")
+            return
+
+        logger.debug("Parsed {count} external orders", count=len(parsed_orders))
+
+        # Step 2: Map token_ids to (market_slug, outcome) and group by position
+        external_positions: dict[tuple[str, Outcome], list[ExternalOrder]] = {}
+        unknown_tokens: list[str] = []
+
+        for parsed in parsed_orders:
+            token_id = parsed.token_id
+            market_info = self._get_market_from_token(token_id)
+
+            if market_info:
+                market_slug, outcome = market_info
+                key = (market_slug, outcome)
+                external_positions.setdefault(key, []).append(parsed)
+            else:
+                unknown_tokens.append(token_id)
+
+        if unknown_tokens:
+            logger.debug(
+                "Found {count} external orders with unknown token_ids (not in cache)",
+                count=len(unknown_tokens),
+            )
+
+        # Step 3: Compare external orders with internal positions
+        for key, external_orders_list in external_positions.items():
+            market_slug, outcome = key
+            has_internal_position = key in self._positions
+
+            # Find most relevant external order (prefer FILLED, then most recent)
+            filled_orders = [o for o in external_orders_list if o.status == "FILLED"]
+            cancelled_orders = [o for o in external_orders_list if o.status == "CANCELLED"]
+            open_orders = [o for o in external_orders_list if o.status == "OPEN"]
+
+            if filled_orders:
+                # External order is FILLED
+                if has_internal_position:
+                    logger.bind(market_slug=market_slug, outcome=outcome).debug(
+                        "Position {market_slug}/{outcome} confirmed by external FILLED order",
+                        market_slug=market_slug,
+                        outcome=outcome,
+                    )
+                else:
+                    logger.bind(market_slug=market_slug, outcome=outcome).warning(
+                        "External FILLED order for {market_slug}/{outcome} "
+                        "but no internal position. Order may have been filled externally.",
+                        market_slug=market_slug,
+                        outcome=outcome,
+                    )
+
+            elif cancelled_orders:
+                # External order is CANCELLED
+                if has_internal_position:
+                    logger.bind(market_slug=market_slug, outcome=outcome).warning(
+                        "External CANCELLED order for {market_slug}/{outcome} "
+                        "but internal position exists. Position may be stale.",
+                        market_slug=market_slug,
+                        outcome=outcome,
+                    )
+                else:
+                    logger.bind(market_slug=market_slug, outcome=outcome).debug(
+                        "External CANCELLED order for {market_slug}/{outcome} "
+                        "(no internal position)",
+                        market_slug=market_slug,
+                        outcome=outcome,
+                    )
+
+            elif open_orders:
+                # External order is OPEN (pending)
+                logger.bind(market_slug=market_slug, outcome=outcome).debug(
+                    "External OPEN order for {market_slug}/{outcome} (pending)",
+                    market_slug=market_slug,
+                    outcome=outcome,
+                )
+
+        # Step 4: Check for internal positions without external orders
+        for key in self._positions:
+            market_slug, outcome = key
+            if key not in external_positions:
+                logger.bind(market_slug=market_slug, outcome=outcome).debug(
+                    "Internal position {market_slug}/{outcome} has no external orders. "
+                    "May be filled externally or order expired.",
+                    market_slug=market_slug,
+                    outcome=outcome,
+                )
 
         logger.debug(
-            "Position sync complete: {count} internal positions",
-            count=len(self._positions),
+            "Position sync complete: {internal_count} internal positions, "
+            "{external_count} external positions mapped",
+            internal_count=len(self._positions),
+            external_count=len(external_positions),
         )
 
     def stop(self) -> None:

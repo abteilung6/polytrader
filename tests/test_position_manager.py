@@ -282,3 +282,191 @@ async def test_position_manager_handles_multiple_positions() -> None:
     assert len(positions) == 2
     assert ("test-market", "UP") in positions
     assert ("test-market", "DOWN") in positions
+
+
+@pytest.mark.asyncio
+async def test_position_manager_caches_token_id() -> None:
+    """Test that PositionManager caches token_id when creating positions."""
+    bus = EventBus()
+    clob_factory = create_fake_clob_factory()
+    gamma_client = MagicMock(spec=GammaClient)
+
+    # Mock market with token_id
+    market = MagicMock()
+    market.get_token_id.return_value = "token-123"
+    gamma_client.get_market_by_slug.return_value = market
+
+    manager = PositionManager(
+        bus=bus,
+        clob_client_factory=clob_factory,
+        gamma_client=gamma_client,
+        sync_interval=0,
+    )
+
+    # Create a BUY order
+    order = Order(
+        ts=time.time(),
+        market_slug="test-market",
+        outcome="UP",
+        side="BUY",
+        size=1.0,
+        target_price=0.50,
+        proposal_reason="Test buy",
+        response={"order_id": "123", "status": "filled"},
+    )
+
+    # Process the order
+    await manager._handle_order(order)
+
+    # Verify token_id was cached
+    market_info = manager._get_market_from_token("token-123")
+    assert market_info is not None
+    assert market_info == ("test-market", "UP")
+
+    # Verify Gamma API was called
+    gamma_client.get_market_by_slug.assert_called_once_with("test-market")
+    market.get_token_id.assert_called_once_with("UP")
+
+
+@pytest.mark.asyncio
+async def test_position_manager_parses_external_order() -> None:
+    """Test that PositionManager can parse external orders."""
+    bus = EventBus()
+    clob_factory = create_fake_clob_factory()
+    gamma_client = MagicMock(spec=GammaClient)
+
+    manager = PositionManager(
+        bus=bus,
+        clob_client_factory=clob_factory,
+        gamma_client=gamma_client,
+        sync_interval=0,
+    )
+
+    # Test various order formats
+    order1 = {
+        "token_id": "token-123",
+        "status": "FILLED",
+        "side": "BUY",
+        "size": "1.0",
+        "order_id": "123",
+    }
+    parsed1 = manager._parse_external_order(order1)
+    assert parsed1 is not None
+    assert parsed1.token_id == "token-123"
+    assert parsed1.status == "FILLED"
+    assert parsed1.side == "BUY"
+    assert parsed1.size == 1.0
+    assert parsed1.order_id == "123"
+
+    # Test with asset_id
+    order2 = {
+        "asset_id": "token-456",
+        "status": "CANCELLED",
+        "side": "SELL",
+        "amount": "2.0",
+        "id": "456",
+    }
+    parsed2 = manager._parse_external_order(order2)
+    assert parsed2 is not None
+    assert parsed2.token_id == "token-456"
+    assert parsed2.status == "CANCELLED"
+    assert parsed2.side == "SELL"
+    assert parsed2.size == 2.0
+
+    # Test with nested asset
+    order3 = {"asset": {"token_id": "token-789"}, "status": "OPEN", "side": "BUY", "size": "3.0"}
+    parsed3 = manager._parse_external_order(order3)
+    assert parsed3 is not None
+    assert parsed3.token_id == "token-789"
+
+    # Test with missing token_id
+    order4 = {"status": "FILLED", "side": "BUY"}
+    parsed4 = manager._parse_external_order(order4)
+    assert parsed4 is None
+
+
+@pytest.mark.asyncio
+async def test_position_manager_reconciles_with_external_orders() -> None:
+    """Test that PositionManager reconciles internal positions with external orders."""
+    bus = EventBus()
+    clob_factory = create_fake_clob_factory()
+    gamma_client = MagicMock(spec=GammaClient)
+
+    manager = PositionManager(
+        bus=bus,
+        clob_client_factory=clob_factory,
+        gamma_client=gamma_client,
+        sync_interval=0,
+    )
+
+    # Create a position and cache its token_id
+    buy_order = Order(
+        ts=time.time(),
+        market_slug="test-market",
+        outcome="UP",
+        side="BUY",
+        size=1.0,
+        target_price=0.50,
+        proposal_reason="Test buy",
+        response={"order_id": "123", "status": "filled"},
+    )
+    await manager._handle_order(buy_order)
+
+    # Mock market for token_id lookup
+    market = MagicMock()
+    market.get_token_id.return_value = "token-123"
+    gamma_client.get_market_by_slug.return_value = market
+
+    # Cache the token_id
+    await manager._cache_token_id("test-market", "UP")
+
+    # Create external orders
+    external_orders = [
+        {
+            "token_id": "token-123",
+            "status": "FILLED",
+            "side": "BUY",
+            "size": "1.0",
+            "order_id": "123",
+        },
+        {
+            "token_id": "token-456",  # Unknown token
+            "status": "FILLED",
+            "side": "BUY",
+            "size": "1.0",
+            "order_id": "456",
+        },
+    ]
+
+    # Reconcile
+    await manager._reconcile_positions(external_orders)
+
+    # Verify position still exists (reconciliation only logs, doesn't modify yet)
+    positions = manager.get_positions()
+    assert ("test-market", "UP") in positions
+
+
+@pytest.mark.asyncio
+async def test_position_manager_get_market_from_token() -> None:
+    """Test that PositionManager can look up market from token_id."""
+    bus = EventBus()
+    clob_factory = create_fake_clob_factory()
+    gamma_client = MagicMock(spec=GammaClient)
+
+    manager = PositionManager(
+        bus=bus,
+        clob_client_factory=clob_factory,
+        gamma_client=gamma_client,
+        sync_interval=0,
+    )
+
+    # Initially, token not in cache
+    assert manager._get_market_from_token("token-123") is None
+
+    # Add to cache
+    manager._token_to_market["token-123"] = ("test-market", "UP")
+
+    # Now should find it
+    market_info = manager._get_market_from_token("token-123")
+    assert market_info is not None
+    assert market_info == ("test-market", "UP")
