@@ -1,11 +1,8 @@
-import logging
-
 from polytrader.events import PROPOSALS, TICKS, EventBus
+from polytrader.logging_config import logger
 from polytrader.models.protocol import ITradingModel
 from polytrader.store import ITickStore
 from polytrader.types import MarketTick, Outcome, TradeProposal
-
-logger = logging.getLogger(__name__)
 
 
 class SimpleThresholdModel(ITradingModel):
@@ -39,8 +36,8 @@ class SimpleThresholdModel(ITradingModel):
             while self._running:
                 tick = await tick_queue.get()
                 await self.on_tick(tick)
-        except Exception as e:
-            logger.error(f"Model error: {e}", exc_info=True)
+        except Exception:
+            logger.exception("Model error")
             raise
         finally:
             self._running = False
@@ -66,8 +63,9 @@ class SimpleThresholdModel(ITradingModel):
         history = self.store.history(tick.market_slug, tick.outcome)
         if len(history) < self.min_history:
             logger.debug(
-                f"Insufficient history: {len(history)}/{self.min_history} ticks. "
-                f"Market: {tick.market_slug}, Outcome: {tick.outcome}"
+                "Insufficient history: {current}/{required} ticks",
+                current=len(history),
+                required=self.min_history,
             )
             return
 
@@ -88,7 +86,9 @@ class SimpleThresholdModel(ITradingModel):
                 ),
             )
             await self.bus.publish(PROPOSALS, proposal)
-            logger.info(f"Published BUY proposal for {tick.outcome}: {proposal.reason}")
+            logger.bind(market_slug=tick.market_slug, outcome=tick.outcome, price=mid_price).info(
+                "Published BUY proposal: {reason}", reason=proposal.reason
+            )
 
         # Generate SELL proposal if price above threshold
         elif mid_price > sell_thresh:
@@ -105,11 +105,16 @@ class SimpleThresholdModel(ITradingModel):
                 ),
             )
             await self.bus.publish(PROPOSALS, proposal)
-            logger.info(f"Published SELL proposal for {tick.outcome}: {proposal.reason}")
+            logger.bind(market_slug=tick.market_slug, outcome=tick.outcome, price=mid_price).info(
+                "Published SELL proposal: {reason}", reason=proposal.reason
+            )
         else:
             logger.debug(
-                f"No proposal for {tick.outcome}: price {mid_price:.4f} between thresholds "
-                f"(buy: {buy_thresh}, sell: {sell_thresh})"
+                "No proposal: price {price:.4f} between thresholds "
+                "(buy: {buy_thresh}, sell: {sell_thresh})",
+                price=mid_price,
+                buy_thresh=buy_thresh,
+                sell_thresh=sell_thresh,
             )
 
     def stop(self) -> None:

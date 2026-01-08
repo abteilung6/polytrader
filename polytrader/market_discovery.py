@@ -1,15 +1,13 @@
 """Market discovery service for finding active recurring markets."""
 
 import asyncio
-import logging
 import re
 import time
 from dataclasses import dataclass
 from typing import Protocol
 
 from polytrader.gamma import GammaClient
-
-logger = logging.getLogger(__name__)
+from polytrader.logging_config import logger
 
 
 @dataclass(frozen=True)
@@ -164,7 +162,7 @@ class MarketDiscoveryService:
         try:
             market_pattern = MarketPattern.parse(pattern)
         except ValueError as e:
-            logger.error(f"Invalid market pattern: {e}")
+            logger.error("Invalid market pattern: {error}", error=e)
             return None
 
         # Try current window
@@ -191,7 +189,7 @@ class MarketDiscoveryService:
             self._cache_result(pattern, next_slug)
             return next_slug
 
-        logger.warning(f"No active market found for pattern: {pattern}")
+        logger.warning("No active market found for pattern: {pattern}", pattern=pattern)
         return None
 
     async def get_next_market(self, pattern: str) -> str | None:
@@ -206,7 +204,7 @@ class MarketDiscoveryService:
         try:
             market_pattern = MarketPattern.parse(pattern)
         except ValueError as e:
-            logger.error(f"Invalid market pattern: {e}")
+            logger.error("Invalid market pattern: {error}", error=e)
             return None
 
         next_end = market_pattern.get_next_window_end()
@@ -234,7 +232,7 @@ class MarketDiscoveryService:
             return market is not None
         except Exception as e:
             # 404 or other error means market doesn't exist
-            logger.debug(f"Market {slug} not found: {e}")
+            logger.debug("Market {slug} not found: {error}", slug=slug, error=e)
             return False
 
     def _get_from_cache(self, pattern: str) -> str | None:

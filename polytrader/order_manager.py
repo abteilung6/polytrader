@@ -1,5 +1,4 @@
 import asyncio
-import logging
 import time
 from collections.abc import Callable
 from typing import Any, Protocol
@@ -7,9 +6,8 @@ from typing import Any, Protocol
 from polytrader.clob import IClobClientFactory, place_market_order, verify_usdc_balance
 from polytrader.events import ORDERS, PROPOSALS, EventBus
 from polytrader.gamma import GammaClient
+from polytrader.logging_config import logger
 from polytrader.types import Order, Outcome, TradeProposal
-
-logger = logging.getLogger(__name__)
 
 
 class IOrderManager(Protocol):
@@ -77,8 +75,8 @@ class OrderManager(IOrderManager):
             while self._running:
                 proposal = await proposal_queue.get()
                 await self._process_proposal(proposal)
-        except Exception as e:
-            logger.error(f"OrderManager error: {e}", exc_info=True)
+        except Exception:
+            logger.exception("OrderManager error")
             raise
         finally:
             self._running = False
@@ -88,24 +86,31 @@ class OrderManager(IOrderManager):
             return
 
         if proposal.side == "SELL" and not self._has_tokens(proposal.market_slug, proposal.outcome):
-            logger.info(
-                f"Skipping SELL proposal: no tokens owned for "
-                f"{proposal.market_slug}/{proposal.outcome}. "
-                "Cannot sell tokens you don't own."
+            logger.bind(market_slug=proposal.market_slug, outcome=proposal.outcome).info(
+                "Skipping SELL proposal: no tokens owned. Cannot sell tokens you don't own."
             )
             return
 
         if self._has_traded(proposal.market_slug, proposal.outcome):
-            logger.info(
-                f"Skipping proposal: already traded {proposal.market_slug}/{proposal.outcome}. "
-                f"Limit: {self.max_trades_per_market} trade(s) per market"
+            logger.bind(
+                market_slug=proposal.market_slug,
+                outcome=proposal.outcome,
+                limit=self.max_trades_per_market,
+            ).info(
+                "Skipping proposal: already traded. Limit: {limit} trade(s) per market",
+                limit=self.max_trades_per_market,
             )
             return
 
         try:
-            logger.info(
-                f"Processing {proposal.side} proposal for "
-                f"{proposal.market_slug}/{proposal.outcome}: {proposal.reason}"
+            logger.bind(
+                market_slug=proposal.market_slug,
+                outcome=proposal.outcome,
+                side=proposal.side,
+            ).info(
+                "Processing {side} proposal: {reason}",
+                side=proposal.side,
+                reason=proposal.reason,
             )
 
             response = await self._execute_order(proposal)
@@ -113,10 +118,14 @@ class OrderManager(IOrderManager):
 
             if proposal.side == "BUY":
                 self._owned_tokens.add((proposal.market_slug, proposal.outcome))
-                logger.debug(f"Added {proposal.market_slug}/{proposal.outcome} to owned tokens")
+                logger.bind(market_slug=proposal.market_slug, outcome=proposal.outcome).debug(
+                    "Added to owned tokens"
+                )
             elif proposal.side == "SELL":
                 self._owned_tokens.discard((proposal.market_slug, proposal.outcome))
-                logger.debug(f"Removed {proposal.market_slug}/{proposal.outcome} from owned tokens")
+                logger.bind(market_slug=proposal.market_slug, outcome=proposal.outcome).debug(
+                    "Removed from owned tokens"
+                )
 
             order = Order(
                 ts=time.time(),
@@ -134,40 +143,51 @@ class OrderManager(IOrderManager):
                 if isinstance(response, dict)
                 else "unknown"
             )
-            logger.info(
-                f"✅ Successfully executed {proposal.side} order (ID: {order_id}) for "
-                f"{proposal.market_slug}/{proposal.outcome}: {proposal.reason}"
+            logger.bind(
+                market_slug=proposal.market_slug,
+                outcome=proposal.outcome,
+                side=proposal.side,
+                order_id=order_id,
+            ).info(
+                "✅ Successfully executed {side} order (ID: {order_id}): {reason}",
+                side=proposal.side,
+                order_id=order_id,
+                reason=proposal.reason,
             )
         except Exception as e:
             error_msg = str(e)
             if "not enough balance" in error_msg.lower() or "allowance" in error_msg.lower():
                 if proposal.side == "SELL":
-                    logger.warning(
-                        f"Cannot sell {proposal.market_slug}/{proposal.outcome}: "
-                        f"insufficient token balance. Error: {error_msg}"
+                    logger.bind(market_slug=proposal.market_slug, outcome=proposal.outcome).warning(
+                        "Cannot sell: insufficient token balance. Error: {error}",
+                        error=error_msg,
                     )
                 else:
-                    logger.error(
-                        f"Balance/allowance error executing {proposal.side} order for "
-                        f"{proposal.market_slug}/{proposal.outcome}: {error_msg}. "
-                        "Please check your USDC balance and allowance."
+                    logger.bind(
+                        market_slug=proposal.market_slug,
+                        outcome=proposal.outcome,
+                        side=proposal.side,
+                    ).error(
+                        "Balance/allowance error executing {side} order: {error}. "
+                        "Please check your USDC balance and allowance.",
+                        side=proposal.side,
+                        error=error_msg,
                     )
             else:
-                logger.error(f"Failed to execute order: {e}", exc_info=True)
+                logger.exception("Failed to execute order")
 
     def _is_proposal_valid(self, proposal: TradeProposal) -> bool:
         current_time = time.time()
         age = current_time - proposal.ts
 
         if age > proposal.ttl_s:
-            logger.debug(
-                f"Proposal expired: age {age:.2f}s > TTL {proposal.ttl_s}s. "
-                f"Market: {proposal.market_slug}, Outcome: {proposal.outcome}"
+            logger.bind(market_slug=proposal.market_slug, outcome=proposal.outcome).debug(
+                "Proposal expired: age {age:.2f}s > TTL {ttl}s", age=age, ttl=proposal.ttl_s
             )
             return False
 
         if proposal.size <= 0:
-            logger.warning(f"Invalid proposal size: {proposal.size}. Skipping.")
+            logger.warning("Invalid proposal size: {size}. Skipping.", size=proposal.size)
             return False
 
         return True

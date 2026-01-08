@@ -1,7 +1,6 @@
 """Polymarket market data adapter."""
 
 import asyncio
-import logging
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
@@ -14,9 +13,8 @@ from polytrader.adapters import IMarketDataAdapter
 from polytrader.adapters.prices import unmarshall_token_prices
 from polytrader.config import CHAIN_ID, CLOB_API_URL, PolymarketSecrets
 from polytrader.gamma import GammaClient
+from polytrader.logging_config import logger
 from polytrader.types import MarketTick, Outcome
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -56,7 +54,7 @@ class PolymarketMarketDataAdapter(IMarketDataAdapter):
             creds = self.client.create_or_derive_api_creds()
             self.client.set_api_creds(creds)
         except Exception as e:
-            logger.warning(f"Could not set API credentials: {e}")
+            logger.warning("Could not set API credentials: {error}", error=e)
 
     def _get_token_ids(self) -> dict[Outcome, str]:
         """Get token IDs for all configured outcomes.
@@ -103,8 +101,8 @@ class PolymarketMarketDataAdapter(IMarketDataAdapter):
                 for outcome, token_id in token_ids.items():
                     token_prices = unmarshall_token_prices(response, token_id)
                     if token_prices is None:
-                        logger.warning(
-                            f"No prices found for token_id {token_id} (outcome: {outcome})"
+                        logger.bind(market_slug=self.market_slug, outcome=outcome).warning(
+                            "No prices found for token_id {token_id}", token_id=token_id
                         )
                         continue
 
@@ -129,22 +127,23 @@ class PolymarketMarketDataAdapter(IMarketDataAdapter):
                 if e.status_code == 404 or "No orderbook exists" in error_msg:
                     self._consecutive_failures += 1
                     if self._consecutive_failures >= self._max_failures:
-                        logger.warning(
-                            f"Market {self.market_slug} appears expired "
-                            f"({self._consecutive_failures} consecutive 404s). "
-                            "Supervisor should handle transition."
+                        logger.bind(market_slug=self.market_slug).warning(
+                            "Market appears expired ({failures} consecutive 404s). "
+                            "Supervisor should handle transition.",
+                            failures=self._consecutive_failures,
                         )
                     else:
-                        logger.debug(
-                            f"Market inactive or no orderbook: {self.market_slug}. "
-                            f"Failure count: {self._consecutive_failures}/{self._max_failures}. "
-                            "Skipping tick, will retry."
+                        logger.bind(market_slug=self.market_slug).debug(
+                            "Market inactive or no orderbook. "
+                            "Failure count: {current}/{max}. Skipping tick, will retry.",
+                            current=self._consecutive_failures,
+                            max=self._max_failures,
                         )
                 else:
                     self._consecutive_failures = 0  # Reset on non-404 errors
-                    logger.error(f"API error fetching prices: {e}", exc_info=True)
-            except Exception as e:
+                    logger.exception("API error fetching prices")
+            except Exception:
                 self._consecutive_failures = 0  # Reset on unexpected errors
-                logger.error(f"Unexpected error fetching prices: {e}", exc_info=True)
+                logger.exception("Unexpected error fetching prices")
 
             await asyncio.sleep(1.0 / self.polling_frequency)

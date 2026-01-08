@@ -4,21 +4,44 @@ from collections.abc import Callable
 from polytrader.adapters import create_adapter_factory
 from polytrader.config import PolymarketSecrets
 from polytrader.events import MARKET_CHANGE, TICKS, EventBus
+from polytrader.logging_config import logger
 from polytrader.market_discovery import MarketDiscoveryService
 from polytrader.observer import create_observer_factory
 from polytrader.store import MemoryTickStore
-from polytrader.tasks.formatters import MarketChangeFormatter, TickFormatter
 from polytrader.types import MarketChangeEvent, MarketTick
 
 
 def default_tick_handler(tick: MarketTick, count: int) -> None:
-    """Default handler for tick events - prints compact format to stdout."""
-    print(TickFormatter.format_compact(tick, count))
+    """Default handler for tick events - logs using structured logging."""
+    market_short = tick.market_slug.split("-")[-1] if "-" in tick.market_slug else tick.market_slug
+    logger.bind(
+        market_slug=tick.market_slug,
+        outcome=tick.outcome,
+        count=count,
+    ).info(
+        "#{count:4d}  {market:15s}  {outcome:4s}  "
+        "bid:{bid:.4f} ask:{ask:.4f} mid:{mid:.4f} spread:{spread:.4f}",
+        count=count,
+        market=market_short,
+        outcome=tick.outcome,
+        bid=tick.best_bid,
+        ask=tick.best_ask,
+        mid=tick.mid,
+        spread=abs(tick.spread),
+    )
 
 
 def default_market_change_handler(event: MarketChangeEvent) -> None:
-    """Default handler for market change events - prints compact format to stdout."""
-    print(MarketChangeFormatter.format_compact(event))
+    """Default handler for market change events - logs using structured logging."""
+    if event.old_market:
+        old_short = event.old_market.split("-")[-1] if "-" in event.old_market else event.old_market
+        new_short = event.new_market.split("-")[-1] if "-" in event.new_market else event.new_market
+        logger.bind(old_market=event.old_market, new_market=event.new_market).info(
+            "🔄 Market: {old} → {new}", old=old_short, new=new_short
+        )
+    else:
+        new_short = event.new_market.split("-")[-1] if "-" in event.new_market else event.new_market
+        logger.bind(new_market=event.new_market).info("🚀 Started: {market}", market=new_short)
 
 
 async def watch_task(

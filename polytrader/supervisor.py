@@ -1,20 +1,18 @@
 """Market supervisor for managing component lifecycle and market transitions."""
 
 import asyncio
-import logging
 import time
 from collections.abc import Callable
 
 from polytrader.adapters import IMarketDataAdapter
 from polytrader.events import MARKET_CHANGE, EventBus
+from polytrader.logging_config import logger
 from polytrader.market_discovery import IMarketDiscoveryService
 from polytrader.models.protocol import ITradingModel
 from polytrader.observer import IObserver
 from polytrader.order_manager import IOrderManager
 from polytrader.store import ITickStore
 from polytrader.types import MarketChangeEvent
-
-logger = logging.getLogger(__name__)
 
 
 class MarketSupervisor:
@@ -76,7 +74,7 @@ class MarketSupervisor:
     async def run(self) -> None:
         """Start the supervisor and manage component lifecycle."""
         self._running = True
-        logger.info(f"Starting MarketSupervisor for pattern: {self.pattern}")
+        logger.bind(pattern=self.pattern).info("Starting MarketSupervisor")
 
         # Initial market discovery
         market = await self.discovery.get_current_market(self.pattern)
@@ -116,10 +114,12 @@ class MarketSupervisor:
         old_market = self.current_market
 
         if old_market == new_market:
-            logger.debug(f"Already on market {new_market}, skipping transition")
+            logger.bind(market=new_market).debug("Already on market, skipping transition")
             return
 
-        logger.info(f"Transitioning from {old_market} to {new_market}")
+        logger.bind(old_market=old_market, new_market=new_market).info(
+            "Transitioning from {old_market} to {new_market}"
+        )
 
         # Stop old components
         await self._stop_components()
@@ -146,7 +146,9 @@ class MarketSupervisor:
         )
         await self.bus.publish(MARKET_CHANGE, event)
 
-        logger.info(f"Successfully transitioned to market: {new_market}")
+        logger.bind(new_market=new_market).info(
+            "Successfully transitioned to market: {new_market}", new_market=new_market
+        )
 
     async def _stop_components(self) -> None:
         """Stop all current components."""
@@ -179,7 +181,9 @@ class MarketSupervisor:
 
     async def _monitor_market(self) -> None:
         """Monitor current market and detect expiration/transitions."""
-        logger.info(f"Starting market monitor (checking every {self.monitor_interval}s)")
+        logger.bind(interval=self.monitor_interval).info(
+            "Starting market monitor (checking every {interval}s)"
+        )
 
         while self._running:
             await asyncio.sleep(self.monitor_interval)
@@ -190,15 +194,17 @@ class MarketSupervisor:
 
                 if current and current != self.current_market:
                     # Market has changed
-                    logger.info(f"Market change detected: {self.current_market} → {current}")
+                    logger.bind(old_market=self.current_market, new_market=current).info(
+                        "Market change detected: {old_market} → {new_market}"
+                    )
                     await self._transition_to_market(current)
                 elif not current:
                     # No active market (gap between markets)
                     logger.warning("No active market found, waiting...")
                     # Retry in shorter interval
                     await asyncio.sleep(5.0)
-            except Exception as e:
-                logger.error(f"Error in market monitor: {e}", exc_info=True)
+            except Exception:
+                logger.exception("Error in market monitor")
                 # Continue monitoring despite errors
 
     async def _cleanup(self) -> None:

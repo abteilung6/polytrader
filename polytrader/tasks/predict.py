@@ -5,24 +5,50 @@ from polytrader.adapters import create_adapter_factory
 from polytrader.clob import create_clob_client_factory
 from polytrader.config import PolymarketSecrets
 from polytrader.events import MARKET_CHANGE, PROPOSALS, EventBus
+from polytrader.logging_config import logger
 from polytrader.market_discovery import MarketDiscoveryService
 from polytrader.models import create_model_factory
 from polytrader.observer import create_observer_factory
 from polytrader.order_manager import create_order_manager_factory
 from polytrader.store import MemoryTickStore
 from polytrader.supervisor import MarketSupervisor
-from polytrader.tasks.formatters import MarketChangeFormatter, ProposalFormatter
 from polytrader.types import MarketChangeEvent, TradeProposal
 
 
 def default_proposal_handler(proposal: TradeProposal) -> None:
-    """Default handler for proposal events - prints compact format to stdout."""
-    print(ProposalFormatter.format_compact(proposal))
+    """Default handler for proposal events - logs using structured logging."""
+    market_short = (
+        proposal.market_slug.split("-")[-1] if "-" in proposal.market_slug else proposal.market_slug
+    )
+    logger.bind(
+        market_slug=proposal.market_slug,
+        outcome=proposal.outcome,
+        side=proposal.side,
+        size=proposal.size,
+    ).info(
+        "💡 PROPOSAL  {market:15s}  {outcome:4s}  {side:4s}  ${size:.2f}  "
+        "@{limit_price:.4f}  target:{target_price:.4f}  {reason}",
+        market=market_short,
+        outcome=proposal.outcome,
+        side=proposal.side,
+        size=proposal.size,
+        limit_price=proposal.limit_price,
+        target_price=proposal.target_price,
+        reason=proposal.reason,
+    )
 
 
 def default_market_change_handler(event: MarketChangeEvent) -> None:
-    """Default handler for market change events - prints compact format to stdout."""
-    print(MarketChangeFormatter.format_compact(event))
+    """Default handler for market change events - logs using structured logging."""
+    if event.old_market:
+        old_short = event.old_market.split("-")[-1] if "-" in event.old_market else event.old_market
+        new_short = event.new_market.split("-")[-1] if "-" in event.new_market else event.new_market
+        logger.bind(old_market=event.old_market, new_market=event.new_market).info(
+            "🔄 Market: {old} → {new}", old=old_short, new=new_short
+        )
+    else:
+        new_short = event.new_market.split("-")[-1] if "-" in event.new_market else event.new_market
+        logger.bind(new_market=event.new_market).info("🚀 Started: {market}", market=new_short)
 
 
 async def predict_task(

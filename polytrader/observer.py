@@ -1,13 +1,11 @@
-import logging
 from collections.abc import Callable
 from typing import Protocol
 
 from polytrader.adapters import IMarketDataAdapter
 from polytrader.events import TICKS, EventBus
+from polytrader.logging_config import logger
 from polytrader.store import ITickStore
 from polytrader.types import MarketTick
-
-logger = logging.getLogger(__name__)
 
 
 class IObserver(Protocol):
@@ -56,8 +54,8 @@ class Observer(IObserver):
                 if not self._running:
                     break
                 await self.publish_market_tick(tick)
-        except Exception as e:
-            logger.error(f"Observer error: {e}", exc_info=True)
+        except Exception:
+            logger.exception("Observer error")
             raise
         finally:
             self._running = False

@@ -48,20 +48,20 @@ def verify_usdc_balance(client: IClobClient, *, required_amount: float) -> float
     Raises:
         ValueError: If balance is insufficient
     """
-    import logging
-
-    logger = logging.getLogger(__name__)
+    from polytrader.logging_config import logger
 
     balance_params = BalanceAllowanceParams(asset_type=AssetType.COLLATERAL)
     balance_info = client.get_balance_allowance(balance_params)
 
-    logger.debug(f"Raw balance info from API: {balance_info}")
+    logger.debug("Raw balance info from API: {info}", info=balance_info)
 
     balance_str = balance_info.get("balance", "0") or "0"
     balance = float(balance_str)
 
-    logger.info(f"USDC Balance: {balance} (required: {required_amount})")
-    logger.debug(f"Allowance info: {balance_info.get('allowance', 'N/A')}")
+    logger.info(
+        "USDC Balance: {balance} (required: {required})", balance=balance, required=required_amount
+    )
+    logger.debug("Allowance info: {allowance}", allowance=balance_info.get("allowance", "N/A"))
     logger.info("Allowance: Auto-managed (Magic wallet)")
 
     if balance < required_amount:
@@ -91,11 +91,12 @@ def place_market_order(
     Returns:
         Order response from the API
     """
-    import logging
+    from polytrader.logging_config import logger
 
-    logger = logging.getLogger(__name__)
-
-    logger.info(f"Placing market order: {amount} USDC, side={side}, token_id={token_id[:20]}...")
+    logger.bind(side=side, amount=amount).info(
+        "Placing market order: {amount} USDC, side={side}, token_id={token_id}...",
+        token_id=token_id[:20],
+    )
     market_order = MarketOrderArgs(
         token_id=token_id,
         amount=amount,
@@ -104,15 +105,15 @@ def place_market_order(
     )
     signed_order = client.create_market_order(market_order)
     order_hash = signed_order.get("hash", "N/A")[:20] if isinstance(signed_order, dict) else "N/A"
-    logger.debug(f"Created signed order (hash: {order_hash}...)")
+    logger.debug("Created signed order (hash: {hash}...)", hash=order_hash)
     response: dict[str, Any] = client.post_order(signed_order, OrderType.FOK)
 
     order_id = response.get("order_id") or response.get("id", "unknown")
     status = response.get("status") or response.get("state", "unknown")
-    logger.info(
-        f"Order submitted: ID={order_id}, status={status}, side={side}, amount={amount} USDC"
+    logger.bind(order_id=order_id, status=status, side=side, amount=amount).info(
+        "Order submitted: ID={order_id}, status={status}, side={side}, amount={amount} USDC"
     )
-    logger.debug(f"Full order response: {response}")
+    logger.debug("Full order response: {response}", response=response)
     return response
 
 

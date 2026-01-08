@@ -5,25 +5,88 @@ from polytrader.adapters import create_adapter_factory
 from polytrader.clob import create_clob_client_factory
 from polytrader.config import PolymarketSecrets
 from polytrader.events import MARKET_CHANGE, ORDERS, EventBus
+from polytrader.logging_config import logger
 from polytrader.market_discovery import MarketDiscoveryService
 from polytrader.models import create_model_factory
 from polytrader.observer import create_observer_factory
 from polytrader.order_manager import create_order_manager_factory
 from polytrader.store import MemoryTickStore
 from polytrader.supervisor import MarketSupervisor
-from polytrader.tasks.formatters import MarketChangeFormatter, OrderFormatter
 from polytrader.types import MarketChangeEvent, Order
 
 
 def default_order_handler(order: Order) -> None:
-    """Default handler for order events - prints compact format to stdout."""
-    for line in OrderFormatter.format_compact(order):
-        print(line)
+    """Default handler for order events - logs using structured logging."""
+    market_short = (
+        order.market_slug.split("-")[-1] if "-" in order.market_slug else order.market_slug
+    )
+
+    response = order.response
+    if isinstance(response, dict):
+        order_id = response.get("order_id") or response.get("id") or "N/A"
+        status = response.get("status") or response.get("state") or "N/A"
+        fills = response.get("fills", [])
+
+        fill_info = ""
+        if fills:
+            fill_info = f" ({len(fills)} fill(s))"
+        elif status.lower() not in ["filled", "complete"]:
+            fill_info = " (pending)"
+
+        error_info = ""
+        if "error" in response:
+            error_info = f" ⚠️  {response['error']}"
+
+        logger.bind(
+            market_slug=order.market_slug,
+            outcome=order.outcome,
+            side=order.side,
+            size=order.size,
+            order_id=order_id,
+            status=status,
+        ).info(
+            "✅ ORDER  {market:15s}  {outcome:4s}  {side:4s}  ${size:.2f}  "
+            "ID:{order_id}  {status}{fill_info}{error_info}",
+            market=market_short,
+            outcome=order.outcome,
+            side=order.side,
+            size=order.size,
+            order_id=order_id,
+            status=status,
+            fill_info=fill_info,
+            error_info=error_info,
+        )
+        if order.proposal_reason:
+            logger.bind(market_slug=order.market_slug, outcome=order.outcome).info(
+                "Reason: {reason}", reason=order.proposal_reason
+            )
+    else:
+        logger.bind(
+            market_slug=order.market_slug,
+            outcome=order.outcome,
+            side=order.side,
+            size=order.size,
+        ).info(
+            "✅ ORDER  {market:15s}  {outcome:4s}  {side:4s}  ${size:.2f}  Response: {response}",
+            market=market_short,
+            outcome=order.outcome,
+            side=order.side,
+            size=order.size,
+            response=response,
+        )
 
 
 def default_market_change_handler(event: MarketChangeEvent) -> None:
-    """Default handler for market change events - prints compact format to stdout."""
-    print(MarketChangeFormatter.format_compact(event))
+    """Default handler for market change events - logs using structured logging."""
+    if event.old_market:
+        old_short = event.old_market.split("-")[-1] if "-" in event.old_market else event.old_market
+        new_short = event.new_market.split("-")[-1] if "-" in event.new_market else event.new_market
+        logger.bind(old_market=event.old_market, new_market=event.new_market).info(
+            "🔄 Market: {old} → {new}", old=old_short, new=new_short
+        )
+    else:
+        new_short = event.new_market.split("-")[-1] if "-" in event.new_market else event.new_market
+        logger.bind(new_market=event.new_market).info("🚀 Started: {market}", market=new_short)
 
 
 async def auto_buy_task(
