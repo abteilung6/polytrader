@@ -12,7 +12,7 @@ from polytrader.clob import place_market_order, verify_usdc_balance
 from polytrader.config import CHAIN_ID, CLOB_API_URL, PolymarketSecrets
 from polytrader.core import PortfolioManager
 from polytrader.core.position import Position
-from polytrader.core.strategy_registry import create_strategy
+from polytrader.core.strategies import create_strategy
 from polytrader.events import TICKS, EventBus
 from polytrader.gamma import GammaClient
 from polytrader.market_discovery import MarketSlugGenerator
@@ -967,7 +967,7 @@ def main() -> None:
     scrape_market_group.add_argument("--market", help="Market slug (e.g., btc-updown-15m-1767709800)")
     scrape_market_group.add_argument(
         "--asset",
-        choices=["bitcoin", "btc", "ethereum", "eth"],
+        choices=["bitcoin", "btc", "ethereum", "eth", "solana", "sol", "xrp"],
         help="Asset name (requires --time-period)",
     )
     scrape_parser.add_argument(

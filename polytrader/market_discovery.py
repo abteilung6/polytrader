@@ -59,7 +59,8 @@ class MarketSlugGenerator:
         """Generate the latest 15-minute market slug.
         
         Format: {asset}-updown-15m-{timestamp}
-        Timestamp is aligned to the next 15-minute interval (round up).
+        Timestamp is aligned to the current 15-minute interval (round down).
+        Unix timestamps automatically handle day boundaries, so no special day handling needed.
         """
         short_format, _ = MarketSlugGenerator.normalize_asset(asset)
         

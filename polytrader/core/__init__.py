@@ -3,14 +3,12 @@
 from polytrader.core.manager import PortfolioManager
 from polytrader.core.portfolio import Portfolio
 from polytrader.core.position import Position
-from polytrader.core.strategy import (
-    GabagoolStrategy,
-    Strategy,
-)
-from polytrader.core.strategy_registry import create_strategy, get_strategy_info
+from polytrader.core.strategy import Strategy
+from polytrader.core.strategies import create_strategy, get_strategy_info
 from polytrader.core.trade import TradeDecision
 
-# Import V2 strategy (optional, may not be available)
+# Import strategies
+from polytrader.core.strategies.gabagool.v1 import GabagoolStrategy
 from polytrader.core.strategies.gabagool.v2 import GabagoolV2Strategy
 
 __all__ = [

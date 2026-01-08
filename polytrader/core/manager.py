@@ -283,7 +283,17 @@ class PortfolioManager:
                 return
         
         # Simulated trading: calculate quantity based on amount and price
+        # Validate price to prevent division by zero or infinity
+        if decision.price <= 0 or not (0 < decision.price <= 1.0):
+            print(f"   ⚠️  Warning: Invalid price {decision.price} for trade. Skipping.")
+            return
+        
         quantity = decision.amount / decision.price
+        
+        # Validate quantity is finite
+        if not (0 <= quantity < float('inf')):
+            print(f"   ⚠️  Warning: Invalid quantity {quantity} for trade (price={decision.price}, amount={decision.amount}). Skipping.")
+            return
 
         # Update portfolio (simulated trading, thread-safe)
         with self._portfolio_lock:
@@ -340,11 +350,21 @@ class PortfolioManager:
             if m_id == market_id:
                 positions_to_remove.append((m_id, outcome))
                 
+                # Validate position quantity is finite before calculating payout
+                if not (0 <= position.quantity < float('inf')):
+                    print(f"   ⚠️  Warning: Invalid position quantity {position.quantity} for {outcome}. Skipping payout.")
+                    positions_settled += 1
+                    continue
+                
                 # If this position's outcome matches the winner, pay out $1.00 per share
                 if outcome == winner:
                     payout = position.quantity * 1.0
-                    self.portfolio.balance += payout
-                    total_payout += payout
+                    # Validate payout is finite
+                    if 0 <= payout < float('inf'):
+                        self.portfolio.balance += payout
+                        total_payout += payout
+                    else:
+                        print(f"   ⚠️  Warning: Invalid payout {payout} for {outcome} position. Skipping.")
                 
                 # If it's the loser, payout is $0.00 (nothing added to balance)
                 positions_settled += 1

@@ -2,10 +2,8 @@
 
 from polytrader.core.strategy import Strategy
 
-# Import V1 from original location
-from polytrader.core.strategy import GabagoolStrategy
-
-# Import V2 and V3 from strategies module
+# Import all versions from strategies module
+from polytrader.core.strategies.gabagool.v1 import GabagoolStrategy
 from polytrader.core.strategies.gabagool.v2 import GabagoolV2Strategy
 from polytrader.core.strategies.gabagool.v3 import GabagoolV3Strategy
 
@@ -52,11 +50,11 @@ def create_strategy(strategy_name: str = "gabagool") -> Strategy:
                 f"Available strategies: gabagool (aliases: gaba, paircost, asymmetric, gabagool-v1)"
             )
         return GabagoolV2Strategy(
-            seconds_between_trades=5.0,
+            seconds_between_trades=10.0,
             min_trade_amount_usdc=1.0,
             max_capital_per_market_usdc=1000.0,
             max_shares_per_trade=5.0,
-            share_ratio=1.4,
+            share_ratio=1.3,
             max_buy_price=0.8,
         )
     # New Gabagool V3 (Rebalancing)
@@ -72,7 +70,7 @@ def create_strategy(strategy_name: str = "gabagool") -> Strategy:
             min_trade_amount_usdc=1.0,
             max_capital_per_market_usdc=5000.0,
             min_shares_per_trade=5.0,
-            share_ratio=1.3,
+            share_ratio=1.4,
             max_buy_price=0.8,
         )
     raise ValueError(

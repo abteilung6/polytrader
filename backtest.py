@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from polytrader.core.manager import PortfolioManager
-from polytrader.core.strategy_registry import create_strategy
+from polytrader.core.strategies import create_strategy
 from polytrader.types import MarketTick, Outcome
 
 
@@ -246,6 +246,29 @@ def filter_markets_by_time_window(
     return filtered_markets, market_cutoffs
 
 
+def get_market_start_time(market_slug: str) -> float | None:
+    """Extract start timestamp from market slug.
+    
+    For 15-minute markets: btc-updown-15m-{timestamp}
+    Returns the start timestamp.
+    
+    Args:
+        market_slug: Market slug string
+        
+    Returns:
+        Start timestamp in seconds, or None if can't parse
+    """
+    if "-updown-15m-" in market_slug:
+        try:
+            timestamp_str = market_slug.split("-updown-15m-")[-1]
+            start_timestamp = int(timestamp_str)
+            return float(start_timestamp)
+        except (ValueError, IndexError):
+            return None
+    
+    return None
+
+
 def get_market_expiration_time(market_slug: str) -> float | None:
     """Extract expiration timestamp from market slug.
     
@@ -270,6 +293,161 @@ def get_market_expiration_time(market_slug: str) -> float | None:
     # For other market types, we'd need more logic
     # For now, return None (markets won't expire in backtest)
     return None
+
+
+def filter_complete_markets(
+    markets: dict[str, list[str]],
+    verbose: bool = True,
+) -> dict[str, list[str]]:
+    """Filter markets to only include those that are complete (full 15 min).
+    
+    A market is considered complete if:
+    - It's a 15-minute market
+    - It has data covering the full 15-minute period (from start to expiration)
+    - The latest tick timestamp is >= expiration time (meaning the market has fully expired)
+    - The earliest tick timestamp is <= start time + small tolerance
+    
+    Args:
+        markets: Dictionary mapping market slugs to CSV file paths
+        verbose: Whether to print filtering messages (default: True)
+        
+    Returns:
+        Dictionary of complete markets only
+    """
+    complete_markets: dict[str, list[str]] = {}
+    
+    if verbose:
+        print(f"🔍 Filtering to complete (full 15 min) markets with full data coverage...")
+    
+    for market_id, csv_files in markets.items():
+        start_time = get_market_start_time(market_id)
+        expiration_time = get_market_expiration_time(market_id)
+        
+        if start_time is None or expiration_time is None:
+            # Not a 15-minute market, skip
+            continue
+        
+        # Load all ticks from all CSV files for this market
+        all_ticks: list[MarketTick] = []
+        for csv_file in csv_files:
+            try:
+                ticks = load_ticks_from_csv(csv_file)
+                all_ticks.extend(ticks)
+            except Exception:
+                continue
+        
+        if not all_ticks:
+            # No data for this market
+            continue
+        
+        # Find earliest and latest tick timestamps
+        earliest_tick = min(tick.ts for tick in all_ticks)
+        latest_tick = max(tick.ts for tick in all_ticks)
+        
+        # Market duration in seconds (should be 900 seconds = 15 minutes)
+        market_duration = expiration_time - start_time
+        
+        # Check that we have data covering the full 15-minute period:
+        # 1. Latest tick should be >= expiration time (market has expired)
+        # 2. Earliest tick should be <= start time + tolerance (data starts near beginning)
+        # 3. Data span should cover at least 15 minutes (with small tolerance)
+        data_span = latest_tick - earliest_tick
+        
+        # Tolerance: allow 5 seconds for timing variations
+        tolerance = 5.0
+        
+        has_full_coverage = (
+            latest_tick >= expiration_time - tolerance and
+            earliest_tick <= start_time + tolerance and
+            data_span >= market_duration - tolerance
+        )
+        
+        if has_full_coverage:
+            complete_markets[market_id] = csv_files
+    
+    if verbose:
+        print(f"   Found {len(complete_markets)} complete markets with full 15 min data out of {len(markets)} total")
+    return complete_markets
+
+
+def get_last_n_markets(
+    markets: dict[str, list[str]],
+    n: int = 4,
+) -> dict[str, list[str]]:
+    """Get the last N markets sorted by start time.
+    
+    Args:
+        markets: Dictionary mapping market slugs to CSV file paths
+        n: Number of markets to return (default: 4)
+        
+    Returns:
+        Dictionary of the last N markets
+    """
+    # Create list of (market_id, start_time) tuples
+    market_times: list[tuple[str, float]] = []
+    
+    for market_id in markets.keys():
+        start_time = get_market_start_time(market_id)
+        if start_time is not None:
+            market_times.append((market_id, start_time))
+    
+    # Sort by start time (ascending)
+    market_times.sort(key=lambda x: x[1])
+    
+    # Take last N
+    last_n = market_times[-n:] if len(market_times) > n else market_times
+    
+    # Build result dictionary
+    result: dict[str, list[str]] = {}
+    for market_id, _ in last_n:
+        result[market_id] = markets[market_id]
+    
+    return result
+
+
+def get_last_n_markets_per_asset(
+    markets: dict[str, list[str]],
+    n: int = 4,
+) -> dict[str, list[str]]:
+    """Get the last N complete markets for each asset.
+    
+    Groups markets by asset, filters to complete markets per asset,
+    and returns the last N markets for each asset.
+    
+    Args:
+        markets: Dictionary mapping market slugs to CSV file paths
+        n: Number of markets to return per asset (default: 4)
+        
+    Returns:
+        Dictionary of the last N markets for each asset
+    """
+    # Group markets by asset
+    asset_markets: dict[str, dict[str, list[str]]] = defaultdict(dict)
+    
+    for market_id, csv_files in markets.items():
+        asset = extract_asset_from_market_id(market_id)
+        asset_markets[asset][market_id] = csv_files
+    
+    # Filter to complete markets and get last N for each asset
+    result: dict[str, list[str]] = {}
+    
+    for asset, asset_market_dict in asset_markets.items():
+        # Filter to complete markets for this asset (suppress verbose messages)
+        complete_markets = filter_complete_markets(asset_market_dict, verbose=False)
+        
+        if not complete_markets:
+            print(f"   ⚠️  {asset.upper()}: No complete markets found")
+            continue
+        
+        # Get last N markets for this asset
+        last_n = get_last_n_markets(complete_markets, n=n)
+        
+        # Add to result
+        result.update(last_n)
+        
+        print(f"   ✓ {asset.upper()}: Selected {len(last_n)} complete markets (out of {len(complete_markets)} available)")
+    
+    return result
 
 
 def backtest_market(
@@ -721,11 +899,14 @@ def main() -> None:
             print(f"❌ Market '{args.market}' not found in data")
             return
     else:
-        # Filter to last 8 hours per asset (unless specific market requested)
-        markets, market_cutoffs = filter_markets_by_time_window(markets, hours_window=8.0)
+        # Filter to complete markets (full 15 min) and get last 4 per asset
+        print(f"🔍 Filtering to complete (full 15 min) markets with full data coverage per asset...")
+        markets = get_last_n_markets_per_asset(markets, n=4)
         if not markets:
-            print(f"❌ No markets found within the last 8 hours")
+            print(f"❌ No complete markets found for any asset")
             return
+        
+        print(f"📊 Selected last 4 complete markets per asset (total: {len(markets)} markets) for backtesting")
     
     # Run backtests
     results: list[BacktestResult] = []
