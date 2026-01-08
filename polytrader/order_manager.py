@@ -1,7 +1,8 @@
 import asyncio
 import logging
 import time
-from typing import Any
+from collections.abc import Callable
+from typing import Any, Protocol
 
 from polytrader.clob import IClobClientFactory, place_market_order, verify_usdc_balance
 from polytrader.events import ORDERS, PROPOSALS, EventBus
@@ -11,7 +12,48 @@ from polytrader.types import Order, Outcome, TradeProposal
 logger = logging.getLogger(__name__)
 
 
-class OrderManager:
+class IOrderManager(Protocol):
+    """Protocol for order manager components."""
+
+    async def run(self) -> None:
+        """Start the order manager."""
+        ...
+
+    def stop(self) -> None:
+        """Stop the order manager."""
+        ...
+
+
+def create_order_manager_factory(
+    bus: EventBus,
+    clob_client_factory: IClobClientFactory,
+    gamma_client: GammaClient | None = None,
+    max_trades_per_market: int = 1,
+) -> Callable[[], IOrderManager]:
+    """Create a factory function for IOrderManager.
+
+    Args:
+        bus: Event bus for publishing orders
+        clob_client_factory: Factory for creating CLOB clients
+        gamma_client: Gamma API client (optional)
+        max_trades_per_market: Maximum trades per market/outcome
+
+    Returns:
+        Factory function that returns order manager
+    """
+
+    def factory() -> IOrderManager:
+        return OrderManager(
+            bus=bus,
+            clob_client_factory=clob_client_factory,
+            gamma_client=gamma_client,
+            max_trades_per_market=max_trades_per_market,
+        )
+
+    return factory
+
+
+class OrderManager(IOrderManager):
     def __init__(
         self,
         bus: EventBus,
@@ -164,6 +206,7 @@ class OrderManager:
     def reset_trades(self) -> None:
         """Reset executed trades tracking. Useful for testing."""
         self._executed_trades.clear()
+        self._owned_tokens.clear()
 
     def reset_owned_tokens(self) -> None:
         """Reset owned tokens tracking. Useful for testing."""

@@ -41,6 +41,8 @@ class PolymarketMarketDataAdapter(IMarketDataAdapter):
 
         self.gamma = GammaClient()
         self._token_ids: dict[Outcome, str] = {}
+        self._consecutive_failures = 0
+        self._max_failures = 5  # Emit warning after 5 consecutive 404s
 
         self.client = ClobClient(
             host=CLOB_API_URL,
@@ -97,6 +99,7 @@ class PolymarketMarketDataAdapter(IMarketDataAdapter):
                 response = await asyncio.to_thread(self.client.get_prices, params)
 
                 # Yield one tick per outcome
+                success_count = 0
                 for outcome, token_id in token_ids.items():
                     token_prices = unmarshall_token_prices(response, token_id)
                     if token_prices is None:
@@ -115,17 +118,33 @@ class PolymarketMarketDataAdapter(IMarketDataAdapter):
                         best_bid=best_bid,
                         best_ask=best_ask,
                     )
+                    success_count += 1
+
+                # Reset failure count on successful tick
+                if success_count > 0:
+                    self._consecutive_failures = 0
 
             except PolyApiException as e:
                 error_msg = str(e)
                 if e.status_code == 404 or "No orderbook exists" in error_msg:
-                    logger.warning(
-                        f"Market inactive or no orderbook: {self.market_slug}. "
-                        "Skipping tick, will retry."
-                    )
+                    self._consecutive_failures += 1
+                    if self._consecutive_failures >= self._max_failures:
+                        logger.warning(
+                            f"Market {self.market_slug} appears expired "
+                            f"({self._consecutive_failures} consecutive 404s). "
+                            "Supervisor should handle transition."
+                        )
+                    else:
+                        logger.debug(
+                            f"Market inactive or no orderbook: {self.market_slug}. "
+                            f"Failure count: {self._consecutive_failures}/{self._max_failures}. "
+                            "Skipping tick, will retry."
+                        )
                 else:
+                    self._consecutive_failures = 0  # Reset on non-404 errors
                     logger.error(f"API error fetching prices: {e}", exc_info=True)
             except Exception as e:
+                self._consecutive_failures = 0  # Reset on unexpected errors
                 logger.error(f"Unexpected error fetching prices: {e}", exc_info=True)
 
             await asyncio.sleep(1.0 / self.polling_frequency)

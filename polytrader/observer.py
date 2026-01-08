@@ -1,4 +1,6 @@
 import logging
+from collections.abc import Callable
+from typing import Protocol
 
 from polytrader.adapters import IMarketDataAdapter
 from polytrader.events import TICKS, EventBus
@@ -8,7 +10,39 @@ from polytrader.types import MarketTick
 logger = logging.getLogger(__name__)
 
 
-class Observer:
+class IObserver(Protocol):
+    """Protocol for observer components."""
+
+    async def run(self) -> None:
+        """Start the observer."""
+        ...
+
+    def stop(self) -> None:
+        """Stop the observer."""
+        ...
+
+
+def create_observer_factory(
+    bus: EventBus,
+    store: ITickStore,
+) -> Callable[[IMarketDataAdapter], IObserver]:
+    """Create a factory function for IObserver.
+
+    Args:
+        bus: Event bus for publishing ticks
+        store: Tick store for historical data
+
+    Returns:
+        Factory function that takes adapter and returns observer
+    """
+
+    def factory(adapter: IMarketDataAdapter) -> IObserver:
+        return Observer(bus, adapter, store)
+
+    return factory
+
+
+class Observer(IObserver):
     def __init__(self, bus: EventBus, adapter: IMarketDataAdapter, store: ITickStore) -> None:
         self.bus = bus
         self.adapter = adapter

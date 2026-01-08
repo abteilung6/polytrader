@@ -82,3 +82,18 @@ class Order:
     size: float
     proposal_reason: str
     response: dict
+
+
+@dataclass(frozen=True)
+class MarketChangeEvent:
+    """Event published when market transitions.
+
+    Attributes:
+        old_market: Previous market slug (None if initial)
+        new_market: New market slug
+        timestamp: When transition occurred
+    """
+
+    old_market: str | None
+    new_market: str
+    timestamp: float

@@ -6,15 +6,17 @@ from datetime import datetime
 from py_clob_client.client import ClobClient  # type: ignore[import-untyped]
 from py_clob_client.order_builder.constants import BUY  # type: ignore[import-untyped]
 
-from polytrader.adapters.polymarket import PolymarketAdapterConfig, PolymarketMarketDataAdapter
+from polytrader.adapters import create_adapter_factory
 from polytrader.clob import create_clob_client_factory, place_market_order, verify_usdc_balance
 from polytrader.config import CHAIN_ID, CLOB_API_URL, PolymarketSecrets
-from polytrader.events import ORDERS, PROPOSALS, TICKS, EventBus
+from polytrader.events import MARKET_CHANGE, ORDERS, PROPOSALS, TICKS, EventBus
 from polytrader.gamma import GammaClient
-from polytrader.models import SimpleThresholdModel
-from polytrader.observer import Observer
-from polytrader.order_manager import OrderManager
+from polytrader.market_discovery import MarketDiscoveryService
+from polytrader.models import create_model_factory
+from polytrader.observer import create_observer_factory
+from polytrader.order_manager import create_order_manager_factory
 from polytrader.store import MemoryTickStore
+from polytrader.supervisor import MarketSupervisor
 
 logging.basicConfig(
     level=logging.INFO,
@@ -25,29 +27,44 @@ logging.basicConfig(
 
 async def watch_mode(args: argparse.Namespace) -> None:
     secrets = PolymarketSecrets()
-    config = PolymarketAdapterConfig(
-        market_slug=args.market,
-        polling_frequency_hz=args.frequency,
-        secrets=secrets,
-    )
-
     bus = EventBus()
     store = MemoryTickStore()
-    adapter = PolymarketMarketDataAdapter(config)
-    observer = Observer(bus, adapter, store)
+
+    discovery = MarketDiscoveryService()
+
+    adapter_factory = create_adapter_factory(secrets, polling_frequency_hz=args.frequency)
+    observer_factory = create_observer_factory(bus, store)
+    model_factory = create_model_factory(bus, store)
+    clob_client_factory = create_clob_client_factory(secrets)
+    order_manager_factory = create_order_manager_factory(
+        bus, clob_client_factory, max_trades_per_market=1
+    )
+
+    supervisor = MarketSupervisor(
+        pattern=args.market,
+        discovery_service=discovery,
+        adapter_factory=adapter_factory,
+        observer_factory=observer_factory,
+        model_factory=model_factory,
+        order_manager_factory=order_manager_factory,
+        bus=bus,
+        store=store,
+    )
 
     tick_queue = bus.subscribe(TICKS)
+    market_change_queue = bus.subscribe(MARKET_CHANGE)
 
-    print(f"Watching market: {args.market}")
-    print(f"Outcomes: UP, DOWN (both)")
+    print(f"Watching market pattern: {args.market}")
+    print("Outcomes: UP, DOWN (both)")
     print(f"Frequency: {args.frequency} Hz")
     if args.limit:
         print(f"Limit: {args.limit} ticks")
     print("\nPress Ctrl+C to stop\n")
 
-    observer_task = asyncio.create_task(observer.run())
+    supervisor_task = asyncio.create_task(supervisor.run())
 
-    try:
+    async def handle_ticks() -> None:
+        """Handle tick events."""
         count = 0
         while True:
             tick = await tick_queue.get()
@@ -64,16 +81,37 @@ async def watch_mode(args: argparse.Namespace) -> None:
 
             if args.limit and count >= args.limit:
                 print(f"Reached limit of {args.limit} ticks. Stopping...")
-                observer.stop()
+                supervisor.stop()
                 break
 
+    async def handle_market_changes() -> None:
+        """Handle market change events."""
+        while True:
+            event = await market_change_queue.get()
+            change_time = datetime.fromtimestamp(event.timestamp).strftime("%Y-%m-%d %H:%M:%S")
+            if event.old_market:
+                print(f"\n🔄 Market transition at {change_time}:")
+                print(f"   Old: {event.old_market}")
+                print(f"   New: {event.new_market}\n")
+            else:
+                print(f"\n🚀 Started with market: {event.new_market} at {change_time}\n")
+
+    ticks_task = asyncio.create_task(handle_ticks())
+    market_changes_task = asyncio.create_task(handle_market_changes())
+
+    try:
+        await asyncio.gather(supervisor_task, ticks_task, market_changes_task)
     except KeyboardInterrupt:
         print("\nStopped by user")
-        observer.stop()
+        supervisor.stop()
     finally:
-        observer_task.cancel()
+        supervisor_task.cancel()
+        ticks_task.cancel()
+        market_changes_task.cancel()
         try:
-            await observer_task
+            await supervisor_task
+            await ticks_task
+            await market_changes_task
         except asyncio.CancelledError:
             pass
 
@@ -106,31 +144,42 @@ def buy_mode(args: argparse.Namespace) -> None:
 
 async def predict_mode(args: argparse.Namespace) -> None:
     secrets = PolymarketSecrets()
-    config = PolymarketAdapterConfig(
-        market_slug=args.market,
-        polling_frequency_hz=args.frequency,
-        secrets=secrets,
-    )
-
     bus = EventBus()
     store = MemoryTickStore()
-    adapter = PolymarketMarketDataAdapter(config)
-    observer = Observer(bus, adapter, store)
 
-    model = SimpleThresholdModel(
-        bus=bus,
-        store=store,
-        market_slug=args.market,
+    discovery = MarketDiscoveryService()
+
+    adapter_factory = create_adapter_factory(secrets, polling_frequency_hz=args.frequency)
+    observer_factory = create_observer_factory(bus, store)
+    model_factory = create_model_factory(
+        bus,
+        store,
         buy_threshold=args.buy_threshold,
         sell_threshold=args.sell_threshold,
         size=args.size,
         min_history=args.min_history,
     )
+    clob_client_factory = create_clob_client_factory(secrets)
+    order_manager_factory = create_order_manager_factory(
+        bus, clob_client_factory, max_trades_per_market=1
+    )
+
+    supervisor = MarketSupervisor(
+        pattern=args.market,
+        discovery_service=discovery,
+        adapter_factory=adapter_factory,
+        observer_factory=observer_factory,
+        model_factory=model_factory,
+        order_manager_factory=order_manager_factory,
+        bus=bus,
+        store=store,
+    )
 
     proposal_queue = bus.subscribe(PROPOSALS)
+    market_change_queue = bus.subscribe(MARKET_CHANGE)
 
-    print(f"Predicting trades for market: {args.market}")
-    print(f"Outcomes: UP, DOWN (both)")
+    print(f"Predicting trades for market pattern: {args.market}")
+    print("Outcomes: UP, DOWN (both)")
     print(f"Frequency: {args.frequency} Hz")
     print(f"Buy threshold: {args.buy_threshold}")
     print(f"Sell threshold: {args.sell_threshold}")
@@ -138,10 +187,10 @@ async def predict_mode(args: argparse.Namespace) -> None:
     print(f"Min history: {args.min_history} ticks")
     print("\nPress Ctrl+C to stop\n")
 
-    observer_task = asyncio.create_task(observer.run())
-    model_task = asyncio.create_task(model.run())
+    supervisor_task = asyncio.create_task(supervisor.run())
 
-    try:
+    async def handle_proposals() -> None:
+        """Handle proposal events."""
         while True:
             proposal = await proposal_queue.get()
             print("Trade Proposal:")
@@ -155,54 +204,76 @@ async def predict_mode(args: argparse.Namespace) -> None:
             print(f"  Reason: {proposal.reason}")
             print()
 
+    async def handle_market_changes() -> None:
+        """Handle market change events."""
+        while True:
+            event = await market_change_queue.get()
+            change_time = datetime.fromtimestamp(event.timestamp).strftime("%Y-%m-%d %H:%M:%S")
+            if event.old_market:
+                print(f"\n🔄 Market transition at {change_time}:")
+                print(f"   Old: {event.old_market}")
+                print(f"   New: {event.new_market}\n")
+            else:
+                print(f"\n🚀 Started with market: {event.new_market} at {change_time}\n")
+
+    proposals_task = asyncio.create_task(handle_proposals())
+    market_changes_task = asyncio.create_task(handle_market_changes())
+
+    try:
+        await asyncio.gather(supervisor_task, proposals_task, market_changes_task)
     except KeyboardInterrupt:
         print("\nStopped by user")
-        observer.stop()
-        model.stop()
+        supervisor.stop()
     finally:
-        observer_task.cancel()
-        model_task.cancel()
+        supervisor_task.cancel()
+        proposals_task.cancel()
+        market_changes_task.cancel()
         try:
-            await observer_task
-            await model_task
+            await supervisor_task
+            await proposals_task
+            await market_changes_task
         except asyncio.CancelledError:
             pass
 
 
 async def auto_buy_mode(args: argparse.Namespace) -> None:
     secrets = PolymarketSecrets()
-    config = PolymarketAdapterConfig(
-        market_slug=args.market,
-        polling_frequency_hz=args.frequency,
-        secrets=secrets,
-    )
-
     bus = EventBus()
     store = MemoryTickStore()
-    adapter = PolymarketMarketDataAdapter(config)
-    observer = Observer(bus, adapter, store)
 
-    model = SimpleThresholdModel(
-        bus=bus,
-        store=store,
-        market_slug=args.market,
+    discovery = MarketDiscoveryService()
+
+    adapter_factory = create_adapter_factory(secrets, polling_frequency_hz=args.frequency)
+    observer_factory = create_observer_factory(bus, store)
+    model_factory = create_model_factory(
+        bus,
+        store,
         buy_threshold=args.buy_threshold,
         sell_threshold=args.sell_threshold,
         size=args.size,
         min_history=args.min_history,
     )
-
     clob_client_factory = create_clob_client_factory(secrets)
-    order_manager = OrderManager(
+    order_manager_factory = create_order_manager_factory(
+        bus, clob_client_factory, max_trades_per_market=args.max_trades
+    )
+
+    supervisor = MarketSupervisor(
+        pattern=args.market,
+        discovery_service=discovery,
+        adapter_factory=adapter_factory,
+        observer_factory=observer_factory,
+        model_factory=model_factory,
+        order_manager_factory=order_manager_factory,
         bus=bus,
-        clob_client_factory=clob_client_factory,
-        max_trades_per_market=args.max_trades,
+        store=store,
     )
 
     order_queue = bus.subscribe(ORDERS)
+    market_change_queue = bus.subscribe(MARKET_CHANGE)
 
-    print(f"Auto-buy mode for market: {args.market}")
-    print(f"Outcomes: UP, DOWN (both)")
+    print(f"Auto-buy mode for market pattern: {args.market}")
+    print("Outcomes: UP, DOWN (both)")
     print(f"Frequency: {args.frequency} Hz")
     print(f"Buy threshold: {args.buy_threshold}")
     print(f"Sell threshold: {args.sell_threshold}")
@@ -211,11 +282,10 @@ async def auto_buy_mode(args: argparse.Namespace) -> None:
     print(f"Max trades per outcome: {args.max_trades}")
     print("\nPress Ctrl+C to stop\n")
 
-    observer_task = asyncio.create_task(observer.run())
-    model_task = asyncio.create_task(model.run())
-    order_manager_task = asyncio.create_task(order_manager.run())
+    supervisor_task = asyncio.create_task(supervisor.run())
 
-    try:
+    async def handle_orders() -> None:
+        """Handle order events."""
         while True:
             order = await order_queue.get()
             order_time = datetime.fromtimestamp(order.ts).strftime("%Y-%m-%d %H:%M:%S")
@@ -261,19 +331,34 @@ async def auto_buy_mode(args: argparse.Namespace) -> None:
 
             print("=" * 60 + "\n")
 
+    async def handle_market_changes() -> None:
+        """Handle market change events."""
+        while True:
+            event = await market_change_queue.get()
+            change_time = datetime.fromtimestamp(event.timestamp).strftime("%Y-%m-%d %H:%M:%S")
+            if event.old_market:
+                print(f"\n🔄 Market transition at {change_time}:")
+                print(f"   Old: {event.old_market}")
+                print(f"   New: {event.new_market}\n")
+            else:
+                print(f"\n🚀 Started with market: {event.new_market} at {change_time}\n")
+
+    orders_task = asyncio.create_task(handle_orders())
+    market_changes_task = asyncio.create_task(handle_market_changes())
+
+    try:
+        await asyncio.gather(supervisor_task, orders_task, market_changes_task)
     except KeyboardInterrupt:
         print("\nStopped by user")
-        observer.stop()
-        model.stop()
-        order_manager.stop()
+        supervisor.stop()
     finally:
-        observer_task.cancel()
-        model_task.cancel()
-        order_manager_task.cancel()
+        supervisor_task.cancel()
+        orders_task.cancel()
+        market_changes_task.cancel()
         try:
-            await observer_task
-            await model_task
-            await order_manager_task
+            await supervisor_task
+            await orders_task
+            await market_changes_task
         except asyncio.CancelledError:
             pass
 
@@ -283,7 +368,11 @@ def main() -> None:
     subparsers = parser.add_subparsers(dest="mode", required=True, help="Command to execute")
 
     watch_parser = subparsers.add_parser("watch", help="Watch market prices/ticks")
-    watch_parser.add_argument("--market", required=True, help="Market slug")
+    watch_parser.add_argument(
+        "--market",
+        required=True,
+        help="Market pattern (e.g., 'btc-updown-15m') or market slug",
+    )
     watch_parser.add_argument(
         "--frequency",
         type=float,
@@ -302,7 +391,11 @@ def main() -> None:
     buy_parser.add_argument("--amount", type=float, required=True, help="Order amount in USDC")
 
     predict_parser = subparsers.add_parser("predict", help="Run trading model predictions")
-    predict_parser.add_argument("--market", required=True, help="Market slug")
+    predict_parser.add_argument(
+        "--market",
+        required=True,
+        help="Market pattern (e.g., 'btc-updown-15m') or market slug",
+    )
     predict_parser.add_argument(
         "--frequency",
         type=float,
@@ -337,7 +430,11 @@ def main() -> None:
     auto_buy_parser = subparsers.add_parser(
         "auto-buy", help="Automatically execute trades based on model predictions"
     )
-    auto_buy_parser.add_argument("--market", required=True, help="Market slug")
+    auto_buy_parser.add_argument(
+        "--market",
+        required=True,
+        help="Market pattern (e.g., 'btc-updown-15m') or market slug",
+    )
     auto_buy_parser.add_argument(
         "--frequency",
         type=float,
