@@ -45,17 +45,17 @@ class OrderManager:
         if not self._is_proposal_valid(proposal):
             return
 
-        if proposal.side == "SELL" and not self._has_tokens(proposal.market_id, proposal.outcome):
+        if proposal.side == "SELL" and not self._has_tokens(proposal.market_slug, proposal.outcome):
             logger.info(
                 f"Skipping SELL proposal: no tokens owned for "
-                f"{proposal.market_id}/{proposal.outcome}. "
+                f"{proposal.market_slug}/{proposal.outcome}. "
                 "Cannot sell tokens you don't own."
             )
             return
 
-        if self._has_traded(proposal.market_id, proposal.outcome):
+        if self._has_traded(proposal.market_slug, proposal.outcome):
             logger.info(
-                f"Skipping proposal: already traded {proposal.market_id}/{proposal.outcome}. "
+                f"Skipping proposal: already traded {proposal.market_slug}/{proposal.outcome}. "
                 f"Limit: {self.max_trades_per_market} trade(s) per market"
             )
             return
@@ -63,22 +63,22 @@ class OrderManager:
         try:
             logger.info(
                 f"Processing {proposal.side} proposal for "
-                f"{proposal.market_id}/{proposal.outcome}: {proposal.reason}"
+                f"{proposal.market_slug}/{proposal.outcome}: {proposal.reason}"
             )
 
             response = await self._execute_order(proposal)
-            self._executed_trades.add((proposal.market_id, proposal.outcome))
+            self._executed_trades.add((proposal.market_slug, proposal.outcome))
 
             if proposal.side == "BUY":
-                self._owned_tokens.add((proposal.market_id, proposal.outcome))
-                logger.debug(f"Added {proposal.market_id}/{proposal.outcome} to owned tokens")
+                self._owned_tokens.add((proposal.market_slug, proposal.outcome))
+                logger.debug(f"Added {proposal.market_slug}/{proposal.outcome} to owned tokens")
             elif proposal.side == "SELL":
-                self._owned_tokens.discard((proposal.market_id, proposal.outcome))
-                logger.debug(f"Removed {proposal.market_id}/{proposal.outcome} from owned tokens")
+                self._owned_tokens.discard((proposal.market_slug, proposal.outcome))
+                logger.debug(f"Removed {proposal.market_slug}/{proposal.outcome} from owned tokens")
 
             order = Order(
                 ts=time.time(),
-                market_id=proposal.market_id,
+                market_slug=proposal.market_slug,
                 outcome=proposal.outcome,
                 side=proposal.side,
                 size=proposal.size,
@@ -94,20 +94,20 @@ class OrderManager:
             )
             logger.info(
                 f"✅ Successfully executed {proposal.side} order (ID: {order_id}) for "
-                f"{proposal.market_id}/{proposal.outcome}: {proposal.reason}"
+                f"{proposal.market_slug}/{proposal.outcome}: {proposal.reason}"
             )
         except Exception as e:
             error_msg = str(e)
             if "not enough balance" in error_msg.lower() or "allowance" in error_msg.lower():
                 if proposal.side == "SELL":
                     logger.warning(
-                        f"Cannot sell {proposal.market_id}/{proposal.outcome}: "
+                        f"Cannot sell {proposal.market_slug}/{proposal.outcome}: "
                         f"insufficient token balance. Error: {error_msg}"
                     )
                 else:
                     logger.error(
                         f"Balance/allowance error executing {proposal.side} order for "
-                        f"{proposal.market_id}/{proposal.outcome}: {error_msg}. "
+                        f"{proposal.market_slug}/{proposal.outcome}: {error_msg}. "
                         "Please check your USDC balance and allowance."
                     )
             else:
@@ -120,7 +120,7 @@ class OrderManager:
         if age > proposal.ttl_s:
             logger.debug(
                 f"Proposal expired: age {age:.2f}s > TTL {proposal.ttl_s}s. "
-                f"Market: {proposal.market_id}, Outcome: {proposal.outcome}"
+                f"Market: {proposal.market_slug}, Outcome: {proposal.outcome}"
             )
             return False
 
@@ -130,15 +130,15 @@ class OrderManager:
 
         return True
 
-    def _has_traded(self, market_id: str, outcome: Outcome) -> bool:
-        return (market_id, outcome) in self._executed_trades
+    def _has_traded(self, market_slug: str, outcome: Outcome) -> bool:
+        return (market_slug, outcome) in self._executed_trades
 
-    def _has_tokens(self, market_id: str, outcome: Outcome) -> bool:
+    def _has_tokens(self, market_slug: str, outcome: Outcome) -> bool:
         """Check if we own tokens for this market/outcome."""
-        return (market_id, outcome) in self._owned_tokens
+        return (market_slug, outcome) in self._owned_tokens
 
     async def _execute_order(self, proposal: TradeProposal) -> dict[str, Any]:
-        market = await asyncio.to_thread(self.gamma_client.get_market_by_slug, proposal.market_id)
+        market = await asyncio.to_thread(self.gamma_client.get_market_by_slug, proposal.market_slug)
         token_id = market.get_token_id(proposal.outcome)
 
         client = self.clob_client_factory()

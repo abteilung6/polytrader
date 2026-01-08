@@ -4,7 +4,7 @@ from polytrader.types import MarketTick
 
 def test_memory_tick_store_add() -> None:
     store = MemoryTickStore()
-    tick = MarketTick(ts=1.0, market_id="test", outcome="UP", best_bid=0.49, best_ask=0.51)
+    tick = MarketTick(ts=1.0, market_slug="test", outcome="UP", best_bid=0.49, best_ask=0.51)
 
     store.add(tick)
 
@@ -14,8 +14,8 @@ def test_memory_tick_store_add() -> None:
 
 def test_memory_tick_store_latest() -> None:
     store = MemoryTickStore()
-    tick1 = MarketTick(ts=1.0, market_id="test", outcome="UP", best_bid=0.49, best_ask=0.51)
-    tick2 = MarketTick(ts=2.0, market_id="test", outcome="UP", best_bid=0.50, best_ask=0.52)
+    tick1 = MarketTick(ts=1.0, market_slug="test", outcome="UP", best_bid=0.49, best_ask=0.51)
+    tick2 = MarketTick(ts=2.0, market_slug="test", outcome="UP", best_bid=0.50, best_ask=0.52)
 
     store.add(tick1)
     store.add(tick2)
@@ -33,9 +33,9 @@ def test_memory_tick_store_latest_none() -> None:
 
 def test_memory_tick_store_history() -> None:
     store = MemoryTickStore()
-    tick1 = MarketTick(ts=1.0, market_id="test", outcome="UP", best_bid=0.49, best_ask=0.51)
-    tick2 = MarketTick(ts=2.0, market_id="test", outcome="UP", best_bid=0.50, best_ask=0.52)
-    tick3 = MarketTick(ts=3.0, market_id="test", outcome="UP", best_bid=0.51, best_ask=0.53)
+    tick1 = MarketTick(ts=1.0, market_slug="test", outcome="UP", best_bid=0.49, best_ask=0.51)
+    tick2 = MarketTick(ts=2.0, market_slug="test", outcome="UP", best_bid=0.50, best_ask=0.52)
+    tick3 = MarketTick(ts=3.0, market_slug="test", outcome="UP", best_bid=0.51, best_ask=0.53)
 
     store.add(tick1)
     store.add(tick2)
@@ -54,8 +54,8 @@ def test_memory_tick_store_history_empty() -> None:
 
 def test_memory_tick_store_separate_markets() -> None:
     store = MemoryTickStore()
-    tick1 = MarketTick(ts=1.0, market_id="market1", outcome="UP", best_bid=0.49, best_ask=0.51)
-    tick2 = MarketTick(ts=2.0, market_id="market2", outcome="UP", best_bid=0.50, best_ask=0.52)
+    tick1 = MarketTick(ts=1.0, market_slug="market1", outcome="UP", best_bid=0.49, best_ask=0.51)
+    tick2 = MarketTick(ts=2.0, market_slug="market2", outcome="UP", best_bid=0.50, best_ask=0.52)
 
     store.add(tick1)
     store.add(tick2)
@@ -66,8 +66,8 @@ def test_memory_tick_store_separate_markets() -> None:
 
 def test_memory_tick_store_separate_outcomes() -> None:
     store = MemoryTickStore()
-    tick_up = MarketTick(ts=1.0, market_id="test", outcome="UP", best_bid=0.49, best_ask=0.51)
-    tick_down = MarketTick(ts=2.0, market_id="test", outcome="DOWN", best_bid=0.50, best_ask=0.52)
+    tick_up = MarketTick(ts=1.0, market_slug="test", outcome="UP", best_bid=0.49, best_ask=0.51)
+    tick_down = MarketTick(ts=2.0, market_slug="test", outcome="DOWN", best_bid=0.50, best_ask=0.52)
 
     store.add(tick_up)
     store.add(tick_down)
@@ -79,10 +79,10 @@ def test_memory_tick_store_separate_outcomes() -> None:
 def test_memory_tick_store_window_limit() -> None:
     store = MemoryTickStore(window=3)
 
-    tick1 = MarketTick(ts=1.0, market_id="test", outcome="UP", best_bid=0.49, best_ask=0.51)
-    tick2 = MarketTick(ts=2.0, market_id="test", outcome="UP", best_bid=0.50, best_ask=0.52)
-    tick3 = MarketTick(ts=3.0, market_id="test", outcome="UP", best_bid=0.51, best_ask=0.53)
-    tick4 = MarketTick(ts=4.0, market_id="test", outcome="UP", best_bid=0.52, best_ask=0.54)
+    tick1 = MarketTick(ts=1.0, market_slug="test", outcome="UP", best_bid=0.49, best_ask=0.51)
+    tick2 = MarketTick(ts=2.0, market_slug="test", outcome="UP", best_bid=0.50, best_ask=0.52)
+    tick3 = MarketTick(ts=3.0, market_slug="test", outcome="UP", best_bid=0.51, best_ask=0.53)
+    tick4 = MarketTick(ts=4.0, market_slug="test", outcome="UP", best_bid=0.52, best_ask=0.54)
 
     store.add(tick1)
     store.add(tick2)

@@ -27,7 +27,6 @@ async def watch_mode(args: argparse.Namespace) -> None:
     secrets = PolymarketSecrets()
     config = PolymarketAdapterConfig(
         market_slug=args.market,
-        outcome=args.outcome,
         polling_frequency_hz=args.frequency,
         secrets=secrets,
     )
@@ -40,7 +39,7 @@ async def watch_mode(args: argparse.Namespace) -> None:
     tick_queue = bus.subscribe(TICKS)
 
     print(f"Watching market: {args.market}")
-    print(f"Outcome: {args.outcome}")
+    print(f"Outcomes: UP, DOWN (both)")
     print(f"Frequency: {args.frequency} Hz")
     if args.limit:
         print(f"Limit: {args.limit} ticks")
@@ -55,7 +54,7 @@ async def watch_mode(args: argparse.Namespace) -> None:
             count += 1
             print(f"Tick #{count}:")
             print(f"  Timestamp: {tick.ts:.3f}")
-            print(f"  Market: {tick.market_id}")
+            print(f"  Market: {tick.market_slug}")
             print(f"  Outcome: {tick.outcome}")
             print(f"  Best Bid: {tick.best_bid:.4f}")
             print(f"  Best Ask: {tick.best_ask:.4f}")
@@ -109,7 +108,6 @@ async def predict_mode(args: argparse.Namespace) -> None:
     secrets = PolymarketSecrets()
     config = PolymarketAdapterConfig(
         market_slug=args.market,
-        outcome=args.outcome.upper(),
         polling_frequency_hz=args.frequency,
         secrets=secrets,
     )
@@ -122,8 +120,7 @@ async def predict_mode(args: argparse.Namespace) -> None:
     model = SimpleThresholdModel(
         bus=bus,
         store=store,
-        market_id=args.market,
-        outcome=args.outcome.upper(),
+        market_slug=args.market,
         buy_threshold=args.buy_threshold,
         sell_threshold=args.sell_threshold,
         size=args.size,
@@ -133,7 +130,7 @@ async def predict_mode(args: argparse.Namespace) -> None:
     proposal_queue = bus.subscribe(PROPOSALS)
 
     print(f"Predicting trades for market: {args.market}")
-    print(f"Outcome: {args.outcome}")
+    print(f"Outcomes: UP, DOWN (both)")
     print(f"Frequency: {args.frequency} Hz")
     print(f"Buy threshold: {args.buy_threshold}")
     print(f"Sell threshold: {args.sell_threshold}")
@@ -149,7 +146,7 @@ async def predict_mode(args: argparse.Namespace) -> None:
             proposal = await proposal_queue.get()
             print("Trade Proposal:")
             print(f"  Timestamp: {proposal.ts:.3f}")
-            print(f"  Market: {proposal.market_id}")
+            print(f"  Market: {proposal.market_slug}")
             print(f"  Outcome: {proposal.outcome}")
             print(f"  Side: {proposal.side}")
             print(f"  Target Price: {proposal.target_price:.4f}")
@@ -176,7 +173,6 @@ async def auto_buy_mode(args: argparse.Namespace) -> None:
     secrets = PolymarketSecrets()
     config = PolymarketAdapterConfig(
         market_slug=args.market,
-        outcome=args.outcome.upper(),
         polling_frequency_hz=args.frequency,
         secrets=secrets,
     )
@@ -189,8 +185,7 @@ async def auto_buy_mode(args: argparse.Namespace) -> None:
     model = SimpleThresholdModel(
         bus=bus,
         store=store,
-        market_id=args.market,
-        outcome=args.outcome.upper(),
+        market_slug=args.market,
         buy_threshold=args.buy_threshold,
         sell_threshold=args.sell_threshold,
         size=args.size,
@@ -207,13 +202,13 @@ async def auto_buy_mode(args: argparse.Namespace) -> None:
     order_queue = bus.subscribe(ORDERS)
 
     print(f"Auto-buy mode for market: {args.market}")
-    print(f"Outcome: {args.outcome}")
+    print(f"Outcomes: UP, DOWN (both)")
     print(f"Frequency: {args.frequency} Hz")
     print(f"Buy threshold: {args.buy_threshold}")
     print(f"Sell threshold: {args.sell_threshold}")
     print(f"Size: ${args.size}")
     print(f"Min history: {args.min_history} ticks")
-    print(f"Max trades per market: {args.max_trades}")
+    print(f"Max trades per outcome: {args.max_trades}")
     print("\nPress Ctrl+C to stop\n")
 
     observer_task = asyncio.create_task(observer.run())
@@ -229,7 +224,7 @@ async def auto_buy_mode(args: argparse.Namespace) -> None:
             print("✅ ORDER EXECUTED SUCCESSFULLY")
             print("=" * 60)
             print(f"Time:        {order_time}")
-            print(f"Market:      {order.market_id}")
+            print(f"Market:      {order.market_slug}")
             print(f"Outcome:     {order.outcome}")
             print(f"Side:        {order.side}")
             print(f"Size:        ${order.size:.2f} USDC")
@@ -290,9 +285,6 @@ def main() -> None:
     watch_parser = subparsers.add_parser("watch", help="Watch market prices/ticks")
     watch_parser.add_argument("--market", required=True, help="Market slug")
     watch_parser.add_argument(
-        "--outcome", choices=["Up", "Down"], required=True, help="Market outcome"
-    )
-    watch_parser.add_argument(
         "--frequency",
         type=float,
         default=1.0,
@@ -311,9 +303,6 @@ def main() -> None:
 
     predict_parser = subparsers.add_parser("predict", help="Run trading model predictions")
     predict_parser.add_argument("--market", required=True, help="Market slug")
-    predict_parser.add_argument(
-        "--outcome", choices=["Up", "Down"], required=True, help="Market outcome"
-    )
     predict_parser.add_argument(
         "--frequency",
         type=float,
@@ -349,9 +338,6 @@ def main() -> None:
         "auto-buy", help="Automatically execute trades based on model predictions"
     )
     auto_buy_parser.add_argument("--market", required=True, help="Market slug")
-    auto_buy_parser.add_argument(
-        "--outcome", choices=["Up", "Down"], required=True, help="Market outcome"
-    )
     auto_buy_parser.add_argument(
         "--frequency",
         type=float,

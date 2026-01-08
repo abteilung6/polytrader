@@ -11,14 +11,14 @@ class MarketTick:
 
     Attributes:
         ts: Unix timestamp in seconds (float for precision)
-        market_id: Market identifier (e.g., market slug)
+        market_slug: Market identifier (e.g., market slug)
         outcome: Market outcome ("UP" or "DOWN")
         best_bid: Best bid price (what buyers offer, from side=SELL)
         best_ask: Best ask price (what sellers ask, from side=BUY)
     """
 
     ts: float
-    market_id: str
+    market_slug: str
     outcome: Outcome
     best_bid: float
     best_ask: float
@@ -40,7 +40,7 @@ class TradeProposal:
 
     Attributes:
         ts: Unix timestamp in seconds (float for precision) when proposal was created
-        market_id: Market identifier (e.g., market slug)
+        market_slug: Market identifier (e.g., market slug)
         outcome: Market outcome ("UP" or "DOWN")
         side: Trade side ("BUY" or "SELL")
         target_price: Target price for the trade (e.g., expected exit price)
@@ -51,7 +51,7 @@ class TradeProposal:
     """
 
     ts: float
-    market_id: str
+    market_slug: str
     outcome: Outcome
     side: Side
     target_price: float
@@ -67,7 +67,7 @@ class Order:
 
     Attributes:
         ts: Unix timestamp in seconds (float for precision) when order was executed
-        market_id: Market identifier (e.g., market slug)
+        market_slug: Market identifier (e.g., market slug)
         outcome: Market outcome ("UP" or "DOWN")
         side: Trade side ("BUY" or "SELL")
         size: Trade size in USD
@@ -76,7 +76,7 @@ class Order:
     """
 
     ts: float
-    market_id: str
+    market_slug: str
     outcome: Outcome
     side: Side
     size: float

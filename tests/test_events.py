@@ -82,7 +82,7 @@ async def test_complex_message_types() -> None:
 
     tick = MarketTick(
         ts=1234567890.0,
-        market_id="test-market",
+        market_slug="test-market",
         outcome="UP",
         best_bid=0.49,
         best_ask=0.51,
@@ -93,7 +93,7 @@ async def test_complex_message_types() -> None:
 
     assert received == tick
     assert isinstance(received, MarketTick)
-    assert received.market_id == "test-market"
+    assert received.market_slug == "test-market"
 
 
 async def test_multiple_topics_multiple_subscribers() -> None:
@@ -107,7 +107,7 @@ async def test_multiple_topics_multiple_subscribers() -> None:
     order_queue2 = bus.subscribe(orders_topic)
 
     await bus.publish(
-        TICKS, MarketTick(ts=1.0, market_id="test", outcome="UP", best_bid=0.49, best_ask=0.51)
+        TICKS, MarketTick(ts=1.0, market_slug="test", outcome="UP", best_bid=0.49, best_ask=0.51)
     )
     await bus.publish(proposals_topic, "proposal1")
     await bus.publish(orders_topic, "order1")

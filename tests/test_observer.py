@@ -20,8 +20,8 @@ class FakeMarketDataAdapter(IMarketDataAdapter):
 async def test_observer_publishes_ticks() -> None:
     bus = EventBus()
     store = MemoryTickStore()
-    tick1 = MarketTick(ts=1.0, market_id="test", outcome="UP", best_bid=0.49, best_ask=0.51)
-    tick2 = MarketTick(ts=2.0, market_id="test", outcome="UP", best_bid=0.50, best_ask=0.52)
+    tick1 = MarketTick(ts=1.0, market_slug="test", outcome="UP", best_bid=0.49, best_ask=0.51)
+    tick2 = MarketTick(ts=2.0, market_slug="test", outcome="UP", best_bid=0.50, best_ask=0.52)
 
     adapter = FakeMarketDataAdapter([tick1, tick2])
     observer = Observer(bus, adapter, store)
@@ -45,7 +45,7 @@ async def test_observer_publishes_ticks() -> None:
 async def test_observer_multiple_subscribers() -> None:
     bus = EventBus()
     store = MemoryTickStore()
-    tick = MarketTick(ts=1.0, market_id="test", outcome="UP", best_bid=0.49, best_ask=0.51)
+    tick = MarketTick(ts=1.0, market_slug="test", outcome="UP", best_bid=0.49, best_ask=0.51)
 
     adapter = FakeMarketDataAdapter([tick])
     observer = Observer(bus, adapter, store)
@@ -69,12 +69,12 @@ async def test_observer_multiple_subscribers() -> None:
 async def test_observer_stops_when_stopped() -> None:
     bus = EventBus()
     store = MemoryTickStore()
-    tick = MarketTick(ts=1.0, market_id="test", outcome="UP", best_bid=0.49, best_ask=0.51)
+    tick = MarketTick(ts=1.0, market_slug="test", outcome="UP", best_bid=0.49, best_ask=0.51)
 
     async def slow_ticks():
         yield tick
         await asyncio.sleep(0.1)
-        yield MarketTick(ts=2.0, market_id="test", outcome="UP", best_bid=0.50, best_ask=0.52)
+        yield MarketTick(ts=2.0, market_slug="test", outcome="UP", best_bid=0.50, best_ask=0.52)
 
     class SlowAdapter:
         async def ticks(self):

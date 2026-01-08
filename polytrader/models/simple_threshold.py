@@ -13,21 +13,23 @@ class SimpleThresholdModel(ITradingModel):
         self,
         bus: EventBus,
         store: ITickStore,
-        market_id: str,
-        outcome: Outcome,
+        market_slug: str,
+        outcomes: set[Outcome] | None = None,
         buy_threshold: float = 0.30,
         sell_threshold: float = 0.50,
         size: float = 1.0,
         min_history: int = 30,
+        outcome_thresholds: dict[Outcome, dict[str, float]] | None = None,
     ) -> None:
         self.bus = bus
         self.store = store
-        self.market_id = market_id
-        self.outcome = outcome
+        self.market_slug = market_slug
+        self.outcomes = outcomes or {"UP", "DOWN"}
         self.buy_threshold = buy_threshold
         self.sell_threshold = sell_threshold
         self.size = size
         self.min_history = min_history
+        self.outcome_thresholds = outcome_thresholds or {}
         self._running = False
 
     async def run(self) -> None:
@@ -44,49 +46,70 @@ class SimpleThresholdModel(ITradingModel):
             self._running = False
 
     async def on_tick(self, tick: MarketTick) -> None:
-        if tick.market_id != self.market_id or tick.outcome != self.outcome:
+        """Process tick and generate proposals for configured outcomes.
+
+        Filters ticks by market_slug and outcome, then applies threshold logic
+        to generate trade proposals.
+        """
+        if tick.market_slug != self.market_slug:
             return
 
-        history = self.store.history(tick.market_id, tick.outcome)
+        if tick.outcome not in self.outcomes:
+            return
+
+        # Get outcome-specific thresholds if available
+        thresholds = self.outcome_thresholds.get(tick.outcome, {})
+        buy_thresh = thresholds.get("buy", self.buy_threshold)
+        sell_thresh = thresholds.get("sell", self.sell_threshold)
+
+        # Check history requirement
+        history = self.store.history(tick.market_slug, tick.outcome)
         if len(history) < self.min_history:
             logger.debug(
                 f"Insufficient history: {len(history)}/{self.min_history} ticks. "
-                f"Market: {tick.market_id}, Outcome: {tick.outcome}"
+                f"Market: {tick.market_slug}, Outcome: {tick.outcome}"
             )
             return
 
         mid_price = tick.mid
 
-        if mid_price < self.buy_threshold:
+        # Generate BUY proposal if price below threshold
+        if mid_price < buy_thresh:
             proposal = TradeProposal(
                 ts=tick.ts,
-                market_id=tick.market_id,
-                outcome=tick.outcome,
+                market_slug=tick.market_slug,
+                outcome=tick.outcome,  # Use the outcome from the tick
                 side="BUY",
-                target_price=self.sell_threshold,
+                target_price=sell_thresh,
                 limit_price=tick.best_ask,
                 size=self.size,
-                reason=f"Price {mid_price:.4f} below buy threshold {self.buy_threshold}",
+                reason=(
+                    f"Price {mid_price:.4f} below buy threshold {buy_thresh} for {tick.outcome}"
+                ),
             )
             await self.bus.publish(PROPOSALS, proposal)
-            logger.info(f"Published BUY proposal: {proposal.reason}")
-        elif mid_price > self.sell_threshold:
+            logger.info(f"Published BUY proposal for {tick.outcome}: {proposal.reason}")
+
+        # Generate SELL proposal if price above threshold
+        elif mid_price > sell_thresh:
             proposal = TradeProposal(
                 ts=tick.ts,
-                market_id=tick.market_id,
-                outcome=tick.outcome,
+                market_slug=tick.market_slug,
+                outcome=tick.outcome,  # Use the outcome from the tick
                 side="SELL",
-                target_price=self.sell_threshold,
+                target_price=sell_thresh,
                 limit_price=tick.best_bid,
                 size=self.size,
-                reason=f"Price {mid_price:.4f} above sell threshold {self.sell_threshold}",
+                reason=(
+                    f"Price {mid_price:.4f} above sell threshold {sell_thresh} for {tick.outcome}"
+                ),
             )
             await self.bus.publish(PROPOSALS, proposal)
-            logger.info(f"Published SELL proposal: {proposal.reason}")
+            logger.info(f"Published SELL proposal for {tick.outcome}: {proposal.reason}")
         else:
             logger.debug(
-                f"No proposal: price {mid_price:.4f} between thresholds "
-                f"(buy: {self.buy_threshold}, sell: {self.sell_threshold})"
+                f"No proposal for {tick.outcome}: price {mid_price:.4f} between thresholds "
+                f"(buy: {buy_thresh}, sell: {sell_thresh})"
             )
 
     def stop(self) -> None:

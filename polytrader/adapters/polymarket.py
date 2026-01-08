@@ -4,7 +4,7 @@ import asyncio
 import logging
 import time
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from py_clob_client.client import ClobClient  # type: ignore[import-untyped]
 from py_clob_client.clob_types import BookParams  # type: ignore[import-untyped]
@@ -22,25 +22,25 @@ logger = logging.getLogger(__name__)
 @dataclass
 class PolymarketAdapterConfig:
     market_slug: str
-    outcome: Outcome
     secrets: PolymarketSecrets
+    outcomes: list[Outcome] = field(default_factory=lambda: ["UP", "DOWN"])
     polling_frequency_hz: float = 1.0
 
 
 class PolymarketMarketDataAdapter(IMarketDataAdapter):
     """Market data adapter for Polymarket using POST /prices endpoint.
 
-    Fetches bid/ask prices using a single API call per tick.
+    Fetches bid/ask prices for multiple outcomes using batched API calls.
     """
 
     def __init__(self, config: PolymarketAdapterConfig) -> None:
         self.config = config
         self.market_slug = config.market_slug
-        self.outcome = config.outcome
+        self.outcomes = config.outcomes
         self.polling_frequency = config.polling_frequency_hz
 
         self.gamma = GammaClient()
-        self._token_id: str | None = None
+        self._token_ids: dict[Outcome, str] = {}
 
         self.client = ClobClient(
             host=CLOB_API_URL,
@@ -56,50 +56,65 @@ class PolymarketMarketDataAdapter(IMarketDataAdapter):
         except Exception as e:
             logger.warning(f"Could not set API credentials: {e}")
 
-    def _get_token_id(self) -> str:
-        if self._token_id is None:
+    def _get_token_ids(self) -> dict[Outcome, str]:
+        """Get token IDs for all configured outcomes.
+
+        Returns:
+            Dictionary mapping outcome to token_id
+        """
+        if not self._token_ids:
             market = self.gamma.get_market_by_slug(self.market_slug)
-            self._token_id = market.get_token_id(self.outcome)
-        return self._token_id
+            for outcome in self.outcomes:
+                self._token_ids[outcome] = market.get_token_id(outcome)
+        return self._token_ids
 
     async def ticks(self) -> AsyncIterator[MarketTick]:
-        """Yield market ticks asynchronously.
+        """Yield market ticks asynchronously for all configured outcomes.
 
         Polls the Polymarket API at the configured frequency and yields
-        MarketTick objects with bid/ask prices.
+        MarketTick objects for each outcome with bid/ask prices.
 
         Yields:
-            MarketTick: Market data updates
+            MarketTick: Market data updates (one per outcome per polling cycle)
 
         Raises:
-            ValueError: If market or outcome not found
+            ValueError: If market or any outcome not found
         """
-        token_id = self._get_token_id()
+        token_ids = self._get_token_ids()
 
         while True:
             try:
-                params = [
-                    BookParams(token_id=token_id, side="BUY"),
-                    BookParams(token_id=token_id, side="SELL"),
-                ]
+                # Batch request for all outcomes
+                params = []
+                for token_id in token_ids.values():
+                    params.extend(
+                        [
+                            BookParams(token_id=token_id, side="BUY"),
+                            BookParams(token_id=token_id, side="SELL"),
+                        ]
+                    )
+
                 response = await asyncio.to_thread(self.client.get_prices, params)
 
-                token_prices = unmarshall_token_prices(response, token_id)
-                if token_prices is None:
-                    logger.warning(f"No prices found for token_id {token_id}")
-                    await asyncio.sleep(1.0 / self.polling_frequency)
-                    continue
+                # Yield one tick per outcome
+                for outcome, token_id in token_ids.items():
+                    token_prices = unmarshall_token_prices(response, token_id)
+                    if token_prices is None:
+                        logger.warning(
+                            f"No prices found for token_id {token_id} (outcome: {outcome})"
+                        )
+                        continue
 
-                best_bid = token_prices.get_best_bid()
-                best_ask = token_prices.get_best_ask()
+                    best_bid = token_prices.get_best_bid()
+                    best_ask = token_prices.get_best_ask()
 
-                yield MarketTick(
-                    ts=time.time(),
-                    market_id=self.market_slug,
-                    outcome=self.outcome,
-                    best_bid=best_bid,
-                    best_ask=best_ask,
-                )
+                    yield MarketTick(
+                        ts=time.time(),
+                        market_slug=self.market_slug,
+                        outcome=outcome,
+                        best_bid=best_bid,
+                        best_ask=best_ask,
+                    )
 
             except PolyApiException as e:
                 error_msg = str(e)

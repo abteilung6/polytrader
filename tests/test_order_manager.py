@@ -52,7 +52,7 @@ async def test_order_manager_executes_valid_proposal() -> None:
 
     proposal = TradeProposal(
         ts=time.time(),
-        market_id="test-market",
+        market_slug="test-market",
         outcome="UP",
         side="BUY",
         target_price=0.50,
@@ -74,7 +74,7 @@ async def test_order_manager_executes_valid_proposal() -> None:
 
     order = await asyncio.wait_for(order_queue.get(), timeout=1.0)
     assert isinstance(order, Order)
-    assert order.market_id == "test-market"
+    assert order.market_slug == "test-market"
     assert order.outcome == "UP"
     assert order.side == "BUY"
     assert order.size == 1.0
@@ -98,7 +98,7 @@ async def test_order_manager_skips_expired_proposal() -> None:
 
     proposal = TradeProposal(
         ts=time.time() - 5.0,
-        market_id="test-market",
+        market_slug="test-market",
         outcome="UP",
         side="BUY",
         target_price=0.50,
@@ -139,7 +139,7 @@ async def test_order_manager_skips_duplicate_trade() -> None:
 
     proposal = TradeProposal(
         ts=time.time(),
-        market_id="test-market",
+        market_slug="test-market",
         outcome="UP",
         side="BUY",
         target_price=0.50,
@@ -176,7 +176,7 @@ async def test_order_manager_skips_invalid_size() -> None:
 
     proposal = TradeProposal(
         ts=time.time(),
-        market_id="test-market",
+        market_slug="test-market",
         outcome="UP",
         side="BUY",
         target_price=0.50,
@@ -215,7 +215,7 @@ async def test_order_manager_subscribes_to_proposals() -> None:
 
     proposal = TradeProposal(
         ts=time.time(),
-        market_id="test-market",
+        market_slug="test-market",
         outcome="UP",
         side="BUY",
         target_price=0.50,
@@ -251,7 +251,7 @@ async def test_order_manager_subscribes_to_proposals() -> None:
 
     order = await asyncio.wait_for(order_queue.get(), timeout=1.0)
     assert isinstance(order, Order)
-    assert order.market_id == "test-market"
+    assert order.market_slug == "test-market"
     assert order.outcome == "UP"
     assert order.side == "BUY"
 
