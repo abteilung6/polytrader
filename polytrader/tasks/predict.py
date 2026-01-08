@@ -1,6 +1,5 @@
 import asyncio
 from collections.abc import Callable
-from datetime import datetime
 
 from polytrader.adapters import create_adapter_factory
 from polytrader.clob import create_clob_client_factory
@@ -12,32 +11,18 @@ from polytrader.observer import create_observer_factory
 from polytrader.order_manager import create_order_manager_factory
 from polytrader.store import MemoryTickStore
 from polytrader.supervisor import MarketSupervisor
+from polytrader.tasks.formatters import MarketChangeFormatter, ProposalFormatter
 from polytrader.types import MarketChangeEvent, TradeProposal
 
 
 def default_proposal_handler(proposal: TradeProposal) -> None:
-    """Default handler for proposal events - prints to stdout."""
-    print("Trade Proposal:")
-    print(f"  Timestamp: {proposal.ts:.3f}")
-    print(f"  Market: {proposal.market_slug}")
-    print(f"  Outcome: {proposal.outcome}")
-    print(f"  Side: {proposal.side}")
-    print(f"  Target Price: {proposal.target_price:.4f}")
-    print(f"  Limit Price: {proposal.limit_price:.4f}")
-    print(f"  Size: ${proposal.size}")
-    print(f"  Reason: {proposal.reason}")
-    print()
+    """Default handler for proposal events - prints compact format to stdout."""
+    print(ProposalFormatter.format_compact(proposal))
 
 
 def default_market_change_handler(event: MarketChangeEvent) -> None:
-    """Default handler for market change events - prints to stdout."""
-    change_time = datetime.fromtimestamp(event.timestamp).strftime("%Y-%m-%d %H:%M:%S")
-    if event.old_market:
-        print(f"\n🔄 Market transition at {change_time}:")
-        print(f"   Old: {event.old_market}")
-        print(f"   New: {event.new_market}\n")
-    else:
-        print(f"\n🚀 Started with market: {event.new_market} at {change_time}\n")
+    """Default handler for market change events - prints compact format to stdout."""
+    print(MarketChangeFormatter.format_compact(event))
 
 
 async def predict_task(

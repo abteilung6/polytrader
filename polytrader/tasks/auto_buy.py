@@ -1,6 +1,5 @@
 import asyncio
 from collections.abc import Callable
-from datetime import datetime
 
 from polytrader.adapters import create_adapter_factory
 from polytrader.clob import create_clob_client_factory
@@ -12,64 +11,19 @@ from polytrader.observer import create_observer_factory
 from polytrader.order_manager import create_order_manager_factory
 from polytrader.store import MemoryTickStore
 from polytrader.supervisor import MarketSupervisor
+from polytrader.tasks.formatters import MarketChangeFormatter, OrderFormatter
 from polytrader.types import MarketChangeEvent, Order
 
 
 def default_order_handler(order: Order) -> None:
-    """Default handler for order events - prints to stdout."""
-    order_time = datetime.fromtimestamp(order.ts).strftime("%Y-%m-%d %H:%M:%S")
-
-    print("\n" + "=" * 60)
-    print("✅ ORDER EXECUTED SUCCESSFULLY")
-    print("=" * 60)
-    print(f"Time:        {order_time}")
-    print(f"Market:      {order.market_slug}")
-    print(f"Outcome:     {order.outcome}")
-    print(f"Side:        {order.side}")
-    print(f"Size:        ${order.size:.2f} USDC")
-    print(f"Reason:      {order.proposal_reason}")
-
-    response = order.response
-    if isinstance(response, dict):
-        order_id = response.get("order_id") or response.get("id") or "N/A"
-        status = response.get("status") or response.get("state") or "N/A"
-        fills = response.get("fills", [])
-
-        print("\nOrder Details:")
-        print(f"  Order ID:   {order_id}")
-        print(f"  Status:     {status}")
-
-        if fills:
-            print(f"  Fills:      {len(fills)} fill(s)")
-            for i, fill in enumerate(fills, 1):
-                price = fill.get("price", "N/A")
-                size = fill.get("size", "N/A")
-                print(f"    Fill {i}: {size} @ {price}")
-        else:
-            print("  Fills:      No fills yet")
-
-        if "error" in response:
-            print(f"  ⚠️  Error:   {response['error']}")
-
-        print("\nFull Response:")
-        for key, value in response.items():
-            if key not in ["order_id", "id", "status", "state", "fills"]:
-                print(f"  {key}: {value}")
-    else:
-        print(f"\nResponse: {response}")
-
-    print("=" * 60 + "\n")
+    """Default handler for order events - prints compact format to stdout."""
+    for line in OrderFormatter.format_compact(order):
+        print(line)
 
 
 def default_market_change_handler(event: MarketChangeEvent) -> None:
-    """Default handler for market change events - prints to stdout."""
-    change_time = datetime.fromtimestamp(event.timestamp).strftime("%Y-%m-%d %H:%M:%S")
-    if event.old_market:
-        print(f"\n🔄 Market transition at {change_time}:")
-        print(f"   Old: {event.old_market}")
-        print(f"   New: {event.new_market}\n")
-    else:
-        print(f"\n🚀 Started with market: {event.new_market} at {change_time}\n")
+    """Default handler for market change events - prints compact format to stdout."""
+    print(MarketChangeFormatter.format_compact(event))
 
 
 async def auto_buy_task(

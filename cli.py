@@ -134,7 +134,16 @@ def main() -> None:
         asyncio.run(watch_task(args.market, args.frequency, args.limit))
     elif args.mode == "buy":
         response = buy_task(args.market, args.outcome, args.amount)
-        print(f"Order placed! Response: {response}")
+        if isinstance(response, dict):
+            order_id = response.get("order_id") or response.get("id", "N/A")
+            status = response.get("status") or response.get("state", "N/A")
+        else:
+            order_id = "N/A"
+            status = "N/A"
+        print(
+            f"✅ Order placed: {args.market}/{args.outcome} ${args.amount:.2f}  "
+            f"ID:{order_id}  Status:{status}"
+        )
     elif args.mode == "predict":
         print(f"Predicting trades for market pattern: {args.market}")
         print("Outcomes: UP, DOWN (both)")

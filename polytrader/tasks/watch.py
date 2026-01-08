@@ -1,6 +1,5 @@
 import asyncio
 from collections.abc import Callable
-from datetime import datetime
 
 from polytrader.adapters import create_adapter_factory
 from polytrader.clob import create_clob_client_factory
@@ -12,31 +11,18 @@ from polytrader.observer import create_observer_factory
 from polytrader.order_manager import create_order_manager_factory
 from polytrader.store import MemoryTickStore
 from polytrader.supervisor import MarketSupervisor
+from polytrader.tasks.formatters import MarketChangeFormatter, TickFormatter
 from polytrader.types import MarketChangeEvent, MarketTick
 
 
 def default_tick_handler(tick: MarketTick, count: int) -> None:
-    """Default handler for tick events - prints to stdout."""
-    print(f"Tick #{count}:")
-    print(f"  Timestamp: {tick.ts:.3f}")
-    print(f"  Market: {tick.market_slug}")
-    print(f"  Outcome: {tick.outcome}")
-    print(f"  Best Bid: {tick.best_bid:.4f}")
-    print(f"  Best Ask: {tick.best_ask:.4f}")
-    print(f"  Mid Price: {tick.mid:.4f}")
-    print(f"  Spread: {tick.spread:.4f}")
-    print()
+    """Default handler for tick events - prints compact format to stdout."""
+    print(TickFormatter.format_compact(tick, count))
 
 
 def default_market_change_handler(event: MarketChangeEvent) -> None:
-    """Default handler for market change events - prints to stdout."""
-    change_time = datetime.fromtimestamp(event.timestamp).strftime("%Y-%m-%d %H:%M:%S")
-    if event.old_market:
-        print(f"\n🔄 Market transition at {change_time}:")
-        print(f"   Old: {event.old_market}")
-        print(f"   New: {event.new_market}\n")
-    else:
-        print(f"\n🚀 Started with market: {event.new_market} at {change_time}\n")
+    """Default handler for market change events - prints compact format to stdout."""
+    print(MarketChangeFormatter.format_compact(event))
 
 
 async def watch_task(
