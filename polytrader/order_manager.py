@@ -106,18 +106,33 @@ class OrderManager(IOrderManager):
             return
 
         if proposal.side == "SELL" and not self._has_tokens(proposal.market_slug, proposal.outcome):
-            logger.bind(market_slug=proposal.market_slug, outcome=proposal.outcome).info(
-                "Skipping SELL proposal: no tokens owned. Cannot sell tokens you don't own."
-            )
-            return
+            # Trust SELL proposals from position manager (they have a position)
+            # Position manager proposals contain "Target price reached" in the reason
+            is_from_position_manager = "Target price reached" in proposal.reason
 
-        if self._has_traded(proposal.market_slug, proposal.outcome):
+            if not is_from_position_manager:
+                logger.bind(market_slug=proposal.market_slug, outcome=proposal.outcome).info(
+                    "Skipping SELL proposal: no tokens owned. Cannot sell tokens you don't own."
+                )
+                return
+            else:
+                # Trust position manager - it has a position, so we should have tokens
+                # Add to owned_tokens to keep tracking in sync
+                logger.bind(market_slug=proposal.market_slug, outcome=proposal.outcome).debug(
+                    "SELL proposal from position manager: trusting position exists, "
+                    "updating token tracking"
+                )
+                self._owned_tokens.add((proposal.market_slug, proposal.outcome))
+
+        # Allow SELL orders even if we've already traded (bought) that outcome
+        # The limit only applies to BUY orders
+        if proposal.side == "BUY" and self._has_traded(proposal.market_slug, proposal.outcome):
             logger.bind(
                 market_slug=proposal.market_slug,
                 outcome=proposal.outcome,
                 limit=self.max_trades_per_market,
             ).info(
-                "Skipping proposal: already traded. Limit: {limit} trade(s) per market",
+                "Skipping BUY proposal: already traded. Limit: {limit} trade(s) per market",
                 limit=self.max_trades_per_market,
             )
             return
@@ -134,7 +149,10 @@ class OrderManager(IOrderManager):
             )
 
             response = await self._execute_order(proposal)
-            self._executed_trades.add((proposal.market_slug, proposal.outcome))
+            # Only track BUY orders in _executed_trades (to enforce max_trades limit)
+            # SELL orders don't count against the limit
+            if proposal.side == "BUY":
+                self._executed_trades.add((proposal.market_slug, proposal.outcome))
 
             if proposal.side == "BUY":
                 self._owned_tokens.add((proposal.market_slug, proposal.outcome))

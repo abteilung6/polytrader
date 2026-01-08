@@ -95,7 +95,10 @@ class PositionManager(IPositionManager):
     async def run(self) -> None:
         """Start the position manager."""
         self._running = True
-        logger.info("Starting PositionManager")
+        logger.bind(sync_interval=self.sync_interval).info(
+            "Starting PositionManager (sync_interval={sync_interval}s)",
+            sync_interval=self.sync_interval,
+        )
 
         # Subscribe to orders and ticks
         orders_queue = self.bus.subscribe(ORDERS)
@@ -130,8 +133,12 @@ class PositionManager(IPositionManager):
                             await self._handle_order(result)
                         elif isinstance(result, MarketTick):
                             await self._check_target_prices(result)
-                    except Exception:
-                        logger.exception("Error processing order or tick")
+                    except Exception as e:
+                        logger.bind(error_type=type(e).__name__, error=str(e)).exception(
+                            "Error processing order or tick: {error_type}: {error}",
+                            error_type=type(e).__name__,
+                            error=str(e),
+                        )
 
                 # Cancel pending tasks
                 for task in pending:
@@ -197,26 +204,96 @@ class PositionManager(IPositionManager):
             # Store token_id mapping for external order reconciliation
             await self._cache_token_id(order.market_slug, order.outcome)
 
+            # Calculate position metrics
+            position_count = len(self._positions)
+            total_size = sum(p.size for p in self._positions.values())
+
             logger.bind(
                 market_slug=order.market_slug,
                 outcome=order.outcome,
+                size=position.size,
+                entry_price=position.entry_price,
                 target_price=position.target_price,
+                order_id=order_id if order_id != "unknown" else None,
+                position_count=position_count,
+                total_size=total_size,
             ).info(
-                "Position opened: {market_slug}/{outcome} size=${size} target={target_price}",
+                "📈 Position opened: {market_slug}/{outcome} | "
+                "size=${size:.2f} | entry={entry_price:.4f} | target={target_price:.4f} | "
+                "order_id={order_id} | "
+                "total positions: {position_count} (${total_size:.2f})",
                 market_slug=order.market_slug,
                 outcome=order.outcome,
-                size=order.size,
+                size=position.size,
+                entry_price=position.entry_price,
                 target_price=position.target_price,
+                order_id=order_id if order_id != "unknown" else "N/A",
+                position_count=position_count,
+                total_size=total_size,
             )
 
         elif order.side == "SELL":
             # Remove position from SELL order
             if key in self._positions:
                 position = self._positions.pop(key)
-                logger.bind(market_slug=order.market_slug, outcome=order.outcome).info(
-                    "Position closed: {market_slug}/{outcome}",
+
+                # Calculate P&L if we have exit price
+                exit_price = 0.5  # Default
+                if isinstance(order.response, dict):
+                    fill_price = order.response.get("fill_price") or order.response.get("price")
+                    if fill_price:
+                        exit_price = float(fill_price)
+
+                # Calculate profit/loss
+                pnl = (exit_price - position.entry_price) * position.size
+                pnl_pct = (
+                    ((exit_price - position.entry_price) / position.entry_price) * 100
+                    if position.entry_price > 0
+                    else 0
+                )
+
+                # Calculate position duration
+                duration_seconds = order.ts - position.entry_time
+                duration_minutes = duration_seconds / 60.0
+
+                position_count = len(self._positions)
+                total_size = sum(p.size for p in self._positions.values())
+
+                order_id = (
+                    order.response.get("order_id") or order.response.get("id", "unknown")
+                    if isinstance(order.response, dict)
+                    else "unknown"
+                )
+
+                logger.bind(
                     market_slug=order.market_slug,
                     outcome=order.outcome,
+                    size=position.size,
+                    entry_price=position.entry_price,
+                    exit_price=exit_price,
+                    pnl=pnl,
+                    pnl_pct=pnl_pct,
+                    duration_seconds=duration_seconds,
+                    position_count=position_count,
+                    total_size=total_size,
+                    order_id=order_id if order_id != "unknown" else None,
+                ).info(
+                    "📉 Position closed: {market_slug}/{outcome} | "
+                    "size=${size:.2f} | entry={entry_price:.4f} | exit={exit_price:.4f} | "
+                    "P&L=${pnl:+.2f} ({pnl_pct:+.1f}%) | duration={duration_minutes:.1f}m | "
+                    "order_id={order_id} | "
+                    "remaining positions: {position_count} (${total_size:.2f})",
+                    market_slug=order.market_slug,
+                    outcome=order.outcome,
+                    size=position.size,
+                    entry_price=position.entry_price,
+                    exit_price=exit_price,
+                    pnl=pnl,
+                    pnl_pct=pnl_pct,
+                    duration_minutes=duration_minutes,
+                    order_id=order_id if order_id != "unknown" else "N/A",
+                    position_count=position_count,
+                    total_size=total_size,
                 )
 
                 # Clean up order ID mapping
@@ -240,6 +317,15 @@ class PositionManager(IPositionManager):
         key = (tick.market_slug, tick.outcome)
 
         if key not in self._positions:
+            # No position for this market/outcome - nothing to sell
+            logger.bind(
+                market_slug=tick.market_slug,
+                outcome=tick.outcome,
+            ).debug(
+                "No position to check: {market_slug}/{outcome}",
+                market_slug=tick.market_slug,
+                outcome=tick.outcome,
+            )
             return
 
         position = self._positions[key]
@@ -286,19 +372,124 @@ class PositionManager(IPositionManager):
                 "Published SELL proposal: target reached at {price:.4f}",
                 price=mid_price,
             )
+        else:
+            # Price hasn't reached target yet - log why we're not selling
+            price_diff = position.target_price - mid_price
+            price_pct = (
+                (price_diff / position.target_price) * 100 if position.target_price > 0 else 0
+            )
+            profit_pct = (
+                ((mid_price - position.entry_price) / position.entry_price) * 100
+                if position.entry_price > 0
+                else 0
+            )
+
+            logger.bind(
+                market_slug=tick.market_slug,
+                outcome=tick.outcome,
+                current_price=mid_price,
+                target_price=position.target_price,
+                entry_price=position.entry_price,
+                size=position.size,
+                price_diff=price_diff,
+                price_pct=price_pct,
+                profit_pct=profit_pct,
+            ).info(
+                "⏸️  Not selling {market_slug}/{outcome}: "
+                "current={current_price:.4f} < target={target_price:.4f} "
+                "(need +{price_diff:.4f}, {price_pct:.1f}% more) | "
+                "entry={entry_price:.4f} | profit={profit_pct:+.1f}% | size=${size:.2f}",
+                market_slug=tick.market_slug,
+                outcome=tick.outcome,
+                current_price=mid_price,
+                target_price=position.target_price,
+                entry_price=position.entry_price,
+                size=position.size,
+                price_diff=price_diff,
+                price_pct=price_pct,
+                profit_pct=profit_pct,
+            )
 
     async def _periodic_sync(self) -> None:
-        """Periodically sync with external API."""
+        """Periodically sync with external API and log position status."""
         while self._running:
             await asyncio.sleep(self.sync_interval)
             try:
+                # Log position status before sync
+                await self._log_position_status()
                 await self._sync_with_external()
             except Exception:
                 logger.exception("Error in periodic sync")
 
+    async def _log_position_status(self) -> None:
+        """Log current position status for observability."""
+        if not self._positions:
+            logger.debug("No active positions")
+            return
+
+        total_size = sum(p.size for p in self._positions.values())
+        import time
+
+        now = time.time()
+
+        # Calculate aggregate metrics
+        total_pnl = 0.0
+        positions_summary = []
+
+        for key, position in self._positions.items():
+            market_slug, outcome = key
+            # Estimate current value (would need current price, using entry as placeholder)
+            # In a real system, you'd fetch current market price
+            duration_minutes = (now - position.entry_time) / 60.0
+
+            positions_summary.append(
+                {
+                    "market_slug": market_slug,
+                    "outcome": outcome,
+                    "size": position.size,
+                    "entry_price": position.entry_price,
+                    "target_price": position.target_price,
+                    "duration_minutes": duration_minutes,
+                }
+            )
+
+        logger.bind(
+            position_count=len(self._positions),
+            total_size=total_size,
+        ).info(
+            "📊 Position status: {position_count} active positions, total size=${total_size:.2f}",
+            position_count=len(self._positions),
+            total_size=total_size,
+        )
+
+        # Log each position (at debug level to avoid spam)
+        for pos_info in positions_summary:
+            logger.bind(
+                market_slug=pos_info["market_slug"],
+                outcome=pos_info["outcome"],
+                size=pos_info["size"],
+                entry_price=pos_info["entry_price"],
+                target_price=pos_info["target_price"],
+                duration_minutes=pos_info["duration_minutes"],
+            ).debug(
+                "  Position: {market_slug}/{outcome} | "
+                "size=${size:.2f} | entry={entry_price:.4f} | target={target_price:.4f} | "
+                "duration={duration_minutes:.1f}m",
+                market_slug=pos_info["market_slug"],
+                outcome=pos_info["outcome"],
+                size=pos_info["size"],
+                entry_price=pos_info["entry_price"],
+                target_price=pos_info["target_price"],
+                duration_minutes=pos_info["duration_minutes"],
+            )
+
     async def _sync_with_external(self) -> None:
         """Sync internal positions with external API state."""
-        logger.debug("Syncing positions with external API")
+        internal_count_before = len(self._positions)
+        logger.bind(internal_count=internal_count_before).debug(
+            "Syncing positions with external API (internal: {internal_count})",
+            internal_count=internal_count_before,
+        )
 
         try:
             client = self.clob_client_factory()
@@ -306,8 +497,26 @@ class PositionManager(IPositionManager):
             # Get all active orders from external API
             external_orders = await asyncio.to_thread(lambda: get_active_orders(client))
 
+            logger.bind(external_count=len(external_orders)).debug(
+                "Retrieved {external_count} external orders",
+                external_count=len(external_orders),
+            )
+
             # Reconcile with internal positions
             await self._reconcile_positions(external_orders)
+
+            internal_count_after = len(self._positions)
+            if internal_count_before != internal_count_after:
+                logger.bind(
+                    before=internal_count_before,
+                    after=internal_count_after,
+                    delta=internal_count_after - internal_count_before,
+                ).info(
+                    "Position sync complete: {before} → {after} positions (Δ{delta:+d})",
+                    before=internal_count_before,
+                    after=internal_count_after,
+                    delta=internal_count_after - internal_count_before,
+                )
 
         except Exception:
             logger.exception("Error syncing with external API")
@@ -535,16 +744,30 @@ class PositionManager(IPositionManager):
                         if external_order.order_id != "unknown":
                             self._order_id_to_position[external_order.order_id] = key
 
+                        position_count = len(self._positions)
+                        total_size = sum(p.size for p in self._positions.values())
+
                         logger.bind(
                             market_slug=market_slug,
                             outcome=outcome,
                             size=position.size,
+                            order_id=external_order.order_id
+                            if external_order.order_id != "unknown"
+                            else None,
+                            position_count=position_count,
+                            total_size=total_size,
                         ).info(
-                            "Created position from external FILLED order: "
-                            "{market_slug}/{outcome} size=${size}",
+                            "🔍 Discovered external position: {market_slug}/{outcome} | "
+                            "size=${size:.2f} | order_id={order_id} | "
+                            "total positions: {position_count} (${total_size:.2f})",
                             market_slug=market_slug,
                             outcome=outcome,
                             size=position.size,
+                            order_id=external_order.order_id
+                            if external_order.order_id != "unknown"
+                            else "N/A",
+                            position_count=position_count,
+                            total_size=total_size,
                         )
                     else:
                         logger.bind(market_slug=market_slug, outcome=outcome).debug(
@@ -558,11 +781,19 @@ class PositionManager(IPositionManager):
                 # External order is CANCELLED
                 if has_internal_position:
                     # Remove stale position - order was cancelled externally
-                    self._remove_position(key, "External order CANCELLED")
+                    cancelled_order_ids = [
+                        o.order_id for o in cancelled_orders if o.order_id != "unknown"
+                    ]
+                    reason = (
+                        f"External order CANCELLED (order_ids: {', '.join(cancelled_order_ids)})"
+                        if cancelled_order_ids
+                        else "External order CANCELLED"
+                    )
+                    self._remove_position(key, reason)
                 else:
                     logger.bind(market_slug=market_slug, outcome=outcome).debug(
                         "External CANCELLED order for {market_slug}/{outcome} "
-                        "(no internal position)",
+                        "(no internal position, ignoring)",
                         market_slug=market_slug,
                         outcome=outcome,
                     )
@@ -586,11 +817,20 @@ class PositionManager(IPositionManager):
                     outcome=outcome,
                 )
 
-        logger.debug(
-            "Position sync complete: {internal_count} internal positions, "
-            "{external_count} external positions mapped",
+        # Log summary with more details
+        total_size = sum(p.size for p in self._positions.values())
+        logger.bind(
             internal_count=len(self._positions),
             external_count=len(external_positions),
+            total_size=total_size,
+            unknown_tokens=len(unknown_tokens),
+        ).debug(
+            "Position reconciliation: {internal_count} internal, {external_count} external mapped, "
+            "{unknown_tokens} unknown tokens, total size=${total_size:.2f}",
+            internal_count=len(self._positions),
+            external_count=len(external_positions),
+            unknown_tokens=len(unknown_tokens),
+            total_size=total_size,
         )
 
     def stop(self) -> None:

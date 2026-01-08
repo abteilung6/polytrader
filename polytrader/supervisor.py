@@ -34,7 +34,7 @@ class MarketSupervisor:
         bus: EventBus,
         store: ITickStore,
         position_manager_factory: Callable[[], IPositionManager] | None = None,
-        monitor_interval: float = 30.0,
+        monitor_interval: float = 1.0,
     ) -> None:
         """Initialize the market supervisor.
 
@@ -48,7 +48,7 @@ class MarketSupervisor:
             bus: Event bus for communication
             store: Tick store for historical data
             position_manager_factory: Factory function to create position managers (optional)
-            monitor_interval: How often to check for market changes (seconds)
+            monitor_interval: How often to check for market changes (seconds, default: 1.0)
         """
         self.pattern = pattern
         self.discovery = discovery_service
