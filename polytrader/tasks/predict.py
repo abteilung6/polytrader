@@ -18,10 +18,10 @@ from polytrader.observer import create_observer_factory
 from polytrader.order_manager import create_noop_order_manager_factory
 from polytrader.store import MemoryMarketDataStore
 from polytrader.supervisor import MarketSupervisor
-from polytrader.types import MarketChangeEvent, TradeProposal
+from polytrader.types import MarketChangeEvent, OrderIntentEvent
 
 
-def default_proposal_handler(proposal: TradeProposal) -> None:
+def default_proposal_handler(proposal: OrderIntentEvent) -> None:
     """Default handler for proposal events - logs using structured logging."""
     market_short = (
         proposal.market_slug.split("-")[-1] if "-" in proposal.market_slug else proposal.market_slug
@@ -64,7 +64,7 @@ async def predict_task(
     sell_threshold: float = 0.50,
     size: float = 1.0,
     min_history: int = 30,
-    proposal_handler: Callable[[TradeProposal], None] | None = None,
+    proposal_handler: Callable[[OrderIntentEvent], None] | None = None,
     market_change_handler: Callable[[MarketChangeEvent], None] | None = None,
     secrets: PolymarketSecrets | None = None,
 ) -> None:

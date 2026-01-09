@@ -7,7 +7,7 @@ from polytrader.clob import IClobClientFactory, place_market_order, verify_usdc_
 from polytrader.events import ORDERS, PROPOSALS, EventBus
 from polytrader.gamma import GammaClient
 from polytrader.logging_config import logger
-from polytrader.types import Order, Outcome, TradeProposal
+from polytrader.types import Order, OrderIntentEvent, Outcome
 
 
 class IOrderManager(Protocol):
@@ -101,7 +101,7 @@ class OrderManager(IOrderManager):
         finally:
             self._running = False
 
-    async def _process_proposal(self, proposal: TradeProposal) -> None:
+    async def _process_proposal(self, proposal: OrderIntentEvent) -> None:
         if not self._is_proposal_valid(proposal):
             return
 
@@ -166,7 +166,7 @@ class OrderManager(IOrderManager):
                 )
 
             order = Order(
-                ts=time.time(),
+                ts=proposal.ts_mono,  # Use monotonic timestamp from intent event
                 market_slug=proposal.market_slug,
                 outcome=proposal.outcome,
                 side=proposal.side,
@@ -215,9 +215,9 @@ class OrderManager(IOrderManager):
             else:
                 logger.exception("Failed to execute order")
 
-    def _is_proposal_valid(self, proposal: TradeProposal) -> bool:
-        current_time = time.time()
-        age = current_time - proposal.ts
+    def _is_proposal_valid(self, proposal: OrderIntentEvent) -> bool:
+        current_time = time.monotonic()
+        age = current_time - proposal.ts_mono
 
         if age > proposal.ttl_s:
             logger.bind(market_slug=proposal.market_slug, outcome=proposal.outcome).debug(
@@ -238,7 +238,7 @@ class OrderManager(IOrderManager):
         """Check if we own tokens for this market/outcome."""
         return (market_slug, outcome) in self._owned_tokens
 
-    async def _execute_order(self, proposal: TradeProposal) -> dict[str, Any]:
+    async def _execute_order(self, proposal: OrderIntentEvent) -> dict[str, Any]:
         market = await asyncio.to_thread(self.gamma_client.get_market_by_slug, proposal.market_slug)
         token_id = market.get_token_id(proposal.outcome)
 

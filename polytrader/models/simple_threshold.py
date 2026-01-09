@@ -2,7 +2,7 @@ from polytrader.events import MARKET_DATA, PROPOSALS, EventBus
 from polytrader.logging_config import logger
 from polytrader.models.protocol import ITradingModel
 from polytrader.store import IMarketDataStore
-from polytrader.types import MarketDataEvent, Outcome, TradeProposal
+from polytrader.types import MarketDataEvent, OrderIntentEvent, Outcome
 
 
 class SimpleThresholdModel(ITradingModel):
@@ -78,8 +78,7 @@ class SimpleThresholdModel(ITradingModel):
 
         # Generate BUY proposal if price below threshold
         if mid_price < buy_thresh:
-            proposal = TradeProposal(
-                ts=event.ts_mono,  # Use monotonic timestamp from event
+            proposal = OrderIntentEvent(
                 market_slug=event.market_slug,
                 outcome=event.outcome,
                 side="BUY",
@@ -97,8 +96,7 @@ class SimpleThresholdModel(ITradingModel):
 
         # Generate SELL proposal if price above threshold
         elif mid_price > sell_thresh:
-            proposal = TradeProposal(
-                ts=event.ts_mono,  # Use monotonic timestamp from event
+            proposal = OrderIntentEvent(
                 market_slug=event.market_slug,
                 outcome=event.outcome,
                 side="SELL",

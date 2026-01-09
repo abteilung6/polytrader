@@ -11,7 +11,7 @@ from polytrader.order_manager import IOrderManager, NoOpOrderManager
 from polytrader.position_manager import IPositionManager, PositionManager
 from polytrader.store import MemoryMarketDataStore
 from polytrader.supervisor import MarketSupervisor
-from polytrader.types import MarketChangeEvent, MarketDataEvent, Order, Outcome, TradeProposal
+from polytrader.types import MarketChangeEvent, MarketDataEvent, Order, OrderIntentEvent, Outcome
 
 
 class FakeAdapter(IMarketDataAdapter):
@@ -361,8 +361,7 @@ async def test_supervisor_with_noop_order_manager_does_not_execute_orders() -> N
     assert isinstance(supervisor.order_manager, NoOpOrderManager)
 
     # Publish a proposal (simulating what the model would do)
-    proposal = TradeProposal(
-        ts=1000.0,
+    proposal = OrderIntentEvent(
         market_slug="test-market-1",
         outcome="UP",
         side="BUY",
@@ -498,8 +497,7 @@ async def test_supervisor_with_position_manager_end_to_end() -> None:
                     event = await asyncio.wait_for(market_data_queue.get(), timeout=0.1)
                     if not self._proposal_sent and event.outcome == "UP":
                         # Publish BUY proposal with target_price
-                        proposal = TradeProposal(
-                            ts=event.ts_mono,  # Use monotonic timestamp from event
+                        proposal = OrderIntentEvent(
                             market_slug=event.market_slug,
                             outcome=event.outcome,
                             side="BUY",

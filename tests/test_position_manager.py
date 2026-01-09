@@ -11,7 +11,7 @@ from polytrader.clob import IClobClient, IClobClientFactory
 from polytrader.events import PROPOSALS, EventBus
 from polytrader.gamma import GammaClient
 from polytrader.position_manager import PositionManager
-from polytrader.types import MarketDataEvent, Order, Outcome, TradeProposal
+from polytrader.types import MarketDataEvent, Order, OrderIntentEvent, Outcome
 
 
 class FakeClobClient(IClobClient):
@@ -180,7 +180,7 @@ async def test_position_manager_generates_sell_proposal_when_target_reached() ->
 
     # Check that SELL proposal was generated
     proposal = await asyncio.wait_for(proposal_queue.get(), timeout=1.0)
-    assert isinstance(proposal, TradeProposal)
+    assert isinstance(proposal, OrderIntentEvent)
     assert proposal.side == "SELL"
     assert proposal.market_slug == "test-market"
     assert proposal.outcome == "UP"

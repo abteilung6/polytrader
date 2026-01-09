@@ -8,7 +8,7 @@ from polytrader.clob import ExternalOrder, IClobClientFactory, get_active_orders
 from polytrader.events import MARKET_DATA, ORDERS, PROPOSALS, EventBus
 from polytrader.gamma import GammaClient
 from polytrader.logging_config import logger
-from polytrader.types import MarketDataEvent, Order, Outcome, Position, TradeProposal
+from polytrader.types import MarketDataEvent, Order, OrderIntentEvent, Outcome, Position
 
 
 class IPositionManager(Protocol):
@@ -348,8 +348,7 @@ class PositionManager(IPositionManager):
             )
 
             # Generate SELL proposal
-            proposal = TradeProposal(
-                ts=event.ts_mono,  # Use monotonic timestamp from event
+            proposal = OrderIntentEvent(
                 market_slug=event.market_slug,
                 outcome=event.outcome,
                 side="SELL",
