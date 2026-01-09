@@ -7,6 +7,7 @@ Per flows.mdc §6: Risk is a hard veto gate that runs before OMS submission.
 """
 
 from polytrader.risk.engine import RiskEngine
+from polytrader.risk.limits_store import get_default_limits, load_limits_from_config
 from polytrader.risk.models import (
     RiskContext,
     RiskLimits,
@@ -43,4 +44,6 @@ __all__ = [
     "check_rate_limits",
     "check_system_health",
     "check_token_ownership",
+    "get_default_limits",
+    "load_limits_from_config",
 ]
