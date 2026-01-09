@@ -55,6 +55,43 @@ class GabagoolV4Strategy:
             self.market_states[market_id] = GabagoolV4State()
         return self.market_states[market_id]
 
+    def _check_target_profit_reached(
+        self,
+        portfolio: Portfolio,
+        market_id: str,
+        outcome: str,
+    ) -> bool:
+        """Check if portfolio has reached target profit for the given outcome.
+        
+        Args:
+            portfolio: Current portfolio state
+            market_id: Market identifier
+            outcome: "UP" or "DOWN" - the outcome to check
+            
+        Returns:
+            True if target profit is reached, False otherwise
+        """
+        # Get existing positions
+        up_pos = portfolio.get_position(market_id, "UP")
+        down_pos = portfolio.get_position(market_id, "DOWN")
+        
+        # Calculate current portfolio state
+        existing_total_cost = (
+            (up_pos.quantity * up_pos.avg_price if up_pos else 0.0)
+            + (down_pos.quantity * down_pos.avg_price if down_pos else 0.0)
+        )
+        
+        existing_shares = (
+            up_pos.quantity if outcome == "UP" and up_pos else
+            down_pos.quantity if outcome == "DOWN" and down_pos else
+            0.0
+        )
+        
+        # Calculate current profit if this outcome wins
+        current_profit = (existing_shares * 1.0) - existing_total_cost
+        
+        return current_profit >= self.target_profit_usdc
+
     def _calculate_amount_for_portfolio_profit(
         self,
         portfolio: Portfolio,
@@ -64,7 +101,8 @@ class GabagoolV4Strategy:
     ) -> float:
         """Calculate amount to buy so portfolio makes target profit if outcome wins.
         
-        Accounts for existing positions in the portfolio.
+        Accounts for existing positions in the portfolio. This will recalculate based
+        on current portfolio state, handling partial fills correctly.
         
         Args:
             portfolio: Current portfolio state
@@ -142,8 +180,11 @@ class GabagoolV4Strategy:
         
         Assumes price is already validated to be at threshold and within buy price range.
         
+        Handles partial fills by checking if target profit is reached after each fill.
+        If we got a partial fill, buy_done will be reset and we'll recalculate on next tick.
+        
         Args:
-            portfolio: Current portfolio state
+            portfolio: Current portfolio state (may have been updated with partial fills)
             market_id: Market identifier
             state: Current market state
             outcome: "UP" or "DOWN"
@@ -157,11 +198,22 @@ class GabagoolV4Strategy:
             state.declared_winner = outcome
             state.buy_done = False
         
-        # If we already bought for this winner, don't buy again
-        if state.buy_done:
+        # Check if we've already reached target profit with current portfolio state
+        # This handles partial fills: if we got a partial fill, portfolio was updated
+        # on the previous tick, and now we check again. If target profit is reached
+        # (either from full fill or cumulative partial fills), we're done.
+        if self._check_target_profit_reached(portfolio, market_id, outcome):
+            state.buy_done = True
             return None
         
-        # Calculate amount to buy
+        # If target profit not reached, ensure buy_done is False so we can buy more
+        # This handles partial fills: if we got a partial fill on the previous tick,
+        # buy_done might have been True, but we haven't reached target profit yet,
+        # so we need to recalculate and buy more with the updated portfolio
+        state.buy_done = False
+        
+        # Calculate amount to buy based on current portfolio state
+        # This will account for any partial fills we received
         amount = self._calculate_amount_for_portfolio_profit(
             portfolio, market_id, outcome, price
         )
@@ -175,8 +227,8 @@ class GabagoolV4Strategy:
         if portfolio.balance < amount:
             return None
         
-        # Make the trade
-        state.buy_done = True
+        # Make the trade (but don't set buy_done yet - will be set after trade executes
+        # in on_trade_executed, or reset if we need more due to partial fill)
         return TradeDecision(
             market_id=market_id,
             outcome=outcome,
@@ -274,8 +326,17 @@ class GabagoolV4Strategy:
         price: float,
         timestamp: float | None = None,
     ) -> None:
-        """Called after a trade is successfully executed."""
-        # State is already updated in decide() method
+        """Called after a trade is successfully executed.
+        
+        Note: We don't set buy_done here because we don't have portfolio access.
+        Instead, on the next decide() call, we'll check if target profit is reached
+        based on the updated portfolio (which may have partial fills). If target
+        profit is reached, buy_done will be set to True in _process_outcome.
+        If not (partial fill), buy_done will remain False and we'll calculate
+        the remaining amount needed.
+        """
+        # Don't set buy_done here - let the next decide() call check if target
+        # profit is reached based on updated portfolio state (handles partial fills)
         pass
 
     def on_trade_failed(
