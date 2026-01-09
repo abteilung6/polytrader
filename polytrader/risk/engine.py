@@ -14,6 +14,11 @@ from typing import Any
 
 from polytrader.events import APPROVED_PROPOSALS, ORDERS, PROPOSALS, RISK_CHECKS, EventBus
 from polytrader.events.types import RiskCheckEvent
+from polytrader.obs.metrics import (
+    record_projected_exposure,
+    record_risk_check,
+    record_risk_denial,
+)
 from polytrader.risk.models import RiskContext, RiskLimits, RiskReasonCode, RiskResult
 from polytrader.risk.policies import (
     Clock,
@@ -181,6 +186,19 @@ class RiskChecker:
             True if allowed, False if denied
         """
         result = self.engine.check(context)
+
+        # Emit metrics per observability.mdc §4
+        record_risk_check(allowed=result.allowed)
+
+        if not result.allowed:
+            # Record denial reason(s) per observability.mdc §4
+            for reason_code in result.reason_codes:
+                if reason_code != RiskReasonCode.RISK_ALLOWED:
+                    record_risk_denial(reason=reason_code.value)
+
+        # Record projected exposure if available per observability.mdc §4
+        if "projected_exposure" in result.projections:
+            record_projected_exposure(exposure=result.projections["projected_exposure"])
 
         # Emit RiskCheckEvent ALWAYS per flows.mdc §6
         event = RiskCheckEvent(
