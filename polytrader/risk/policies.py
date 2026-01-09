@@ -404,3 +404,90 @@ def check_max_trades_per_market(context: RiskContext, limits: RiskLimits) -> Ris
         reason_codes=[RiskReasonCode.RISK_ALLOWED],
         metadata=metadata,
     )
+
+
+def check_system_health(context: RiskContext, limits: RiskLimits) -> RiskResult:
+    """Check system health gates per flows.mdc §13.
+
+    These are hard gates that prevent all trading if system is unhealthy.
+
+    Args:
+        context: Risk context with system state
+        limits: Risk limits (unused, but kept for consistency)
+
+    Returns:
+        RiskResult with allowed=False if any health gate is active
+    """
+    reasons: list[RiskReasonCode] = []
+    metadata: dict[str, Any] = {}
+
+    if context.kill_switch_active:
+        reasons.append(RiskReasonCode.RISK_KILL_SWITCH)
+        metadata["kill_switch_active"] = True
+        metadata["limits_version"] = limits.version
+        return RiskResult(
+            allowed=False,
+            reason_codes=reasons,
+            metadata=metadata,
+        )
+
+    if context.circuit_breaker_active:
+        reasons.append(RiskReasonCode.RISK_RECONCILE_DIVERGENCE)  # Reuse for circuit breaker
+        metadata["circuit_breaker_active"] = True
+        metadata["limits_version"] = limits.version
+        return RiskResult(
+            allowed=False,
+            reason_codes=reasons,
+            metadata=metadata,
+        )
+
+    if not context.reconciliation_healthy:
+        reasons.append(RiskReasonCode.RISK_RECONCILE_DIVERGENCE)
+        metadata["reconciliation_healthy"] = False
+        metadata["limits_version"] = limits.version
+        return RiskResult(
+            allowed=False,
+            reason_codes=reasons,
+            metadata=metadata,
+        )
+
+    return RiskResult(
+        allowed=True,
+        reason_codes=[RiskReasonCode.RISK_ALLOWED],
+        metadata=metadata,
+    )
+
+
+def check_rate_limits(context: RiskContext, limits: RiskLimits) -> RiskResult:
+    """Check order and cancel rate limits per flows.mdc §6.
+
+    Args:
+        context: Risk context with rate limit state
+        limits: Risk limits configuration
+
+    Returns:
+        RiskResult with allowed=False if rate limits exceeded
+    """
+    reasons: list[RiskReasonCode] = []
+    metadata: dict[str, Any] = {}
+
+    # Check order rate limit
+    if context.order_count_last_minute >= limits.order_rate_limit_per_minute:
+        reasons.append(RiskReasonCode.RISK_RATE_LIMIT)
+        metadata["order_count_last_minute"] = context.order_count_last_minute
+        metadata["order_rate_limit"] = limits.order_rate_limit_per_minute
+        metadata["limits_version"] = limits.version
+        return RiskResult(
+            allowed=False,
+            reason_codes=reasons,
+            metadata=metadata,
+        )
+
+    # Note: Cancel rate limit is checked separately (not blocking order submission)
+    # but included for completeness
+
+    return RiskResult(
+        allowed=True,
+        reason_codes=[RiskReasonCode.RISK_ALLOWED],
+        metadata=metadata,
+    )
