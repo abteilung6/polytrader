@@ -1,3 +1,7 @@
+---
+alwaysApply: true
+---
+
 # Observability — Audit, Logs, Metrics, Tracing (Python)
 
 Institutional systems are debuggable by design.

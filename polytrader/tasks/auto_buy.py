@@ -19,6 +19,7 @@ from polytrader.models import create_model_factory
 from polytrader.observer import create_observer_factory
 from polytrader.order_manager import create_order_manager_factory
 from polytrader.position_manager import create_position_manager_factory
+from polytrader.risk import RiskChecker, RiskEngine, get_default_limits
 from polytrader.store import MemoryMarketDataStore
 from polytrader.supervisor import MarketSupervisor
 from polytrader.types import MarketChangeEvent, OrderExecutedEvent
@@ -160,6 +161,13 @@ async def auto_buy_task(
         bus, clob_client_factory, sync_interval=60.0
     )
 
+    # Create risk engine and checker per flows.mdc §6
+    # Risk runs before OMS submission, so RiskChecker subscribes to PROPOSALS
+    # and publishes APPROVED_PROPOSALS that OrderManager consumes
+    risk_limits = get_default_limits()
+    risk_engine = RiskEngine(limits=risk_limits)
+    risk_checker = RiskChecker(bus=bus, engine=risk_engine, store=store)
+
     supervisor = MarketSupervisor(
         pattern=market_pattern,
         discovery_service=discovery,
@@ -175,6 +183,9 @@ async def auto_buy_task(
     order_queue = bus.subscribe(ORDERS)
     market_change_queue = bus.subscribe(MARKET_CHANGE)
 
+    # Start risk checker as async task per flows.mdc §6
+    # RiskChecker subscribes to PROPOSALS and publishes APPROVED_PROPOSALS
+    risk_checker_task = asyncio.create_task(risk_checker.run())
     supervisor_task = asyncio.create_task(supervisor.run())
 
     async def handle_orders() -> None:
@@ -193,9 +204,10 @@ async def auto_buy_task(
     market_changes_task = asyncio.create_task(handle_market_changes())
 
     try:
-        await asyncio.gather(supervisor_task, orders_task, market_changes_task)
+        await asyncio.gather(supervisor_task, risk_checker_task, orders_task, market_changes_task)
     except KeyboardInterrupt:
         supervisor.stop()
+        risk_checker.stop()
         # Emit system stopped event (auto-persisted by EventBus)
         stopped_event = SystemStoppedEvent(reason="KeyboardInterrupt")
         await bus.publish(SYSTEM_LIFECYCLE, stopped_event)
@@ -206,7 +218,7 @@ async def auto_buy_task(
         raise
     finally:
         supervisor_task.cancel()
-        orders_task.cancel()
+        risk_checker_task.cancel()
         market_changes_task.cancel()
         try:
             await supervisor_task

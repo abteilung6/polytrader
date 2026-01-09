@@ -199,3 +199,198 @@ class TestEventSourceEnum:
         """Test that invalid EventSource raises ValidationError."""
         with pytest.raises(ValidationError):
             Event(source="invalid")
+
+
+class TestRiskCheckEvent:
+    """Tests for RiskCheckEvent per observability.mdc §1."""
+
+    def test_risk_check_event_creation(self) -> None:
+        """Test that RiskCheckEvent can be created with intent and result."""
+        from polytrader.events.types import RiskCheckEvent
+        from polytrader.risk.models import RiskReasonCode, RiskResult
+        from polytrader.types import OrderIntentEvent
+
+        intent = OrderIntentEvent(
+            market_slug="test-market",
+            outcome="UP",
+            side="BUY",
+            target_price=0.5,
+            limit_price=0.45,
+            size=1.0,
+            reason="Test",
+        )
+
+        result = RiskResult(
+            allowed=True,
+            reason_codes=[RiskReasonCode.RISK_ALLOWED],
+        )
+
+        event = RiskCheckEvent(intent=intent, result=result)
+
+        assert event.intent == intent
+        assert event.result == result
+        assert event.source.value == "risk"
+
+    def test_risk_check_event_has_base_fields(self) -> None:
+        """Test that RiskCheckEvent has all Event base class fields."""
+        from polytrader.events.types import EventSource, RiskCheckEvent
+        from polytrader.risk.models import RiskReasonCode, RiskResult
+        from polytrader.types import OrderIntentEvent
+
+        intent = OrderIntentEvent(
+            market_slug="test-market",
+            outcome="UP",
+            side="BUY",
+            target_price=0.5,
+            limit_price=0.45,
+            size=1.0,
+            reason="Test",
+        )
+
+        result = RiskResult(
+            allowed=True,
+            reason_codes=[RiskReasonCode.RISK_ALLOWED],
+        )
+
+        event = RiskCheckEvent(intent=intent, result=result)
+
+        # Check all base Event fields
+        assert event.event_id
+        assert event.ts_wall
+        assert event.ts_mono
+        assert event.correlation_id
+        assert event.run_id
+        assert event.schema_version == "1.0"
+        assert event.source == EventSource.RISK
+
+    def test_risk_check_event_allowed_property(self) -> None:
+        """Test that allowed property works correctly."""
+        from polytrader.events.types import RiskCheckEvent
+        from polytrader.risk.models import RiskReasonCode, RiskResult
+        from polytrader.types import OrderIntentEvent
+
+        intent = OrderIntentEvent(
+            market_slug="test-market",
+            outcome="UP",
+            side="BUY",
+            target_price=0.5,
+            limit_price=0.45,
+            size=1.0,
+            reason="Test",
+        )
+
+        # Test allowed=True
+        result_allowed = RiskResult(
+            allowed=True,
+            reason_codes=[RiskReasonCode.RISK_ALLOWED],
+        )
+        event_allowed = RiskCheckEvent(intent=intent, result=result_allowed)
+        assert event_allowed.allowed is True
+
+        # Test allowed=False
+        result_denied = RiskResult(
+            allowed=False,
+            reason_codes=[RiskReasonCode.RISK_PROPOSAL_EXPIRED],
+        )
+        event_denied = RiskCheckEvent(intent=intent, result=result_denied)
+        assert event_denied.allowed is False
+
+    def test_risk_check_event_reason_codes_property(self) -> None:
+        """Test that reason_codes property works correctly."""
+        from polytrader.events.types import RiskCheckEvent
+        from polytrader.risk.models import RiskReasonCode, RiskResult
+        from polytrader.types import OrderIntentEvent
+
+        intent = OrderIntentEvent(
+            market_slug="test-market",
+            outcome="UP",
+            side="BUY",
+            target_price=0.5,
+            limit_price=0.45,
+            size=1.0,
+            reason="Test",
+        )
+
+        result = RiskResult(
+            allowed=False,
+            reason_codes=[
+                RiskReasonCode.RISK_PROPOSAL_EXPIRED,
+                RiskReasonCode.RISK_ORDER_TOO_LARGE,
+            ],
+        )
+
+        event = RiskCheckEvent(intent=intent, result=result)
+
+        assert len(event.reason_codes) == 2
+        assert RiskReasonCode.RISK_PROPOSAL_EXPIRED in event.reason_codes
+        assert RiskReasonCode.RISK_ORDER_TOO_LARGE in event.reason_codes
+
+    def test_risk_check_event_correlation_id(self) -> None:
+        """Test that RiskCheckEvent includes correlation_id per observability.mdc §2."""
+        from polytrader.events.types import RiskCheckEvent
+        from polytrader.risk.models import RiskReasonCode, RiskResult
+        from polytrader.types import OrderIntentEvent
+
+        intent = OrderIntentEvent(
+            market_slug="test-market",
+            outcome="UP",
+            side="BUY",
+            target_price=0.5,
+            limit_price=0.45,
+            size=1.0,
+            reason="Test",
+        )
+
+        result = RiskResult(
+            allowed=True,
+            reason_codes=[RiskReasonCode.RISK_ALLOWED],
+        )
+
+        # Use the same correlation_id as the intent
+        shared_correlation_id = intent.correlation_id
+        event = RiskCheckEvent(
+            intent=intent,
+            result=result,
+            correlation_id=shared_correlation_id,
+        )
+
+        # Verify correlation_id is present and matches intent
+        assert event.correlation_id == shared_correlation_id
+        assert event.correlation_id == intent.correlation_id
+
+    def test_risk_check_event_serialization(self) -> None:
+        """Test that RiskCheckEvent can be serialized (Pydantic model)."""
+        from polytrader.events.types import RiskCheckEvent
+        from polytrader.risk.models import RiskReasonCode, RiskResult
+        from polytrader.types import OrderIntentEvent
+
+        intent = OrderIntentEvent(
+            market_slug="test-market",
+            outcome="UP",
+            side="BUY",
+            target_price=0.5,
+            limit_price=0.45,
+            size=1.0,
+            reason="Test",
+        )
+
+        result = RiskResult(
+            allowed=True,
+            reason_codes=[RiskReasonCode.RISK_ALLOWED],
+            projections={"new_position": 1.0},
+            metadata={"mid_price": 0.45},
+        )
+
+        event = RiskCheckEvent(intent=intent, result=result)
+
+        # Test Pydantic serialization
+        event_dict = event.model_dump()
+        assert "intent" in event_dict
+        assert "result" in event_dict
+        assert "correlation_id" in event_dict
+        assert event_dict["result"]["allowed"] is True
+
+        # Test JSON serialization
+        event_json = event.model_dump_json()
+        assert isinstance(event_json, str)
+        assert "test-market" in event_json

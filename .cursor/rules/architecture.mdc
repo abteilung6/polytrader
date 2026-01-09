@@ -1,3 +1,7 @@
+---
+alwaysApply: true
+---
+
 # Architecture — Canonical Institutional Trading Stack (Python-first)
 
 This repo should resemble a simplified institutional trading platform:

@@ -1,3 +1,7 @@
+---
+alwaysApply: true
+---
+
 # testing.md — Institutional Testing Standard (Trading Systems)
 
 This repo treats testing as a **risk control** and a **change-control mechanism**.

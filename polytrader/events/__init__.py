@@ -6,11 +6,13 @@ from polytrader.events.types import (
     ConfigLoadedEvent,
     Event,
     EventSource,
+    RiskCheckEvent,
     SystemStartedEvent,
     SystemStoppedEvent,
 )
 
 __all__ = [
+    "APPROVED_PROPOSALS",
     "ConfigLoadedEvent",
     "Event",
     "EventBus",
@@ -21,6 +23,8 @@ __all__ = [
     "MemoryEventStore",
     "ORDERS",
     "PROPOSALS",
+    "RISK_CHECKS",
+    "RiskCheckEvent",
     "SYSTEM_LIFECYCLE",
     "SystemStartedEvent",
     "SystemStoppedEvent",
@@ -63,4 +67,12 @@ def __getattr__(name: str):
         from polytrader.events.topics import get_system_lifecycle_topic
 
         return get_system_lifecycle_topic()
+    elif name == "RISK_CHECKS":
+        from polytrader.events.topics import get_risk_checks_topic
+
+        return get_risk_checks_topic()
+    elif name == "APPROVED_PROPOSALS":
+        from polytrader.events.topics import get_approved_proposals_topic
+
+        return get_approved_proposals_topic()
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
