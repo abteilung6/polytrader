@@ -13,7 +13,7 @@ def render_sidebar() -> dict:
         # Strategy selection
         strategy_name = st.selectbox(
             "Strategy",
-            ["gabagool", "gabagool-v2", "gabagool-v3"],
+            ["gabagool", "gabagool-v2", "gabagool-v3", "gabagool-v4"],
             index=2,
         )
 

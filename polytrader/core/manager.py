@@ -10,7 +10,7 @@ from polytrader.clob import place_market_order
 from polytrader.core.portfolio import Portfolio
 from polytrader.core.strategy import Strategy
 from polytrader.core.trade import TradeDecision
-from polytrader.types import MarketTick, Outcome
+from polytrader.types import CandleData, MarketTick, Outcome
 
 if TYPE_CHECKING:
     from py_clob_client.client import ClobClient  # type: ignore[import-untyped]
@@ -101,6 +101,7 @@ class PortfolioManager:
         up_price: float,
         down_price: float,
         timestamp: float | None = None,
+        candle_data: CandleData | None = None,
     ) -> TradeDecision | list[TradeDecision] | None:
         """Process prices for both outcomes and potentially execute a trade.
 
@@ -111,6 +112,7 @@ class PortfolioManager:
             up_price: Current mid price for UP outcome
             down_price: Current mid price for DOWN outcome
             timestamp: Optional timestamp for backtesting (defaults to None)
+            candle_data: Optional ETH/USD candle data (OHLCV) for price context
 
         Returns:
             TradeDecision or list of TradeDecisions if trades were made, None otherwise
@@ -122,6 +124,7 @@ class PortfolioManager:
             up_price=up_price,
             down_price=down_price,
             timestamp=timestamp,
+            candle_data=candle_data,
         )
 
         if decision is None:

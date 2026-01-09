@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import threading
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -17,6 +18,10 @@ from polytrader.gamma import GammaClient
 from polytrader.types import MarketTick, Outcome
 
 logger = logging.getLogger(__name__)
+
+# Global lock to serialize access to ClobClient instances when used from threads
+# This prevents race conditions in httpx HTTP/2 connection handling
+_client_lock = threading.Lock()
 
 
 @dataclass
@@ -84,7 +89,13 @@ class PolymarketMarketDataAdapter(IMarketDataAdapter):
                     BookParams(token_id=token_id, side="BUY"),
                     BookParams(token_id=token_id, side="SELL"),
                 ]
-                response = await asyncio.to_thread(self.client.get_prices, params)
+                # Use a lock to serialize access to the client when running in threads
+                # This prevents race conditions in httpx HTTP/2 connection handling
+                def _get_prices_safe():
+                    with _client_lock:
+                        return self.client.get_prices(params)
+                
+                response = await asyncio.to_thread(_get_prices_safe)
 
                 token_prices = unmarshall_token_prices(response, token_id)
                 if token_prices is None:

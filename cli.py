@@ -19,7 +19,7 @@ from polytrader.gamma import GammaClient
 from polytrader.market_discovery import MarketSlugGenerator
 from polytrader.observer import Observer
 from polytrader.store import MemoryTickStore
-from polytrader.types import MarketTick, Outcome
+from polytrader.types import CandleData, MarketTick, Outcome
 
 
 def get_current_interval_id(asset: str, time_period: str) -> str:
@@ -350,10 +350,24 @@ async def watch_mode(args: argparse.Namespace) -> None:
                 if has_fresh_up and has_fresh_down and timestamps_match:
                     # Both ticks are fresh and have matching timestamps - safe to trade
                     # Use best_ask (best_bid + spread) for buying - accounts for spread
+                    
+                    # Convert latest_candle dict to CandleData if available
+                    candle_data: CandleData | None = None
+                    if latest_candle:
+                        candle_data = CandleData(
+                            timestamp=latest_candle['timestamp'],
+                            open=latest_candle['open'],
+                            high=latest_candle['high'],
+                            low=latest_candle['low'],
+                            close=latest_candle['close'],
+                            volume=latest_candle['volume'],
+                        )
+                    
                     decision = portfolio_manager.process_prices(
                         market_id=tick.market_id,
                         up_price=up_tick.best_ask,
                         down_price=down_tick.best_ask,
+                        candle_data=candle_data,
                     )
                     if decision:
                         trade_executed = True

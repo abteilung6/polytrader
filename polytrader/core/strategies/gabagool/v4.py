@@ -2,7 +2,9 @@
 
 Strategy:
 - When any side hits 0.6, declare it as winner and buy enough to have X$ profit
-- If the other side hits 0.6 and keeps it for 1 minute, buy enough of that side to have X$ profit
+- If the other side hits 0.6 and keeps it consistently above 0.6 for 30 seconds,
+  buy enough of that side to have X$ profit
+- The timer resets if the price drops below 0.6 at any point, requiring continuous hold
 """
 
 import time
@@ -10,6 +12,7 @@ from dataclasses import dataclass, field
 
 from polytrader.core.portfolio import Portfolio
 from polytrader.core.trade import TradeDecision
+from polytrader.types import CandleData
 
 
 @dataclass
@@ -23,20 +26,21 @@ class GabagoolV4State:
 
 
 class GabagoolV4Strategy:
-    """Strategy that buys the declared winner at 0.6 and hedges if other side hits 0.6 for 1 minute.
+    """Strategy that buys the declared winner at 0.6 and hedges if other side hits 0.6 consistently.
     
     Strategy:
     - When any side hits 0.6, declare it as winner
     - Buy enough of that side to have target_profit_usdc profit if it wins
-    - If the other side hits 0.6 and stays there for 1 minute (60 seconds), 
-      buy enough of that side to have target_profit_usdc profit if it wins
+    - If the other side hits 0.6 and stays consistently above 0.6 for the required duration
+      (default 30 seconds), buy enough of that side to have target_profit_usdc profit if it wins
+    - The timer resets if the price drops below 0.6 at any point, requiring continuous hold above threshold
     """
 
     def __init__(
         self,
         target_profit_usdc: float = 10.0,
         winner_threshold: float = 0.6,
-        other_side_hold_duration_seconds: float = 60.0,
+        other_side_hold_duration_seconds: float = 30.0,
         max_buy_price: float = 0.65,
         min_trade_amount_usdc: float = 1.0,
         max_capital_per_market_usdc: float = 500.0,
@@ -91,8 +95,18 @@ class GabagoolV4Strategy:
         up_price: float,
         down_price: float,
         timestamp: float | None = None,
+        candle_data: CandleData | None = None,
     ) -> TradeDecision | list[TradeDecision] | None:
-        """Make trading decision based on price thresholds."""
+        """Make trading decision based on price thresholds.
+        
+        Args:
+            portfolio: Current portfolio state
+            market_id: Market identifier
+            up_price: Current best ask price for UP outcome
+            down_price: Current best ask price for DOWN outcome
+            timestamp: Optional timestamp for backtesting
+            candle_data: Optional ETH/USD candle data (OHLCV) for price context
+        """
         now = timestamp if timestamp is not None else time.time()
         state = self._get_state(market_id)
 
@@ -158,7 +172,14 @@ class GabagoolV4Strategy:
                         if up_price > self.max_buy_price:
                             return None  # Price too high
                         
-                        amount = self._calculate_amount_for_profit(up_price, self.target_profit_usdc)
+                        # Calculate target profit accounting for existing DOWN position cost
+                        # If UP wins, we'll lose the cost of DOWN position, so we need to
+                        # make enough profit on UP to cover that loss + desired profit
+                        down_pos = portfolio.get_position(market_id, "DOWN")
+                        existing_down_cost = down_pos.quantity * down_pos.avg_price if down_pos else 0.0
+                        adjusted_target_profit = self.target_profit_usdc + existing_down_cost
+                        
+                        amount = self._calculate_amount_for_profit(up_price, adjusted_target_profit)
                         if amount < self.min_trade_amount_usdc:
                             amount = self.min_trade_amount_usdc
                         
@@ -219,7 +240,14 @@ class GabagoolV4Strategy:
                         if down_price > self.max_buy_price:
                             return None  # Price too high
                         
-                        amount = self._calculate_amount_for_profit(down_price, self.target_profit_usdc)
+                        # Calculate target profit accounting for existing UP position cost
+                        # If DOWN wins, we'll lose the cost of UP position, so we need to
+                        # make enough profit on DOWN to cover that loss + desired profit
+                        up_pos = portfolio.get_position(market_id, "UP")
+                        existing_up_cost = up_pos.quantity * up_pos.avg_price if up_pos else 0.0
+                        adjusted_target_profit = self.target_profit_usdc + existing_up_cost
+                        
+                        amount = self._calculate_amount_for_profit(down_price, adjusted_target_profit)
                         if amount < self.min_trade_amount_usdc:
                             amount = self.min_trade_amount_usdc
                         

@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Literal
 
 Outcome = Literal["UP", "DOWN"]
@@ -31,3 +32,29 @@ class MarketTick:
     def spread(self) -> float:
         """Bid-ask spread."""
         return self.best_ask - self.best_bid
+
+
+@dataclass(frozen=True)
+class CandleData:
+    """OHLCV candle data for ETH/USD price.
+
+    Attributes:
+        timestamp: Candle timestamp (datetime in UTC)
+        open: Opening price
+        high: Highest price
+        low: Lowest price
+        close: Closing price
+        volume: Volume in ETH
+    """
+
+    timestamp: datetime
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: float
+
+    @property
+    def range(self) -> float:
+        """Price range (high - low)."""
+        return self.high - self.low

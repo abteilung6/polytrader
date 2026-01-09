@@ -85,9 +85,9 @@ def create_strategy(strategy_name: str = "gabagool") -> Strategy:
                 f"gabagool-v3 (aliases: gabagool3, gaba-v3)"
             )
         return GabagoolV4Strategy(
-            target_profit_usdc=10.0,
+            target_profit_usdc=5.0,
             winner_threshold=0.6,
-            other_side_hold_duration_seconds=60.0,
+            other_side_hold_duration_seconds=20.0,
             max_buy_price=0.80,
             min_trade_amount_usdc=1.0,
             max_capital_per_market_usdc=500.0,

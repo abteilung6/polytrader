@@ -4,6 +4,7 @@ from typing import Protocol
 
 from polytrader.core.portfolio import Portfolio
 from polytrader.core.trade import TradeDecision
+from polytrader.types import CandleData
 
 
 class Strategy(Protocol):
@@ -16,6 +17,7 @@ class Strategy(Protocol):
         up_price: float,
         down_price: float,
         timestamp: float | None = None,
+        candle_data: CandleData | None = None,
     ) -> TradeDecision | list[TradeDecision] | None:
         """Make a trading decision.
 
@@ -25,6 +27,7 @@ class Strategy(Protocol):
             up_price: Current best ask price (best bid + spread) for UP outcome
             down_price: Current best ask price (best bid + spread) for DOWN outcome
             timestamp: Optional timestamp for backtesting (defaults to None, uses current time)
+            candle_data: Optional ETH/USD candle data (OHLCV) for price context
 
         Returns:
             TradeDecision or list of TradeDecisions if trades should be made, None otherwise
