@@ -89,9 +89,30 @@ def get_system_lifecycle_topic() -> Topic:
     return _system_lifecycle_topic
 
 
-# Topic constants
-MARKET_DATA = get_market_data_topic()
-PROPOSALS = get_proposals_topic()
-ORDERS = get_orders_topic()
-MARKET_CHANGE = get_market_change_topic()
-SYSTEM_LIFECYCLE = get_system_lifecycle_topic()
+def __getattr__(name: str) -> Topic:
+    """Lazily initialize topic constants on first access.
+
+    This defers topic initialization until after all modules are fully loaded,
+    breaking the circular import between polytrader.types and polytrader.events.topics.
+
+    Args:
+        name: Name of the topic constant to retrieve
+
+    Returns:
+        The requested Topic instance
+
+    Raises:
+        AttributeError: If the requested topic name is not recognized
+    """
+    if name == "MARKET_DATA":
+        return get_market_data_topic()
+    elif name == "PROPOSALS":
+        return get_proposals_topic()
+    elif name == "ORDERS":
+        return get_orders_topic()
+    elif name == "MARKET_CHANGE":
+        return get_market_change_topic()
+    elif name == "SYSTEM_LIFECYCLE":
+        return get_system_lifecycle_topic()
+    else:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
