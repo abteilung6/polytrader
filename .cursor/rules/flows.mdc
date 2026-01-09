@@ -1,0 +1,335 @@
+# flow.md — Canonical Institutional Trading Flows (Python-first)
+
+This document defines the **one true set of flows** for this repo.
+If implementation deviates, it must be refactored or justified via ADR.
+
+---
+
+## 1) High-Level Pipeline (North Star)
+
+┌──────────────────────────────┐
+│ Market Data & Normalization  │  (raw feeds → canonical events)
+└───────────────┬──────────────┘
+                ↓
+┌──────────────────────────────┐
+│ State Builders               │  (books, trades, features, snapshots)
+└───────────────┬──────────────┘
+                ↓
+┌──────────────────────────────┐
+│ Alpha / Signal Layer         │  (stateless, probabilistic forecasts)
+└───────────────┬──────────────┘
+                ↓
+┌──────────────────────────────┐
+│ Portfolio Construction       │  (targets, sizing, constraints)
+└───────────────┬──────────────┘
+                ↓
+┌──────────────────────────────┐
+│ Risk & Limits Engine         │  (hard veto power)
+└───────────────┬──────────────┘
+                ↓
+┌──────────────────────────────┐
+│ OMS (Order State Machine)    │  ← CORE OF THE SYSTEM
+└───────────────┬──────────────┘
+                ↓
+┌──────────────────────────────┐
+│ Execution / Routing          │  (tactics, throttles, idempotent commands)
+└───────────────┬──────────────┘
+                ↓
+┌──────────────────────────────┐
+│ Exchange Connectivity        │  (WS/REST adapters; retries; no business logic)
+└──────────────────────────────┘
+
+Layer semantics:
+- Alpha produces **scores/forecasts**, never orders.
+- Portfolio converts scores → **targets / order intents**.
+- Risk is a **hard gate** (allow/deny + reasons).
+- OMS owns all order states and emits the authoritative lifecycle events.
+- Execution decides *how* to place, not *whether* to trade.
+- Adapters do IO + normalization only.
+
+---
+
+## 2) Boot & Safety Gating
+
+### Goal
+Start safely, reconstruct state, and only enable execution when healthy.
+
+Flow:
+1. Load config (validated). Emit `ConfigLoaded(hash, version)`.
+2. Init EventStore (append-only). Emit `SystemStarted(run_id)`.
+3. Start adapters:
+   - market data WS
+   - user stream WS (orders/fills)
+   - REST clients (snapshots, reconcile)
+4. Build projections from event log:
+   - open orders (OMS projection)
+   - positions + balances (posttrade projection)
+   - pnl projection
+5. Initial reconciliation snapshot:
+   - fetch venue open orders
+   - fetch balances/positions
+   - compare to projections
+   - emit `ReconcileEvent(diff)`
+6. Health gates:
+   - market data freshness OK
+   - user stream connected
+   - reconcile divergence within tolerance
+   - error rate below threshold
+7. Only then issue `ExecutionPermit` and set `execution_enabled = true`.
+
+Default: `execution_enabled = false`.
+
+---
+
+## 3) Market Data Ingest → Normalization → Book
+
+### Input
+Raw venue messages (WS or REST snapshot).
+
+Flow:
+1. Adapter receives raw message.
+2. Normalize to `CanonicalMarketUpdate` (pure mapping).
+3. Feed State Builder:
+   - sequence checks (gap detection)
+   - update book/trades
+4. Emit events:
+   - `MarketDataEvent` (mid/spread/seq/hash/ts)
+   - optional `FeatureEvent` (volatility, imbalance, etc.)
+5. Update freshness gauges.
+6. If stale/gap:
+   - emit `DataStaleEvent` / `DataGapEvent`
+   - trigger circuit breaker if thresholds exceeded
+   - request snapshot refresh if needed
+
+Rule: State Builders are deterministic projections from events.
+
+---
+
+## 4) Alpha / Signal Generation (Stateless)
+
+### Input
+Latest snapshot/features + context (time, regime labels if any)
+
+Flow:
+1. Compute probabilistic scores:
+   - p(up), p(down), edge, confidence
+2. Emit `SignalEvent` with:
+   - input snapshot hash/version
+   - score outputs
+   - model/version id
+3. Output is **NOT** an order and contains **NO** venue details.
+
+---
+
+## 5) Portfolio Construction (Targets & Sizing)
+
+### Input
+SignalEvent + current positions + open orders + portfolio constraints
+
+Flow:
+1. Convert scores → target exposure or delta:
+   - e.g., desired position, notional, or risk budget usage
+2. Produce `OrderIntent` objects:
+   - side, qty, limit price policy, tif, post_only, urgency
+3. Emit `TargetEvent` / `OrderIntentEvent` including:
+   - target rationale
+   - computed sizing terms
+   - constraint binding reasons (if clipped)
+
+Rule: Portfolio is where **“how much”** is decided.
+
+---
+
+## 6) Pre-Trade Risk Gate (Hard Veto)
+
+### Input
+OrderIntent + Context:
+- current net position
+- open orders
+- mid price / bands
+- limits version
+- system health flags (data stale, kill switch)
+
+Flow:
+1. Evaluate deterministic policies in fixed order.
+2. Output `RiskResult(allowed, reasons, projections)`.
+3. Emit `RiskCheckEvent` ALWAYS.
+4. If denied: stop (no OMS entry).
+5. If allowed: produce `ApprovedOrderIntent` and pass to OMS.
+
+Rule: Risk never lives in strategy/portfolio.
+
+---
+
+## 7) OMS (Authoritative Order Lifecycle)
+
+### Input
+ApprovedOrderIntent
+
+Flow:
+1. Create internal order:
+   - `order_id` (uuid)
+   - `client_order_id` (idempotency key)
+2. FSM transition:
+   - `NEW → PENDING_SUBMIT`
+3. Emit `OrderCreatedEvent`.
+4. Send `SubmitOrderCommand(order_id, client_order_id, params...)` to Execution.
+
+OMS must handle:
+- duplicate submits (idempotent)
+- restarts (rebuild from events)
+- ordering (user stream can arrive before rest ack)
+
+OMS owns the truth.
+
+---
+
+## 8) Execution / Routing (How to Place)
+
+### Input
+SubmitOrderCommand or CancelCommand
+
+Flow:
+1. Apply execution tactics (deterministic policy):
+   - limit pricing rules
+   - post-only preference
+   - child split sizing (optional)
+   - throttling
+2. Emit `ExecutionPlannedEvent` (optional).
+3. Call adapter:
+   - `adapter.submit_order(client_order_id, ...)`
+4. Emit structured logs:
+   - request/response
+   - latency
+   - error class (retryable/fatal)
+
+Execution must NOT change OMS state. It reports outcomes via events/commands.
+
+---
+
+## 9) Exchange Connectivity (Adapters)
+
+Responsibilities:
+- IO only
+- retries/backoff
+- reconnect
+- rate limit compliance
+- normalization of all inbound/outbound messages
+
+Flow:
+- outbound: internal command → venue API request
+- inbound: venue message → canonical update → emitted into system
+
+No business logic, no risk decisions, no portfolio logic.
+
+---
+
+## 10) User Stream → Acks / Fills / Cancels
+
+### Input
+Venue user stream events (ack, reject, partial fill, cancel confirm)
+
+Flow:
+1. Adapter normalizes to:
+   - `CanonicalOrderAck/Reject`
+   - `CanonicalFill`
+   - `CanonicalCancel`
+2. OMS matches update to internal order by:
+   - venue_order_id OR client_order_id
+3. OMS applies FSM transitions, emits:
+   - `OrderAckEvent` / `OrderRejectedEvent`
+   - `FillEvent`
+   - `OrderCanceledEvent`
+
+Edge cases (must be supported):
+- fill arrives after cancel request
+- duplicate fills / duplicate acks
+- out-of-order updates
+- reconnect replay / missed messages
+
+---
+
+## 11) Post-Trade (Positions / PnL / Ledger)
+
+### Input
+FillEvents (+ fee data)
+
+Flow:
+1. Update positions projection.
+2. Update realized/unrealized PnL.
+3. Emit:
+   - `PositionUpdatedEvent`
+   - `PnLEvent`
+4. Periodic venue balance reconciliation.
+
+Rule: positions are derived from fills (events), not from assumptions.
+
+---
+
+## 12) Reconciliation (Continuous Correctness)
+
+Triggers:
+- periodic timer
+- adapter reconnect
+- detected gaps/staleness
+- operator request
+
+Flow:
+1. Fetch:
+   - venue open orders
+   - venue balances/positions
+2. Compare with projections:
+   - phantom internal orders
+   - orphan venue orders
+   - fill mismatches
+3. Emit `ReconcileEvent(diff, severity)`.
+4. If severe:
+   - set `execution_enabled = false`
+   - optional cancel-all (if configured)
+   - require explicit operator reset
+
+---
+
+## 13) Circuit Breakers & Kill Switch
+
+### Circuit breakers trigger on:
+- market data stale beyond threshold
+- reconcile divergence above tolerance
+- adapter error spike
+- latency breach
+- unexpected order/fill rate
+
+Actions:
+- emit `CircuitBreakerEvent(type, details)`
+- set execution_enabled = false
+- optionally cancel open orders
+- require manual/health reset to re-enable
+
+Kill switch:
+- immediate stop-trading + cancel-open-orders policy
+- emit `KillSwitchEvent`
+
+---
+
+## 14) Replay / Backtest Mode (Same Core)
+
+Goal: production behavior should be explainable by replay.
+
+Flow:
+1. Load historical MarketDataEvents.
+2. Rebuild state builders.
+3. Run alpha → portfolio → risk → OMS in simulation.
+4. Compare decisions with golden runs when needed.
+
+Rule: production and backtest share the same deterministic core.
+
+---
+
+## 15) Non-Negotiable Invariants
+
+- Strategy/Alpha produces no orders.
+- Risk is a veto gate that runs before OMS submission.
+- OMS is the only writer of order states.
+- Every significant action emits an event.
+- Execution/Adapters never contain business logic.
+- Default safe state is **no trading**.

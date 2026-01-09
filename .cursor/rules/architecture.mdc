@@ -1,0 +1,165 @@
+# Architecture — Canonical Institutional Trading Stack (Python-first)
+
+This repo should resemble a simplified institutional trading platform:
+- A deterministic "core" (signals/risk/OMS state transitions)
+- Adapter layer for IO (exchange APIs, websockets, persistence)
+- Event-sourced audit trail for replay and traceability
+- Strong pre-trade and post-trade risk controls
+- Continuous reconciliation against venue truth
+
+## 1) Canonical Service/Module Map
+
+### A) Market Data Plant (MDP)
+Responsibilities:
+- Connect to venue feeds (WS, REST polling fallback).
+- Normalize raw messages into a canonical model.
+- Maintain order book / ticker snapshots.
+- Emit MarketData events (append-only).
+- Provide derived features (optional) and freshness signals.
+
+In Python, split into:
+- adapters/market_data/<venue>.py (IO, reconnect, rate limit)
+- md/normalization.py (pure transformations)
+- md/book.py (book state machine)
+- md/features.py (derived metrics, pure if possible)
+- md/health.py (staleness, gaps, sequence checks)
+
+### B) Strategy Research / Signal Engine
+Responsibilities:
+- Consume normalized market state + positions + config.
+- Produce *OrderIntents* (not orders) or higher-level target positions.
+- Keep it deterministic/testable.
+
+Split:
+- strategies/<name>/model.py (pure decision)
+- strategies/<name>/state.py (strategy-specific state)
+- strategies/<name>/params.py (validated config)
+- strategies/<name>/tests/*
+
+### C) Pre-Trade Risk
+Responsibilities:
+- Gate every OrderIntent before it becomes an order.
+- Enforce: max position, max notional, order size, price bands, throttles, kill-switch.
+- Emit RiskCheck events always (allow/deny + reasons).
+
+Split:
+- risk/policies.py (pure rules)
+- risk/engine.py (runs policies, aggregates result)
+- risk/limits_store.py (loads config; versioned)
+
+### D) OMS (Order Management System) / State Machines
+Responsibilities:
+- Own the authoritative internal order state machine.
+- Create idempotency keys (client_order_id).
+- Track lifecycle: submit→ack→fill→cancel→reject→error.
+- Correlate with venue updates.
+- Emit Order* and Fill events.
+- Provide a query surface for current open orders + history.
+
+Split:
+- oms/models.py (Order, Fill, enums)
+- oms/fsm.py (state transitions, pure)
+- oms/store.py (event-backed projection)
+- oms/reconcile.py (venue truth vs internal)
+- oms/idempotency.py
+
+### E) Execution / Router (EMS-like)
+Responsibilities:
+- Convert approved OrderIntent into specific order actions.
+- Apply execution tactics: limit, post-only, time-in-force, split sizing.
+- Route to adapters (venue APIs).
+- Retry policy classification lives here or in adapters (but not in strategy).
+
+Split:
+- execution/router.py
+- execution/tactics.py
+- execution/pricing.py (limit price rules)
+- execution/throttle.py
+
+### F) Post-Trade: Positions / PnL / Ledger
+Responsibilities:
+- Maintain positions from fills (event-driven).
+- Compute realized/unrealized PnL.
+- Optional: accounting-like ledger for cash/shares/fees.
+- Reconcile balances with venue.
+
+Split:
+- posttrade/positions.py (projection from Fill events)
+- posttrade/pnl.py
+- posttrade/reconcile.py
+
+### G) Event Store / Replay / Backtest Harness
+Responsibilities:
+- Append-only event persistence.
+- Build projections/materialized views (orders, positions).
+- Replay events to reproduce behavior.
+
+Split:
+- events/types.py (all event schemas)
+- events/store.py (append + read streams)
+- events/replay.py (replayer)
+- backtest/engine.py (feeds historical events)
+
+### H) Observability + Ops Control Plane
+Responsibilities:
+- Structured logs, metrics, tracing.
+- Feature flags: execution_enabled, paper_trading, kill_switch.
+- Alerting hooks.
+
+Split:
+- obs/logging.py
+- obs/metrics.py
+- obs/tracing.py
+- ops/control.py
+
+## 2) Data Contracts (Institutional Pattern)
+Everything important crosses boundaries as one of:
+- Events: immutable facts (append-only)
+- Commands: requests to do something (submit/cancel)
+- Queries: read-only projections
+
+Do NOT pass raw dicts across modules. Use typed models.
+
+## 3) Process Topology (Single-process first, multi-process later)
+
+Phase 1 (simple, reliable):
+- One Python process with internal async tasks:
+  - Market data task(s)
+  - Strategy loop task(s)
+  - Execution task(s)
+  - Venue user-stream listener task(s)
+  - Event writer task
+
+Phase 2 (institutional scale):
+- Split into services connected by a bus (Kafka/Redpanda/NATS):
+  - mdp-service
+  - strategy-service
+  - risk-service
+  - oms-service
+  - execution-service
+  - posttrade-service
+But keep the SAME boundaries and contracts so migration is mechanical.
+
+## 4) Folder Layout Recommendation (Python)
+src/
+  adapters/
+    venue_x/
+      market_data.py
+      trading_api.py
+      user_stream.py
+  md/
+  strategies/
+  risk/
+  oms/
+  execution/
+  posttrade/
+  events/
+  obs/
+  ops/
+  common/  (clock, ids, config, utils)
+
+## 5) Golden Rules
+- Strategy produces intents, not orders.
+- Risk is a hard gate, returns allow/deny with reasons.
+- OMS is the only writer of order state.
+- Everything emits events. Replay should explain any action.

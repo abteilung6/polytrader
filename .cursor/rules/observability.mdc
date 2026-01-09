@@ -1,0 +1,121 @@
+# Observability — Audit, Logs, Metrics, Tracing (Python)
+
+Institutional systems are debuggable by design.
+If it’s not observable, it doesn’t exist.
+
+## 1) Event Sourcing Standard
+All important actions emit immutable events to an append-only store.
+
+### Required Event Fields
+- event_id (uuid)
+- ts_wall (UTC ISO)
+- ts_mono (monotonic ns)
+- correlation_id (per decision/order lifecycle)
+- run_id (process start id)
+- strategy_id
+- venue / market / symbol
+- schema_version
+- source ("mdp", "strategy", "risk", "oms", "exec", "posttrade")
+
+### Core Event Types
+MarketDataEvent
+FeatureEvent
+SignalEvent
+OrderIntentEvent
+RiskCheckEvent
+OrderCreatedEvent
+OrderSubmittedEvent
+OrderAckEvent
+OrderRejectedEvent
+CancelRequestedEvent
+OrderCanceledEvent
+FillEvent
+PositionUpdatedEvent
+PnLEvent
+ReconcileEvent
+CircuitBreakerEvent
+KillSwitchEvent
+SystemStartedEvent
+SystemStoppedEvent
+
+## 2) Correlation IDs (Non-negotiable)
+- One correlation_id per "decision → resulting order actions".
+- Orders also have:
+  - order_id (internal uuid)
+  - client_order_id (idempotency key)
+  - venue_order_id (when known)
+
+Every log line must include correlation_id when applicable.
+
+## 3) Structured Logging (JSON)
+Mandatory fields when relevant:
+- correlation_id, order_id, client_order_id, venue_order_id
+- strategy_id, run_id
+- market, venue
+- event_type
+- latency_ms
+- error_class (retryable/fatal)
+
+Never log secrets.
+
+## 4) Metrics (Minimum Set)
+### Market Data
+- md_updates_total
+- md_staleness_seconds (gauge)
+- md_gap_total
+- md_reconnect_total
+- md_book_mid (gauge)
+- md_spread (gauge)
+
+### Strategy
+- strategy_eval_total
+- strategy_eval_latency_ms (histogram)
+- order_intents_total
+
+### Risk
+- risk_checks_total{allowed=true/false}
+- risk_denials_total{reason=...}
+- risk_projected_exposure (gauge)
+
+### OMS/Execution
+- orders_submitted_total
+- orders_live (gauge)
+- cancels_total
+- rejects_total
+- fills_total
+- submit_latency_ms, ack_latency_ms, fill_latency_ms
+- adapter_errors_total{class=...}
+- queue_depth (gauge)
+
+### Posttrade
+- position_net{market=...} (gauge)
+- pnl_realized, pnl_unrealized (gauge)
+- drawdown (gauge)
+
+### Safety
+- execution_enabled (gauge 0/1)
+- kill_switch (gauge 0/1)
+- circuit_breaker_total{type=...}
+
+## 5) Tracing (OpenTelemetry style)
+Span hierarchy suggestion:
+- StrategyCycle
+  - RiskCheck
+  - OMSCreate
+  - ExecSubmit
+- VenueUserStreamMessage
+  - OMSUpdate
+  - PosttradeUpdate
+- ReconciliationRun
+
+Each span includes correlation_id.
+
+## 6) Replayability Checks
+- Every production run writes:
+  - ConfigLoaded (hash)
+  - SystemStarted/SystemStopped
+  - VenueConnected/VenueDisconnected
+- On restart, system can:
+  - rebuild projections from event store
+  - reconcile venue truth
+  - continue safely (or disable execution)

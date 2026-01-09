@@ -1,0 +1,76 @@
+# Trading — Institutional Engineering Guardrails (Python)
+
+This file defines how we design trading logic and what "good" looks like.
+
+## 1) What We Trade vs How We Trade
+- What: strategy models produce targets/intents based on market + state.
+- How: execution layer translates those intents into venue-specific actions.
+
+Keep these separate.
+
+## 2) Canonical Models (Required)
+Use typed models for:
+- Market snapshot / book (mid, spread, levels, seq, ts)
+- OrderIntent: side, qty, limit_price, tif, flags (post_only)
+- Order: internal state + venue ids
+- Fill: price, qty, fee, ts
+- Position: net, avg price, realized/unrealized
+- RiskResult: allowed + reason codes + computed exposures
+
+No dicts across boundaries.
+
+## 3) Pricing & Order Policy Defaults (Safe)
+- Default to limit orders (not market).
+- Apply price bands:
+  - if buy: limit_price <= mid * (1 + max_buy_slippage)
+  - if sell: limit_price >= mid * (1 - max_sell_slippage)
+- Default to small size unless explicitly configured.
+- Always include a time-in-force policy (GTC/IOC/etc.) appropriate to venue.
+- Avoid aggressive cancels; enforce cancel throttles.
+
+## 4) Risk Policy Reason Codes (Standardize)
+Examples:
+- RISK_MAX_POSITION
+- RISK_MAX_NOTIONAL
+- RISK_ORDER_TOO_LARGE
+- RISK_PRICE_OUT_OF_BOUNDS
+- RISK_DATA_STALE
+- RISK_RATE_LIMIT
+- RISK_KILL_SWITCH
+- RISK_RECONCILE_DIVERGENCE
+
+Risk checks must emit:
+- allowed/denied
+- reason codes
+- key inputs (mid, qty, projected position, limits version)
+
+## 5) Execution Tactics (Keep Simple)
+Phase 1:
+- One order per intent.
+- Optional: split large intent into N child orders (deterministic).
+- Optional: passive-first (post-only) then relax if not filled.
+
+Phase 2:
+- Child order management, pegging, smart routing (only if needed).
+
+## 6) Failure Modes (Always Handle Explicitly)
+- adapter disconnect
+- websocket gaps
+- partial acks
+- duplicate messages
+- venue rejects
+- fills after cancel request (race)
+- replay/restart with in-flight orders
+
+Rule:
+- never "assume" success; always confirm via user stream or REST reconcile.
+
+## 7) Config & Change Control
+- Limits and strategy params must be validated and versioned.
+- Emit ConfigLoaded event with config hash + version.
+- Any config change must be auditable.
+
+## 8) “No Surprise Orders”
+- Default execution_enabled = false.
+- Provide a dry-run mode that produces intents but never submits.
+- Execution requires an ExecutionPermit object obtained only after health/risk initialization.

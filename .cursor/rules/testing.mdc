@@ -1,0 +1,191 @@
+# testing.md — Institutional Testing Standard (Trading Systems)
+
+This repo treats testing as a **risk control** and a **change-control mechanism**.
+If core trading behavior changes without tests, it is a production incident waiting to happen.
+
+Source-of-truth: `flow.md`.  
+Tests must validate each major flow and the invariants between layers.
+
+---
+
+## 1) Testing Pyramid (What we require)
+
+### A) Unit tests (fast, deterministic) — MOST OF THE SUITE
+Targets:
+- alpha models (stateless scoring)
+- portfolio sizing / constraints / intent generation
+- risk policies + aggregation order
+- OMS FSM transitions (pure transition functions)
+- normalization functions (raw → canonical)
+
+Rules:
+- no network
+- no time() directly (use injected Clock)
+- no randomness without seeded RNG
+- no sleeps
+- property-based tests encouraged for FSM/risk boundaries
+
+### B) Integration tests (bounded, realistic)
+Targets:
+- “in-proc pipeline” wiring:
+  md → state → alpha → portfolio → risk → oms → execution (dry-run adapter)
+- user stream normalization + OMS update handling
+- reconciliation diff generation
+
+Rules:
+- use fake venue adapters (deterministic)
+- replay canned market/user-stream sequences
+- assert emitted events + resulting projections (orders/positions)
+
+### C) Replay / Golden tests (highest value for trading)
+Targets:
+- given an event log, system produces:
+  - identical decisions
+  - identical intents
+  - identical OMS state
+  - identical projections
+
+Rules:
+- event logs are versioned fixtures
+- results are stable across refactors
+- any difference must be explained in test name/PR description
+
+---
+
+## 2) Mandatory Invariants to Test (Non-Negotiable)
+
+### Safety & Boundaries
+- Strategy/alpha never calls venue adapters.
+- Risk runs before OMS submission.
+- OMS is sole writer of order state.
+- Execution cannot mutate OMS state directly.
+
+### Determinism
+- Same inputs produce same outputs:
+  - alpha scores
+  - portfolio targets/intents
+  - risk allow/deny + reasons
+  - OMS FSM transitions
+
+### OMS correctness (state machine)
+- No invalid transitions.
+- Duplicate events are idempotent.
+- Out-of-order updates handled safely.
+- Fill-after-cancel-request is handled correctly.
+- Reject paths emit proper events + terminal states.
+
+### Risk correctness
+- Hard veto works and emits reason codes.
+- Limits version changes are detected/audited.
+- Stale data veto triggers correctly.
+
+### Reconciliation
+- Detect orphan venue orders (venue has order, OMS doesn’t).
+- Detect phantom internal orders (OMS thinks live, venue doesn’t).
+- Divergence triggers circuit breaker when severe.
+
+---
+
+## 3) Required Test Harness Components
+
+### A) FakeClock
+- deterministic time progression
+- monotonic + wall time support
+
+### B) FakeVenue (deterministic adapter)
+- accepts submit/cancel
+- emits user-stream events (ack/fill/cancel) deterministically
+- supports injecting:
+  - rejects
+  - partial fills
+  - delayed acks
+  - duplicate messages
+  - out-of-order sequences
+
+### C) EventCapture
+- capture every emitted event during a test
+- assert:
+  - event ordering where required
+  - event correlation_id consistency
+  - required fields exist
+  - no missing RiskCheckEvent
+
+---
+
+## 4) Test Categories & Folder Structure
+
+tests/
+  unit/
+    alpha/
+    portfolio/
+    risk/
+    oms/
+    md/
+  integration/
+    pipeline_dry_run_test.py
+    user_stream_handling_test.py
+    reconcile_test.py
+  replay/
+    test_replay_golden_*.py
+    fixtures/
+      event_log_*.jsonl
+
+---
+
+## 5) “No Surprise Orders” Test Rule
+
+Any change that can alter trading behavior MUST include at least one of:
+- unit test for pure logic
+- integration test for pipeline wiring
+- replay/golden test proving no behavioral drift
+
+If execution is enabled in any environment:
+- there must be a kill-switch test
+- there must be a data-stale circuit breaker test
+
+---
+
+## 6) What to Assert (Institutional Style)
+
+Prefer asserting on:
+- emitted events (facts)
+- resulting projections (orders/positions/pnl)
+instead of asserting on internal function call order.
+
+Events are the audit truth.
+
+---
+
+## 7) Property-Based Tests (Recommended for Trading Core)
+
+High value targets:
+- OMS FSM transitions:
+  - random valid sequences must never violate invariants
+  - duplicates must not change final state
+- risk policies:
+  - projected exposure must never exceed max if allowed
+- normalization:
+  - must not crash on malformed messages; must fail fast cleanly
+
+---
+
+## 8) CI Gate (Required Expectations)
+
+Minimum gates for merging:
+- ruff/format/lint pass
+- mypy/pyright (at least for core models/contracts)
+- unit tests pass
+- integration tests pass
+- replay tests pass (if touched core flows)
+
+A PR that changes OMS/risk/execution without tests is invalid.
+
+---
+
+## 9) Change Control Principle
+
+If you can’t express the behavior change as:
+- “event sequence before vs after”
+then you don’t understand the change enough to ship it.
+
+Testing is the proof of understanding.

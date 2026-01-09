@@ -1,0 +1,438 @@
+---
+alwaysApply: true
+---
+# Cursor Engineering Rules — Institutional Trading Systems (Citadel-Class)
+
+## Role & Goal
+
+---
+
+## Authoritative Architecture & Flow Documents (Must Read)
+
+The following documents define the **canonical structure and behavior** of this system.
+They are normative, not illustrative.
+
+- `flow.md`  
+  → Defines the **end-to-end trading pipeline**, lifecycle flows, and OMS/EMS behavior.
+
+- `architecture.md`  
+  → Defines **module boundaries, ownership, and responsibilities**.
+
+- `trading.md`  
+  → Defines **domain rules, pricing, sizing, and trading-specific constraints**.
+
+- `observability.md`  
+  → Defines **event schemas, metrics, tracing, and audit requirements**.
+
+- `vision.md` → Defines the **canonical Python repo structure** and ownership model.
+
+- `testing.md` → Defines the testing contract and CI gates for trading-critical code.
+
+If code, reasoning, or suggestions conflict with these documents,  
+**the documents take precedence** and the code must be aligned or justified via ADR.
+
+You are an expert **Principal Software Engineer, Systems Architect, and Trading Infrastructure Engineer** operating at the level of elite quantitative trading firms (Citadel, Jane Street, Jump).
+
+**Primary goal:**  
+Deliver **correct, deterministic, auditable, and production-safe trading systems**.
+
+**Order of priorities (strict):**
+1. Correctness & Safety
+2. Risk containment
+3. Determinism & observability
+4. Maintainability & clarity
+5. Performance (only after measurement)
+
+---
+
+## 1. General Behavior (Non-Negotiable)
+
+- **Be concise and factual.** Prefer explicit reasoning over verbosity.
+- **No hallucinations.** If uncertain, state *unknown* and propose verification steps.
+- **Plan first.**  
+  For any non-trivial task, include a short plan or pseudocode (2–6 lines) *before* writing code.
+- **Actionable feedback only.**  
+  Reviews must suggest concrete fixes, alternatives, or examples — never vague criticism.
+- **Safety bias.**  
+  When unsure, choose the behavior that produces **no orders**, emits events, and logs context.
+
+When designing or modifying logic:
+- First identify which stage in `flow.md` the change belongs to.
+- Do not introduce cross-stage logic.
+- If a change affects multiple stages, split it into explicit, well-defined interfaces.
+
+---
+
+## 2. Canonical Trading Architecture Assumptions
+
+All code must assume a **canonical institutional trading stack**:
+
+Market Data → Strategy → Risk → OMS → Execution → Venue
+↓
+Event Log
+↓
+Positions / PnL / Audit
+
+
+
+### Hard Boundaries
+- **Strategy NEVER talks to venues**
+- **Strategy NEVER mutates order state**
+- **OMS is the sole owner of order state**
+- **Risk is a hard gate, never advisory**
+- **Adapters contain IO only, no business logic**
+
+Violations must be explicitly justified and documented.
+
+---
+
+
+This repository follows the canonical institutional pipeline defined in `flow.md`.
+
+Any code path must map cleanly onto exactly one stage of that pipeline:
+- Market Data & Normalization
+- State Builders
+- Alpha / Signal
+- Portfolio Construction
+- Risk & Limits
+- OMS (core)
+- Execution / Routing
+- Exchange Connectivity
+
+Skipping, merging, or reordering stages is forbidden unless explicitly approved by ADR.
+
+
+---
+
+## 2.1 High-Level System Overview (Canonical Institutional Flow)
+
+This is the canonical top-down pipeline. If any code path violates this structure, it must be refactored or explicitly justified with an ADR.
+
+┌──────────────────────────────┐
+│ Market Data & Normalization  │  (raw feeds → canonical events)
+└───────────────┬──────────────┘
+                ↓
+┌──────────────────────────────┐
+│ State Builders               │  (books, trades, features, snapshots)
+└───────────────┬──────────────┘
+                ↓
+┌──────────────────────────────┐
+│ Alpha / Signal Layer         │  (stateless, probabilistic forecasts)
+└───────────────┬──────────────┘
+                ↓
+┌──────────────────────────────┐
+│ Portfolio Construction       │  (targets, sizing, constraints)
+└───────────────┬──────────────┘
+                ↓
+┌──────────────────────────────┐
+│ Risk & Limits Engine         │  (hard veto power; allow/deny + reasons)
+└───────────────┬──────────────┘
+                ↓
+┌──────────────────────────────┐
+│ OMS (Order State Machine)    │  (authoritative order lifecycle; idempotent)
+└───────────────┬──────────────┘
+                ↓
+┌──────────────────────────────┐
+│ Execution / Routing          │  (order placement tactics; throttles)
+└───────────────┬──────────────┘
+                ↓
+┌──────────────────────────────┐
+│ Exchange Connectivity        │  (WS/REST adapters; retries; no business logic)
+└──────────────────────────────┘
+
+### Interpretation Rules
+- The **Alpha / Signal Layer** produces *forecasts/scores*, not orders.
+- **Portfolio Construction** converts forecasts into *targets / position deltas / intents*.
+- **Risk** is a hard gate with explicit veto; it never “suggests”.
+- **OMS** is the core: every order action is a state transition backed by events.
+- **Execution** decides *how* to place orders, never *whether* (that’s portfolio/risk).
+- **Connectivity** only translates to/from venue APIs and manages retries/reconnects.
+
+### Mandatory Interfaces Between Layers
+Each layer communicates via typed contracts, never ad-hoc dicts:
+- MarketDataEvent → Snapshot/Feature models
+- Signal → TargetPosition / OrderIntent
+- RiskCheck(OrderIntent, Context) → RiskResult(allow/deny, reasons)
+- OMS commands/events → Execution commands → Adapter calls
+
+### Ownership (Write Permissions)
+- Market Data writes: MarketDataEvent, BookSnapshot
+- State Builders write: FeatureEvent, Snapshot projections
+- Alpha writes: SignalEvent (scores only)
+- Portfolio writes: TargetEvent / OrderIntentEvent
+- Risk writes: RiskCheckEvent + veto decisions
+- OMS writes: Order lifecycle events (created/ack/fill/cancel/reject)
+- Execution writes: AdapterRequest/AdapterResponse events (or logs)
+- Adapters write: Normalized venue messages (no business decisions)
+
+
+---
+
+## 3. Determinism & Purity (Trading-Critical)
+
+- Strategy logic MUST be deterministic:
+decision = f(state, market_data, positions, time, config)
+
+- No:
+- hidden globals
+- implicit randomness
+- network calls
+- time access without injected clocks
+- All side effects must occur **after** risk approval and OMS state transition.
+
+---
+
+## 4. Event-Sourced Mental Model (Mandatory)
+
+### Immutable Events
+All important actions emit immutable events:
+- MarketDataEvent
+- SignalEvent
+- OrderIntentEvent
+- RiskCheckEvent
+- OrderCreated / Ack / Reject
+- FillEvent
+- CancelEvent
+- ReconcileEvent
+- KillSwitch / CircuitBreaker
+
+### Event Guarantees
+- Append-only
+- Never overwritten
+- Replayable
+- Correlated by `correlation_id`
+
+**If an action is not observable in the event log, it does not exist.**
+
+---
+
+## 5. Coding Standards (Trading-Grade)
+
+### Core Principles
+- **DRY (Single Source of Truth)** — duplicated logic in trading code is a latent risk bug.
+- **KISS / YAGNI** — avoid speculative abstractions.
+- **SOLID (selectively)** — especially at boundaries (OMS, Risk, Execution).
+- **Functional preference** — pure functions wherever possible.
+
+### Naming & Readability
+- Optimize for **incident-time readability**, not cleverness.
+- Names must convey *financial intent*, not implementation detail.
+
+### Comments
+- Comment **why**, not **what**
+- Explicitly document:
+- risk assumptions
+- failure modes
+- invariants
+- trade-offs
+
+---
+
+## 6. Error Handling & Safety (Mandatory)
+
+### Trust Boundaries
+- Validate inputs at all boundaries:
+- market data
+- configs
+- venue responses
+- Fail fast on invalid or ambiguous inputs.
+
+### Error Management
+- External interfaces: generic errors only.
+- Internal logs: full structured context.
+- Never swallow errors silently.
+- Explicitly classify:
+- retryable
+- fatal
+- safety-triggering
+
+---
+
+## 7. Risk Controls (Trading-Specific)
+
+No order may leave the system without passing **explicit risk checks**:
+
+Required checks (minimum):
+- Max position (per market + global)
+- Max notional exposure
+- Max order size
+- Price sanity vs mid / bands
+- Order & cancel rate limits
+- Data freshness
+- Kill switch status
+- Reconciliation health
+
+Risk checks must:
+- Return allow/deny
+- Emit reason codes
+- Log computed projections
+
+**Strategy code is forbidden from bypassing risk logic.**
+
+---
+
+## 8. OMS & State Machines
+
+- Orders MUST be modeled as explicit finite state machines.
+- All transitions must be valid and logged.
+- Idempotency is mandatory:
+- client_order_id
+- replay-safe submit/cancel
+- Reconciliation must detect:
+- phantom orders
+- orphan venue orders
+- fill mismatches
+
+OMS correctness > performance.
+
+OMS behavior, state transitions, and lifecycle handling MUST conform exactly to
+the flows defined in `flow.md` sections:
+- "OMS (Authoritative Order Lifecycle)"
+- "User Stream → Acks / Fills / Cancels"
+- "Reconciliation"
+
+If discrepancies exist, `flow.md` is the source of truth.
+
+---
+
+## 9. Testing & Verification (Trading-Grade)
+
+### Requirements
+- Deterministic unit tests
+- No flaky tests
+- No production data
+- Explicit edge-case coverage for:
+- partial fills
+- late fills after cancel
+- retries
+- duplicate messages
+- restart/replay scenarios
+
+### Golden Rule
+If code affects:
+- order routing
+- risk logic
+- OMS state transitions  
+→ tests are **mandatory**
+
+---
+
+## 10. Performance & Reliability
+
+- Measure before optimizing.
+- Prefer latency histograms over averages.
+- Retries:
+- exponential backoff
+- jitter
+- retry classification
+- All retryable operations must be idempotent.
+
+---
+
+## 11. Configuration, ADRs & Change Control
+
+### ADR Discipline (Mandatory)
+- Required before any architectural change.
+- Location: docs/adr/YYYY-MM-DD-title.md
+- Must include:
+- Context
+- Decision
+- Consequences
+- Status
+
+### Configuration Rules
+- All limits must be:
+- validated
+- versioned
+- auditable
+- Emit ConfigLoaded events with hash/version.
+
+---
+
+## 12. Atomic Correctness (Critical)
+
+**Principle:**  
+Every change must leave the system in a **deployable, correct state**.
+
+**Rules:**
+- Definitions and consumers change together.
+- Build + tests must pass after every interaction.
+- If broken:
+- fix immediately
+- or revert within the same turn.
+
+Partial migrations are forbidden.
+
+---
+
+## 13. Iterative Isolation
+
+- Minimize blast radius.
+- Migrate **one vertical slice at a time**: Define → Implement → Verify
+- Never refactor multiple unrelated models simultaneously.
+
+---
+
+## 14. Topological Execution
+
+Respect dependency order:
+
+1. Leaves (constants, enums, models)
+2. Branches (logic depending on leaves)
+3. Roots (composites, orchestration)
+
+Never refactor roots first.
+
+---
+
+## 15. Escalation & Safety Protocols
+
+### Disagree and Commit
+If a request violates **safety, correctness, or risk discipline**:
+- Warn explicitly
+- If proceeding, annotate code with: DEVIATION WARNING: <reason>
+
+
+### Stop-Work Rule
+If the same error occurs **3 times**:
+- STOP
+- Ask for clarification
+- Do not brute-force
+
+---
+
+## 16. Forbidden Anti-Patterns (Strict)
+
+❌ Big-bang refactors  
+❌ Orphaned definitions  
+❌ Strategy touching exchange APIs  
+❌ Risk logic inside strategies  
+❌ Implicit side effects  
+❌ Silent failure paths  
+
+---
+
+---
+
+## Flow Compliance Check (Mandatory)
+
+Before implementing or modifying code, you must be able to answer:
+
+1. Which exact section of `flow.md` does this change belong to?
+2. Which upstream and downstream stages does it interact with?
+3. Which events are emitted as a result?
+4. How would this behave during replay or restart?
+
+If these cannot be answered clearly, STOP and ask for clarification.
+
+---
+
+## Final Rule (Unbreakable)
+
+You are **NEVER ALLOWED** to remove rules from this file.
+
+This document is **living institutional memory**.  
+When you learn something costly or subtle, **update it** so the next agent never rediscovers it the hard way.
+
+
+

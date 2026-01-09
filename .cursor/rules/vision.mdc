@@ -1,0 +1,242 @@
+# vision.md — Canonical Institutional Python Trading System (Repo Vision)
+
+This file is **architecture-as-communication**.
+A reader must understand the system in < 2 minutes.
+
+Source of truth:
+- `flow.md` defines canonical runtime flows
+- `architecture.md` defines boundaries and responsibilities
+- This `vision.md` defines the **ideal repo shape** that makes those boundaries obvious
+
+If code does not fit cleanly into exactly one box in the pipeline, it belongs in the wrong place.
+
+---
+
+## 1) North Star Pipeline (Maps 1:1 to packages)
+
+┌──────────────────────────────┐
+│ Market Data & Normalization  │  → trading/md/*
+└───────────────┬──────────────┘
+                ↓
+┌──────────────────────────────┐
+│ State Builders               │  → trading/state/*
+└───────────────┬──────────────┘
+                ↓
+┌──────────────────────────────┐
+│ Alpha / Signal Layer         │  → trading/alpha/*
+└───────────────┬──────────────┘
+                ↓
+┌──────────────────────────────┐
+│ Portfolio Construction       │  → trading/portfolio/*
+└───────────────┬──────────────┘
+                ↓
+┌──────────────────────────────┐
+│ Risk & Limits Engine         │  → trading/risk/*
+└───────────────┬──────────────┘
+                ↓
+┌──────────────────────────────┐
+│ OMS (Order State Machine)    │  → trading/oms/*   (CORE)
+└───────────────┬──────────────┘
+                ↓
+┌──────────────────────────────┐
+│ Execution / Routing          │  → trading/execution/*
+└───────────────┬──────────────┘
+                ↓
+┌──────────────────────────────┐
+│ Exchange Connectivity        │  → trading/adapters/*
+└──────────────────────────────┘
+
+Cross-cutting:
+- events & replay → trading/events/*
+- posttrade → trading/posttrade/*
+- observability → trading/obs/*
+- operational controls → trading/ops/*
+- shared primitives → trading/common/*
+
+---
+
+## 2) “Institutional” Repo Structure (Python-first)
+
+Recommended top-level layout:
+
+trading-system/
+├── README.md
+├── pyproject.toml
+├── .cursor/
+│   ├── rules.md
+│   ├── flow.md
+│   ├── architecture.md
+│   ├── trading.md
+│   ├── observability.md
+│   └── vision.md                 ← this file
+├── src/
+│   └── trading/
+│       ├── common/               # pure primitives only
+│       │   ├── clock.py          # injected Clock (no direct time.time())
+│       │   ├── ids.py            # correlation_id, run_id, client_order_id
+│       │   ├── config.py         # validated config + hashing/versioning
+│       │   ├── types.py          # shared enums, Money, Side, etc.
+│       │   └── errors.py         # typed error classes + classifications
+│       │
+│       ├── events/               # immutable events + store + replay
+│       │   ├── types.py          # Event schemas (pydantic/dataclasses)
+│       │   ├── bus.py            # simple in-proc event bus (Phase 1)
+│       │   ├── store.py          # append-only store interface + impl
+│       │   └── replay.py         # rebuild projections from events
+│       │
+│       ├── md/                   # market data ingest + normalization
+│       │   ├── adapters/         # md IO only (WS/REST)
+│       │   │   └── exchange_x.py
+│       │   ├── normalization.py  # raw → canonical messages
+│       │   ├── book.py           # order book state machine
+│       │   ├── features.py       # derived features (pure where possible)
+│       │   └── health.py         # staleness/gaps/circuit triggers
+│       │
+│       ├── state/                # deterministic projections (builders)
+│       │   ├── snapshots.py      # market snapshot model + versioning
+│       │   ├── registry.py       # manages builders + outputs
+│       │   └── projections.py    # projections driven by events
+│       │
+│       ├── alpha/                # stateless forecasting/signal layer
+│       │   ├── base.py           # AlphaModel Protocol
+│       │   ├── momentum.py
+│       │   └── volatility.py
+│       │
+│       ├── portfolio/            # targets, sizing, constraints
+│       │   ├── targets.py        # target exposures / deltas
+│       │   ├── sizing.py         # translate target → size
+│       │   ├── constraints.py    # portfolio constraints & clipping
+│       │   └── intents.py        # target → OrderIntent
+│       │
+│       ├── risk/                 # hard veto engine (pre-trade)
+│       │   ├── limits.py         # limits model + versions
+│       │   ├── policies.py       # pure rule checks (maxpos, bands, rates)
+│       │   └── engine.py         # runs policies in order + aggregates result
+│       │
+│       ├── oms/                  # CORE: state machine + idempotency + reconcile
+│       │   ├── models.py         # Order, Fill, state enums
+│       │   ├── fsm.py            # pure transitions + invariants
+│       │   ├── store.py          # event-backed order projection + queries
+│       │   ├── idempotency.py    # client_order_id + dedupe rules
+│       │   └── reconcile.py      # venue truth vs internal
+│       │
+│       ├── execution/            # convert OMS commands → adapter calls
+│       │   ├── router.py         # routes to venue adapters
+│       │   ├── pricing.py        # limit price policy (bands, passive-first)
+│       │   ├── tactics.py        # split, post-only, escalation
+│       │   └── throttle.py       # order/cancel throttling (non-risk)
+│       │
+│       ├── adapters/             # venue connectivity (trading IO only)
+│       │   └── exchange_x/
+│       │       ├── rest.py       # place/cancel + snapshots
+│       │       ├── websocket.py  # connectivity primitives
+│       │       └── user_stream.py# orders/fills stream normalization
+│       │
+│       ├── posttrade/            # positions & pnl projections
+│       │   ├── positions.py      # derived from FillEvents
+│       │   ├── pnl.py            # realized/unrealized
+│       │   └── reconcile.py      # balances/positions venue reconcile
+│       │
+│       ├── obs/                  # logging/metrics/tracing helpers
+│       │   ├── logging.py        # structured JSON logging
+│       │   ├── metrics.py        # counters/histograms/gauges
+│       │   └── tracing.py        # correlation spans
+│       │
+│       ├── ops/                  # kill switch, flags, health gates
+│       │   ├── control.py        # execution_enabled, kill_switch toggles
+│       │   └── health.py         # readiness/health evaluation
+│       │
+│       └── app.py                # wiring/orchestration (NO business logic)
+│
+├── tests/
+│   ├── unit/
+│   ├── integration/
+│   └── replay/
+└── docs/
+    └── adr/
+
+---
+
+## 3) Ownership & Write Permissions (Who is allowed to write what)
+
+- md/* writes: MarketDataEvent, FeatureEvent
+- state/* writes: Snapshot projections only
+- alpha/* writes: SignalEvent only (scores/forecasts)
+- portfolio/* writes: TargetEvent, OrderIntentEvent
+- risk/* writes: RiskCheckEvent (allow/deny + reasons)
+- oms/* writes: all Order lifecycle events (created/ack/fill/cancel/reject)
+- execution/* writes: execution logs/events (request/response/latency)
+- adapters/* writes: normalized inbound venue events only (no decisions)
+- posttrade/* writes: PositionUpdatedEvent, PnLEvent
+
+If a module writes outside its ownership, it's an architecture violation.
+
+---
+
+## 4) The 6-Line “Whole System” Mental Model
+
+A correct system can be summarized as:
+
+market_event = md_adapter.recv()
+snapshot     = state_registry.update(market_event)
+
+signal       = alpha.score(snapshot)
+target       = portfolio.build(signal, positions, constraints)
+intent       = portfolio.to_intent(target)
+
+result       = risk.check(intent, context)
+if result.allowed:
+    order = oms.create(intent)
+    execution.submit(order)
+
+Everything else exists to:
+- make this deterministic
+- make it safe
+- make it observable
+- make it replayable
+
+---
+
+## 5) Scaling Path (Institutional Roadmap)
+
+Phase 1 (single Python process):
+- In-proc EventBus + append-only EventStore
+- Async tasks for:
+  - md ingest
+  - user stream
+  - strategy cycle
+  - reconciliation
+  - event persistence
+
+Phase 2 (service split, same boundaries):
+- Replace in-proc bus with Kafka/NATS/Redpanda
+- Run md/alpha/portfolio/risk/oms/execution as separate processes
+- Keep contracts identical so migration is mechanical
+
+---
+
+## 6) Common Failure Modes (Design for them upfront)
+
+- data stale / gaps / reconnect
+- duplicate messages
+- out-of-order acks/fills
+- fill after cancel request
+- REST snapshot differs from stream
+- retries causing duplicates unless idempotent
+- restart with in-flight orders
+
+The structure above is chosen specifically to make these failures:
+- detectable (events/metrics)
+- containable (risk + circuit breakers)
+- debuggable (replay + correlation ids)
+
+---
+
+## 7) Non-Negotiable Principles (Institutional Grade)
+
+- Strategy/Alpha produces no orders.
+- Risk is a hard gate before OMS submission.
+- OMS is the only owner of order state.
+- Adapters are IO only.
+- Everything emits events; replay explains behavior.
+- Default safe mode is: execution disabled.
