@@ -96,10 +96,15 @@ def _check_market_expiration(
     portfolio_manager: PortfolioManager | None,
     market_expirations: dict[str, datetime],
     latest_ticks: dict[str, MarketTick],
-) -> None:
-    """Check for expired markets and settle positions."""
+    args: argparse.Namespace,
+) -> bool:
+    """Check for expired markets and settle positions.
+    
+    Returns:
+        True if trading should stop (loss threshold exceeded), False otherwise
+    """
     if not portfolio_manager:
-        return
+        return False
     
     now_utc = datetime.now(timezone.utc)
     expired_markets: list[str] = []
@@ -115,6 +120,15 @@ def _check_market_expiration(
         down_tick = latest_ticks.get("DOWN")
         
         if up_tick and down_tick and up_tick.market_id == expired_market_id:
+            # Get positions before expiration to calculate cost basis
+            portfolio = portfolio_manager.get_portfolio()
+            positions_before: dict[Outcome, tuple[float, float]] = {}  # outcome -> (quantity, cost_basis)
+            
+            for (m_id, outcome), position in portfolio.positions.items():
+                if m_id == expired_market_id:
+                    cost_basis = position.quantity * position.avg_price
+                    positions_before[outcome] = (position.quantity, cost_basis)
+            
             # Determine winner based on highest price
             settlement_info = portfolio_manager.expire_positions(
                 market_id=expired_market_id,
@@ -126,6 +140,27 @@ def _check_market_expiration(
             positions_settled = settlement_info["positions_settled"]
             total_payout = settlement_info["total_payout"]
             
+            # Check for losses exceeding $20 threshold (only in --money mode)
+            should_stop = False
+            if args.money:
+                for outcome, (quantity, cost_basis) in positions_before.items():
+                    if outcome == winner:
+                        # Winning position: payout = quantity * 1.0, loss = cost_basis - payout
+                        payout = quantity * 1.0
+                        loss = cost_basis - payout
+                    else:
+                        # Losing position: payout = 0, loss = cost_basis
+                        loss = cost_basis
+                    
+                    if loss > 20.0:
+                        print(f"\n🛑 STOPPING TRADING: Single trade loss of ${loss:.2f} exceeds $20 threshold!")
+                        print(f"   Market: {expired_market_id}")
+                        print(f"   Outcome: {outcome}")
+                        print(f"   Cost basis: ${cost_basis:.2f}")
+                        print(f"   Loss: ${loss:.2f}")
+                        should_stop = True
+                        break
+            
             print_market_expired(
                 market_id=expired_market_id,
                 winner=winner,
@@ -135,9 +170,14 @@ def _check_market_expiration(
                 total_payout=total_payout,
                 balance=portfolio_manager.get_balance(),
             )
+            
+            if should_stop:
+                return True
         
         # Remove from tracking
         del market_expirations[expired_market_id]
+    
+    return False
 
 
 async def _handle_interval_change(
@@ -154,7 +194,7 @@ async def _handle_interval_change(
     secrets: PolymarketSecrets,
     bus: EventBus,
     store: MemoryTickStore,
-) -> tuple[str, str | None]:
+) -> tuple[str, str | None] | None:
     """Handle interval change for auto-refresh mode."""
     if not auto_refresh:
         return market_slug, current_interval_id
@@ -174,6 +214,15 @@ async def _handle_interval_change(
                     up_tick = latest_ticks.get("UP")
                     down_tick = latest_ticks.get("DOWN")
                     if up_tick and down_tick:
+                        # Get positions before expiration to calculate cost basis
+                        portfolio = portfolio_manager.get_portfolio()
+                        positions_before: dict[Outcome, tuple[float, float]] = {}
+                        
+                        for (m_id, outcome), position in portfolio.positions.items():
+                            if m_id == market_slug:
+                                cost_basis = position.quantity * position.avg_price
+                                positions_before[outcome] = (position.quantity, cost_basis)
+                        
                         settlement_info = portfolio_manager.expire_positions(
                             market_id=market_slug,
                             up_price=up_tick.mid,
@@ -183,6 +232,23 @@ async def _handle_interval_change(
                         total_payout = settlement_info["total_payout"]
                         print(f"   Settled expired market: {market_slug}")
                         print(f"   Winner: {winner}, Payout: ${total_payout:.2f} USDC")
+                        
+                        # Check for losses exceeding $20 threshold (only in --money mode)
+                        if args.money:
+                            for outcome, (quantity, cost_basis) in positions_before.items():
+                                if outcome == winner:
+                                    payout = quantity * 1.0
+                                    loss = cost_basis - payout
+                                else:
+                                    loss = cost_basis
+                                
+                                if loss > 20.0:
+                                    print(f"\n🛑 STOPPING TRADING: Single trade loss of ${loss:.2f} exceeds $20 threshold!")
+                                    print(f"   Market: {market_slug}")
+                                    print(f"   Outcome: {outcome}")
+                                    print(f"   Cost basis: ${cost_basis:.2f}")
+                                    print(f"   Loss: ${loss:.2f}")
+                                    return market_slug, current_interval_id
         
         # Stop old observers
         await stop_observers(observers, observer_tasks)
@@ -350,12 +416,18 @@ async def watch_mode(args: argparse.Namespace) -> None:
             
             # Check for expired markets and settle positions
             if portfolio_manager and check_interval_counter >= 10:
-                _check_market_expiration(portfolio_manager, market_expirations, latest_ticks)
+                should_stop = _check_market_expiration(
+                    portfolio_manager, market_expirations, latest_ticks, args
+                )
+                if should_stop:
+                    print("\n🛑 Stopping trading due to loss threshold exceeded.")
+                    await stop_observers(observers, observer_tasks)
+                    break
             
             # Check for interval change every 10 ticks (to avoid checking too frequently)
             if auto_refresh and check_interval_counter >= 10:
                 check_interval_counter = 0
-                market_slug, current_interval_id = await _handle_interval_change(
+                result = await _handle_interval_change(
                     args,
                     auto_refresh,
                     current_interval_id,
@@ -370,6 +442,12 @@ async def watch_mode(args: argparse.Namespace) -> None:
                     bus,
                     store,
                 )
+                if result is None:
+                    # Trading stopped due to loss threshold
+                    print("\n🛑 Stopping trading due to loss threshold exceeded.")
+                    await stop_observers(observers, observer_tasks)
+                    break
+                market_slug, current_interval_id = result
             
             # Store latest tick for this outcome
             outcome_key = tick.outcome
