@@ -118,6 +118,145 @@ def check_token_ownership(context: RiskContext, limits: RiskLimits) -> RiskResul
     )
 
 
+def check_price_sanity(context: RiskContext, limits: RiskLimits) -> RiskResult:
+    """Check if order price is within acceptable bounds per trading.mdc §3.
+
+    Validates that the limit price is not too far from the market mid price.
+    This prevents orders with stale or incorrect prices.
+
+    Per trading.mdc §3: Apply price bands:
+    - if buy: limit_price <= mid * (1 + price_deviation_threshold)
+    - if sell: limit_price >= mid * (1 - price_deviation_threshold)
+
+    Args:
+        context: Risk context with market data
+        limits: Risk limits with price_deviation_threshold
+
+    Returns:
+        RiskResult with allowed=False if price is out of bounds
+    """
+    intent = context.intent
+    reasons: list[RiskReasonCode] = []
+    metadata: dict[str, Any] = {}
+
+    # If no market data, we can't check price (but don't deny - data freshness check will handle)
+    if context.market_data is None:
+        return RiskResult(
+            allowed=True,
+            reason_codes=[RiskReasonCode.RISK_ALLOWED],
+            metadata=metadata,
+        )
+
+    market_data = context.market_data
+    mid_price = market_data.mid
+    limit_price = intent.limit_price
+
+    # Calculate deviation from mid
+    deviation = abs(limit_price - mid_price)
+    max_deviation = limits.price_deviation_threshold
+
+    # Per trading.mdc §3: Apply price bands
+    if intent.side == "BUY":
+        max_price = mid_price * (1 + max_deviation)
+        if limit_price > max_price:
+            reasons.append(RiskReasonCode.RISK_PRICE_OUT_OF_BOUNDS)
+            metadata["limit_price"] = limit_price
+            metadata["mid_price"] = mid_price
+            metadata["max_buy_price"] = max_price
+            metadata["deviation"] = deviation
+            metadata["max_deviation"] = max_deviation
+            metadata["limits_version"] = limits.version
+            return RiskResult(
+                allowed=False,
+                reason_codes=reasons,
+                metadata=metadata,
+            )
+    else:  # SELL
+        min_price = mid_price * (1 - max_deviation)
+        if limit_price < min_price:
+            reasons.append(RiskReasonCode.RISK_PRICE_OUT_OF_BOUNDS)
+            metadata["limit_price"] = limit_price
+            metadata["mid_price"] = mid_price
+            metadata["min_sell_price"] = min_price
+            metadata["deviation"] = deviation
+            metadata["max_deviation"] = max_deviation
+            metadata["limits_version"] = limits.version
+            return RiskResult(
+                allowed=False,
+                reason_codes=reasons,
+                metadata=metadata,
+            )
+
+    # Include key inputs per trading.mdc §4
+    metadata["mid_price"] = mid_price
+    metadata["qty"] = intent.size
+    metadata["limits_version"] = limits.version
+
+    return RiskResult(
+        allowed=True,
+        reason_codes=[RiskReasonCode.RISK_ALLOWED],
+        metadata=metadata,
+    )
+
+
+def check_data_freshness(
+    context: RiskContext, limits: RiskLimits, clock: Clock | None = None
+) -> RiskResult:
+    """Check if market data is fresh enough per flows.mdc §6.
+
+    Rejects orders if market data is too stale. This prevents trading
+    on outdated information.
+
+    For Polymarket bitcoin trading: Missing or stale market data is a hard
+    gate - we must not trade without current price information.
+
+    Args:
+        context: Risk context with market data
+        limits: Risk limits with max_data_staleness_seconds
+        clock: Optional clock for deterministic time (for testing)
+
+    Returns:
+        RiskResult with allowed=False if data is stale or missing
+    """
+    intent = context.intent
+    reasons: list[RiskReasonCode] = []
+    metadata: dict[str, Any] = {}
+
+    # If no market data, deny (we need data to trade safely)
+    # This is a hard gate for live trading
+    if context.market_data is None:
+        reasons.append(RiskReasonCode.RISK_DATA_STALE)
+        metadata["market_slug"] = intent.market_slug
+        metadata["reason"] = "No market data available"
+        metadata["limits_version"] = limits.version
+        return RiskResult(
+            allowed=False,
+            reason_codes=reasons,
+            metadata=metadata,
+        )
+
+    market_data = context.market_data
+    current_time = clock.monotonic() if clock else time.monotonic()
+    data_age = current_time - market_data.ts_mono
+
+    if data_age > limits.max_data_staleness_seconds:
+        reasons.append(RiskReasonCode.RISK_DATA_STALE)
+        metadata["data_age_seconds"] = data_age
+        metadata["max_staleness_seconds"] = limits.max_data_staleness_seconds
+        metadata["limits_version"] = limits.version
+        return RiskResult(
+            allowed=False,
+            reason_codes=reasons,
+            metadata=metadata,
+        )
+
+    return RiskResult(
+        allowed=True,
+        reason_codes=[RiskReasonCode.RISK_ALLOWED],
+        metadata=metadata,
+    )
+
+
 def check_position_limits(context: RiskContext, limits: RiskLimits) -> RiskResult:
     """Check position limits (per-market and global) per flows.mdc §6.
 

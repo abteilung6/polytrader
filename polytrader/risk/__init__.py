@@ -14,8 +14,10 @@ from polytrader.risk.models import (
     _rebuild_risk_context_model,
 )
 from polytrader.risk.policies import (
+    check_data_freshness,
     check_max_trades_per_market,
     check_position_limits,
+    check_price_sanity,
     check_proposal_validity,
     check_token_ownership,
 )
@@ -29,8 +31,10 @@ __all__ = [
     "RiskLimits",
     "RiskReasonCode",
     "RiskResult",
+    "check_data_freshness",
     "check_max_trades_per_market",
     "check_position_limits",
+    "check_price_sanity",
     "check_proposal_validity",
     "check_token_ownership",
 ]
