@@ -1,3 +1,7 @@
+---
+alwaysApply: true
+---
+
 # Trading — Institutional Engineering Guardrails (Python)
 
 This file defines how we design trading logic and what "good" looks like.

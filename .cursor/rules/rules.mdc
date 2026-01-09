@@ -12,7 +12,7 @@ alwaysApply: true
 The following documents define the **canonical structure and behavior** of this system.
 They are normative, not illustrative.
 
-- `flow.md`  
+- `flows.md`  
   → Defines the **end-to-end trading pipeline**, lifecycle flows, and OMS/EMS behavior.
 
 - `architecture.md`  

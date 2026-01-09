@@ -1,3 +1,7 @@
+---
+alwaysApply: true
+---
+
 # flow.md — Canonical Institutional Trading Flows (Python-first)
 
 This document defines the **one true set of flows** for this repo.
