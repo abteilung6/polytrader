@@ -8,7 +8,13 @@ from polytrader.clob import ExternalOrder, IClobClientFactory, get_active_orders
 from polytrader.events import MARKET_DATA, ORDERS, PROPOSALS, EventBus
 from polytrader.gamma import GammaClient
 from polytrader.logging_config import logger
-from polytrader.types import MarketDataEvent, Order, OrderIntentEvent, Outcome, Position
+from polytrader.types import (
+    MarketDataEvent,
+    OrderExecutedEvent,
+    OrderIntentEvent,
+    Outcome,
+    Position,
+)
 
 
 class IPositionManager(Protocol):
@@ -129,7 +135,7 @@ class PositionManager(IPositionManager):
                 for task in done:
                     try:
                         result = await task
-                        if isinstance(result, Order):
+                        if isinstance(result, OrderExecutedEvent):
                             await self._handle_order(result)
                         elif isinstance(result, MarketDataEvent):
                             await self._check_target_prices(result)
@@ -160,7 +166,7 @@ class PositionManager(IPositionManager):
                 except asyncio.CancelledError:
                     pass
 
-    async def _handle_order(self, order: Order) -> None:
+    async def _handle_order(self, order: OrderExecutedEvent) -> None:
         """Handle an executed order.
 
         Creates positions from BUY orders and removes positions from SELL orders.
@@ -194,7 +200,7 @@ class PositionManager(IPositionManager):
                 size=order.size,
                 target_price=order.target_price if order.target_price is not None else 0.5,
                 entry_price=entry_price,
-                entry_time=order.ts,
+                entry_time=order.ts_mono,
                 order_id=order_id if order_id != "unknown" else None,
             )
 
@@ -253,7 +259,7 @@ class PositionManager(IPositionManager):
                 )
 
                 # Calculate position duration
-                duration_seconds = order.ts - position.entry_time
+                duration_seconds = order.ts_mono - position.entry_time
                 duration_minutes = duration_seconds / 60.0
 
                 position_count = len(self._positions)

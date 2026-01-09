@@ -20,10 +20,10 @@ from polytrader.order_manager import create_order_manager_factory
 from polytrader.position_manager import create_position_manager_factory
 from polytrader.store import MemoryMarketDataStore
 from polytrader.supervisor import MarketSupervisor
-from polytrader.types import MarketChangeEvent, Order
+from polytrader.types import MarketChangeEvent, OrderExecutedEvent
 
 
-def default_order_handler(order: Order) -> None:
+def default_order_handler(order: OrderExecutedEvent) -> None:
     """Default handler for order events - logs using structured logging."""
     market_short = (
         order.market_slug.split("-")[-1] if "-" in order.market_slug else order.market_slug
@@ -105,7 +105,7 @@ async def auto_buy_task(
     size: float = 1.0,
     min_history: int = 30,
     max_trades: int = 1,
-    order_handler: Callable[[Order], None] | None = None,
+    order_handler: Callable[[OrderExecutedEvent], None] | None = None,
     market_change_handler: Callable[[MarketChangeEvent], None] | None = None,
     secrets: PolymarketSecrets | None = None,
 ) -> None:

@@ -11,7 +11,13 @@ from polytrader.order_manager import IOrderManager, NoOpOrderManager
 from polytrader.position_manager import IPositionManager, PositionManager
 from polytrader.store import MemoryMarketDataStore
 from polytrader.supervisor import MarketSupervisor
-from polytrader.types import MarketChangeEvent, MarketDataEvent, Order, OrderIntentEvent, Outcome
+from polytrader.types import (
+    MarketChangeEvent,
+    MarketDataEvent,
+    OrderExecutedEvent,
+    OrderIntentEvent,
+    Outcome,
+)
 
 
 class FakeAdapter(IMarketDataAdapter):
@@ -403,7 +409,6 @@ async def test_supervisor_with_position_manager_end_to_end() -> None:
     monitors ticks, generates SELL proposals when target is reached,
     and removes positions after SELL orders.
     """
-    import time
     from unittest.mock import MagicMock
 
     bus = EventBus()
@@ -531,8 +536,7 @@ async def test_supervisor_with_position_manager_end_to_end() -> None:
                 try:
                     proposal = await asyncio.wait_for(proposal_queue.get(), timeout=0.1)
                     # Execute order immediately
-                    order = Order(
-                        ts=time.time(),
+                    order = OrderExecutedEvent(
                         market_slug=proposal.market_slug,
                         outcome=proposal.outcome,
                         side=proposal.side,

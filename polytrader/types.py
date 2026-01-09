@@ -97,40 +97,41 @@ class OrderIntentEvent(Event):
     )
 
 
-class Order:
-    """Executed order from OrderManager.
+class OrderExecutedEvent(Event):
+    """Order executed event from execution layer.
+
+    Represents an order that has been executed by the OrderManager.
+    This is the canonical representation of executed orders in the system.
 
     Attributes:
-        ts: Unix timestamp in seconds (float for precision) when order was executed
-        market_slug: Market identifier (e.g., market slug)
+        market_slug: Polymarket market identifier
         outcome: Market outcome ("UP" or "DOWN")
         side: Trade side ("BUY" or "SELL")
         size: Trade size in USD
-        target_price: Target price for position (from proposal, None for SELL orders)
-        proposal_reason: Original reason from the trade proposal
-        response: Order response from the CLOB API
+        target_price: Target price for position (from intent, None for SELL orders)
+        proposal_reason: Original reason from the order intent
+        response: Order response from the CLOB API (dict with order_id, status, etc.)
+
+    Note:
+        - Timestamps come from Event base class (ts_wall, ts_mono)
+        - Source is automatically set to EventSource.EXEC
+        - All Event base class fields are inherited (event_id, correlation_id, run_id, etc.)
     """
 
-    def __init__(
-        self,
-        ts: float,
-        market_slug: str,
-        outcome: Outcome,
-        side: Side,
-        size: float,
-        target_price: float | None,
-        proposal_reason: str,
-        response: dict,
-    ) -> None:
-        """Initialize Order."""
-        self.ts = ts
-        self.market_slug = market_slug
-        self.outcome = outcome
-        self.side = side
-        self.size = size
-        self.target_price = target_price
-        self.proposal_reason = proposal_reason
-        self.response = response
+    source: EventSource = Field(default=EventSource.EXEC)
+
+    market_slug: str = Field(description="Polymarket market identifier")
+    outcome: Outcome = Field(description="Market outcome: UP or DOWN")
+    side: Side = Field(description="Trade side: BUY or SELL")
+    size: float = Field(gt=0, description="Trade size in USD")
+    target_price: float | None = Field(
+        default=None,
+        ge=0,
+        le=1,
+        description="Target price for position (from intent, None for SELL orders)",
+    )
+    proposal_reason: str = Field(description="Original reason from the order intent")
+    response: dict = Field(description="Order response from the CLOB API")
 
 
 class Position:

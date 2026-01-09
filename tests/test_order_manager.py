@@ -7,7 +7,7 @@ from polytrader.clob import IClobClient
 from polytrader.events import ORDERS, PROPOSALS, EventBus
 from polytrader.gamma import GammaClient, Market
 from polytrader.order_manager import OrderManager
-from polytrader.types import Order, OrderIntentEvent
+from polytrader.types import OrderExecutedEvent, OrderIntentEvent
 
 
 class FakeClobClient(IClobClient):
@@ -74,7 +74,7 @@ async def test_order_manager_executes_valid_proposal() -> None:
     market.get_token_id.assert_called_once_with("UP")
 
     order = await asyncio.wait_for(order_queue.get(), timeout=1.0)
-    assert isinstance(order, Order)
+    assert isinstance(order, OrderExecutedEvent)
     assert order.market_slug == "test-market"
     assert order.outcome == "UP"
     assert order.side == "BUY"
@@ -255,7 +255,7 @@ async def test_order_manager_subscribes_to_proposals() -> None:
     assert manager._has_traded("test-market", "UP")
 
     order = await asyncio.wait_for(order_queue.get(), timeout=1.0)
-    assert isinstance(order, Order)
+    assert isinstance(order, OrderExecutedEvent)
     assert order.market_slug == "test-market"
     assert order.outcome == "UP"
     assert order.side == "BUY"
@@ -338,7 +338,7 @@ async def test_order_manager_executes_sell_from_position_manager_despite_no_toke
 
     # Verify order was executed
     order = await asyncio.wait_for(order_queue.get(), timeout=1.0)
-    assert isinstance(order, Order)
+    assert isinstance(order, OrderExecutedEvent)
     assert order.market_slug == "test-market"
     assert order.outcome == "UP"
     assert order.side == "SELL"
@@ -427,7 +427,7 @@ async def test_order_manager_executes_sell_after_buy() -> None:
 
     # Verify SELL was executed
     sell_order = await asyncio.wait_for(order_queue.get(), timeout=1.0)
-    assert isinstance(sell_order, Order)
+    assert isinstance(sell_order, OrderExecutedEvent)
     assert sell_order.market_slug == "test-market"
     assert sell_order.outcome == "UP"
     assert sell_order.side == "SELL"

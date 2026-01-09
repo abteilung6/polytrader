@@ -25,9 +25,9 @@ def _create_proposals_topic() -> Topic:
 
 def _create_orders_topic() -> Topic:
     """Create the ORDERS topic."""
-    from polytrader.types import Order
+    from polytrader.types import OrderExecutedEvent
 
-    return Topic[Order]("orders")
+    return Topic[OrderExecutedEvent]("orders")
 
 
 def _create_market_change_topic() -> Topic:

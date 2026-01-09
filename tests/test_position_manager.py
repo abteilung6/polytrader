@@ -1,7 +1,6 @@
 """Tests for PositionManager."""
 
 import asyncio
-import time
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -11,7 +10,7 @@ from polytrader.clob import IClobClient, IClobClientFactory
 from polytrader.events import PROPOSALS, EventBus
 from polytrader.gamma import GammaClient
 from polytrader.position_manager import PositionManager
-from polytrader.types import MarketDataEvent, Order, OrderIntentEvent, Outcome
+from polytrader.types import MarketDataEvent, OrderExecutedEvent, OrderIntentEvent, Outcome
 
 
 class FakeClobClient(IClobClient):
@@ -59,8 +58,7 @@ async def test_position_manager_creates_position_from_buy_order() -> None:
     )
 
     # Create a BUY order
-    order = Order(
-        ts=time.time(),
+    order = OrderExecutedEvent(
         market_slug="test-market",
         outcome="UP",
         side="BUY",
@@ -103,8 +101,7 @@ async def test_position_manager_removes_position_from_sell_order() -> None:
     )
 
     # Create and add a position
-    buy_order = Order(
-        ts=time.time(),
+    buy_order = OrderExecutedEvent(
         market_slug="test-market",
         outcome="UP",
         side="BUY",
@@ -118,8 +115,7 @@ async def test_position_manager_removes_position_from_sell_order() -> None:
     assert len(manager.get_positions()) == 1
 
     # Create a SELL order
-    sell_order = Order(
-        ts=time.time(),
+    sell_order = OrderExecutedEvent(
         market_slug="test-market",
         outcome="UP",
         side="SELL",
@@ -152,8 +148,7 @@ async def test_position_manager_generates_sell_proposal_when_target_reached() ->
     )
 
     # Create a position
-    buy_order = Order(
-        ts=time.time(),
+    buy_order = OrderExecutedEvent(
         market_slug="test-market",
         outcome="UP",
         side="BUY",
@@ -202,8 +197,7 @@ async def test_position_manager_does_not_generate_proposal_below_target() -> Non
     )
 
     # Create a position
-    buy_order = Order(
-        ts=time.time(),
+    buy_order = OrderExecutedEvent(
         market_slug="test-market",
         outcome="UP",
         side="BUY",
@@ -251,8 +245,7 @@ async def test_position_manager_handles_multiple_positions() -> None:
     )
 
     # Create positions for UP and DOWN
-    buy_order_up = Order(
-        ts=time.time(),
+    buy_order_up = OrderExecutedEvent(
         market_slug="test-market",
         outcome="UP",
         side="BUY",
@@ -261,8 +254,7 @@ async def test_position_manager_handles_multiple_positions() -> None:
         proposal_reason="Test buy UP",
         response={"order_id": "123", "status": "filled"},
     )
-    buy_order_down = Order(
-        ts=time.time(),
+    buy_order_down = OrderExecutedEvent(
         market_slug="test-market",
         outcome="DOWN",
         side="BUY",
@@ -302,8 +294,7 @@ async def test_position_manager_caches_token_id() -> None:
     )
 
     # Create a BUY order
-    order = Order(
-        ts=time.time(),
+    order = OrderExecutedEvent(
         market_slug="test-market",
         outcome="UP",
         side="BUY",
@@ -398,8 +389,7 @@ async def test_position_manager_reconciles_with_external_orders() -> None:
     )
 
     # Create a position and cache its token_id
-    buy_order = Order(
-        ts=time.time(),
+    buy_order = OrderExecutedEvent(
         market_slug="test-market",
         outcome="UP",
         side="BUY",
@@ -459,8 +449,7 @@ async def test_position_manager_removes_stale_positions() -> None:
     )
 
     # Create a position
-    buy_order = Order(
-        ts=time.time(),
+    buy_order = OrderExecutedEvent(
         market_slug="test-market",
         outcome="UP",
         side="BUY",

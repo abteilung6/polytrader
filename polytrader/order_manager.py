@@ -7,7 +7,7 @@ from polytrader.clob import IClobClientFactory, place_market_order, verify_usdc_
 from polytrader.events import ORDERS, PROPOSALS, EventBus
 from polytrader.gamma import GammaClient
 from polytrader.logging_config import logger
-from polytrader.types import Order, OrderIntentEvent, Outcome
+from polytrader.types import OrderExecutedEvent, OrderIntentEvent, Outcome
 
 
 class IOrderManager(Protocol):
@@ -165,8 +165,7 @@ class OrderManager(IOrderManager):
                     "Removed from owned tokens"
                 )
 
-            order = Order(
-                ts=proposal.ts_mono,  # Use monotonic timestamp from intent event
+            order = OrderExecutedEvent(
                 market_slug=proposal.market_slug,
                 outcome=proposal.outcome,
                 side=proposal.side,
