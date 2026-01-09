@@ -76,3 +76,45 @@ class Event(BaseModel):
         "frozen": True,  # Immutability for event sourcing
         "validate_assignment": True,  # Validate on assignment
     }
+
+
+class SystemStartedEvent(Event):
+    """Emitted when the system starts.
+
+    This event marks the beginning of a system run and is emitted
+    once at process startup. It allows correlating all events from
+    a single process execution.
+    """
+
+    source: EventSource = Field(default=EventSource.OPS)
+
+
+class ConfigLoadedEvent(Event):
+    """Emitted when configuration is loaded.
+
+    This event records when and what configuration was loaded,
+    enabling audit trails and debugging of configuration issues.
+
+    Attributes:
+        config_hash: Hash of loaded configuration (for verification)
+        config_version: Optional version identifier for the config
+    """
+
+    source: EventSource = Field(default=EventSource.OPS)
+    config_hash: str = Field(description="Hash of loaded configuration")
+    config_version: str | None = Field(default=None, description="Optional version identifier")
+
+
+class SystemStoppedEvent(Event):
+    """Emitted when the system stops.
+
+    This event marks the end of a system run and is emitted
+    during graceful shutdown. It allows tracking why and when
+    the system stopped.
+
+    Attributes:
+        reason: Optional reason for shutdown (e.g., "KeyboardInterrupt", "Error")
+    """
+
+    source: EventSource = Field(default=EventSource.OPS)
+    reason: str | None = Field(default=None, description="Optional reason for shutdown")

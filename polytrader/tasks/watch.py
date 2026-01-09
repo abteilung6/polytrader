@@ -3,7 +3,14 @@ from collections.abc import Callable
 
 from polytrader.adapters import create_adapter_factory
 from polytrader.config import PolymarketSecrets
-from polytrader.events import MARKET_CHANGE, TICKS, EventBus
+from polytrader.events import (
+    MARKET_CHANGE,
+    TICKS,
+    EventBus,
+    MemoryEventStore,
+    SystemStartedEvent,
+    SystemStoppedEvent,
+)
 from polytrader.logging_config import logger
 from polytrader.market_discovery import MarketDiscoveryService
 from polytrader.observer import create_observer_factory
@@ -73,7 +80,12 @@ async def watch_task(
 
     bus = EventBus()
     store = MemoryTickStore()
+    event_store = MemoryEventStore()
     discovery = MarketDiscoveryService()
+
+    # Emit system started event
+    started_event = SystemStartedEvent()
+    await event_store.append(started_event)
 
     # For watch mode, we only need adapter and observer - no model or order manager
     adapter_factory = create_adapter_factory(secrets, polling_frequency_hz=frequency)
@@ -120,6 +132,14 @@ async def watch_task(
         await asyncio.gather(observer_task, ticks_task, market_changes_task)
     except KeyboardInterrupt:
         observer.stop()
+        # Emit system stopped event
+        stopped_event = SystemStoppedEvent(reason="KeyboardInterrupt")
+        await event_store.append(stopped_event)
+    except Exception as e:
+        # Emit system stopped event with error reason
+        stopped_event = SystemStoppedEvent(reason=f"Error: {type(e).__name__}: {str(e)}")
+        await event_store.append(stopped_event)
+        raise
     finally:
         observer_task.cancel()
         ticks_task.cancel()
@@ -130,3 +150,10 @@ async def watch_task(
             await market_changes_task
         except asyncio.CancelledError:
             pass
+        # Emit system stopped event if not already emitted
+        if not any(
+            isinstance(e, SystemStoppedEvent)
+            for e in event_store.read_stream(event_type=SystemStoppedEvent)
+        ):
+            stopped_event = SystemStoppedEvent(reason="Normal shutdown")
+            await event_store.append(stopped_event)

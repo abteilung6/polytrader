@@ -8,9 +8,16 @@ from polytrader.events.topics import (
     PROPOSALS,
     TICKS,
 )
-from polytrader.events.types import Event, EventSource
+from polytrader.events.types import (
+    ConfigLoadedEvent,
+    Event,
+    EventSource,
+    SystemStartedEvent,
+    SystemStoppedEvent,
+)
 
 __all__ = [
+    "ConfigLoadedEvent",
     "Event",
     "EventBus",
     "EventSource",
@@ -19,6 +26,8 @@ __all__ = [
     "MemoryEventStore",
     "ORDERS",
     "PROPOSALS",
+    "SystemStartedEvent",
+    "SystemStoppedEvent",
     "TICKS",
     "Topic",
 ]
