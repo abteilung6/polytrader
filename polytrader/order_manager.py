@@ -1,10 +1,9 @@
 import asyncio
-import time
 from collections.abc import Callable
 from typing import Any, Protocol
 
 from polytrader.clob import IClobClientFactory, place_market_order, verify_usdc_balance
-from polytrader.events import ORDERS, PROPOSALS, EventBus
+from polytrader.events import APPROVED_PROPOSALS, ORDERS, PROPOSALS, EventBus
 from polytrader.gamma import GammaClient
 from polytrader.logging_config import logger
 from polytrader.types import OrderExecutedEvent, OrderIntentEvent, Outcome
@@ -88,8 +87,16 @@ class OrderManager(IOrderManager):
         self._running = False
 
     async def run(self) -> None:
+        """Start the order manager.
+
+        Subscribes to APPROVED_PROPOSALS (proposals that passed risk checks).
+        Per flows.mdc §6: Risk runs before OMS submission, so OrderManager
+        only receives approved proposals.
+        """
         self._running = True
-        proposal_queue = self.bus.subscribe(PROPOSALS)
+        # Subscribe to APPROVED_PROPOSALS instead of PROPOSALS
+        # Risk checks run before proposals reach OrderManager
+        proposal_queue = self.bus.subscribe(APPROVED_PROPOSALS)
 
         try:
             while self._running:
@@ -102,40 +109,14 @@ class OrderManager(IOrderManager):
             self._running = False
 
     async def _process_proposal(self, proposal: OrderIntentEvent) -> None:
-        if not self._is_proposal_valid(proposal):
-            return
+        """Process an approved proposal (execution only).
 
-        if proposal.side == "SELL" and not self._has_tokens(proposal.market_slug, proposal.outcome):
-            # Trust SELL proposals from position manager (they have a position)
-            # Position manager proposals contain "Target price reached" in the reason
-            is_from_position_manager = "Target price reached" in proposal.reason
+        Per flows.mdc §6: Risk checks run before proposals reach OrderManager.
+        This method only handles execution - all risk logic has been moved to RiskChecker.
 
-            if not is_from_position_manager:
-                logger.bind(market_slug=proposal.market_slug, outcome=proposal.outcome).info(
-                    "Skipping SELL proposal: no tokens owned. Cannot sell tokens you don't own."
-                )
-                return
-            else:
-                # Trust position manager - it has a position, so we should have tokens
-                # Add to owned_tokens to keep tracking in sync
-                logger.bind(market_slug=proposal.market_slug, outcome=proposal.outcome).debug(
-                    "SELL proposal from position manager: trusting position exists, "
-                    "updating token tracking"
-                )
-                self._owned_tokens.add((proposal.market_slug, proposal.outcome))
-
-        # Allow SELL orders even if we've already traded (bought) that outcome
-        # The limit only applies to BUY orders
-        if proposal.side == "BUY" and self._has_traded(proposal.market_slug, proposal.outcome):
-            logger.bind(
-                market_slug=proposal.market_slug,
-                outcome=proposal.outcome,
-                limit=self.max_trades_per_market,
-            ).info(
-                "Skipping BUY proposal: already traded. Limit: {limit} trade(s) per market",
-                limit=self.max_trades_per_market,
-            )
-            return
+        Args:
+            proposal: Approved order intent (passed risk checks)
+        """
 
         try:
             logger.bind(
@@ -215,27 +196,18 @@ class OrderManager(IOrderManager):
             else:
                 logger.exception("Failed to execute order")
 
-    def _is_proposal_valid(self, proposal: OrderIntentEvent) -> bool:
-        current_time = time.monotonic()
-        age = current_time - proposal.ts_mono
-
-        if age > proposal.ttl_s:
-            logger.bind(market_slug=proposal.market_slug, outcome=proposal.outcome).debug(
-                "Proposal expired: age {age:.2f}s > TTL {ttl}s", age=age, ttl=proposal.ttl_s
-            )
-            return False
-
-        if proposal.size <= 0:
-            logger.warning("Invalid proposal size: {size}. Skipping.", size=proposal.size)
-            return False
-
-        return True
-
     def _has_traded(self, market_slug: str, outcome: Outcome) -> bool:
+        """Check if we have executed a trade for this market/outcome.
+
+        This is kept for tracking purposes only. Risk validation is handled by RiskChecker.
+        """
         return (market_slug, outcome) in self._executed_trades
 
     def _has_tokens(self, market_slug: str, outcome: Outcome) -> bool:
-        """Check if we own tokens for this market/outcome."""
+        """Check if we own tokens for this market/outcome.
+
+        This is kept for tracking purposes only. Risk validation is handled by RiskChecker.
+        """
         return (market_slug, outcome) in self._owned_tokens
 
     async def _execute_order(self, proposal: OrderIntentEvent) -> dict[str, Any]:

@@ -9,6 +9,7 @@ _orders_topic: Topic | None = None
 _market_change_topic: Topic | None = None
 _system_lifecycle_topic: Topic | None = None
 _risk_checks_topic: Topic | None = None
+_approved_proposals_topic: Topic | None = None
 
 
 def _create_market_data_topic() -> Topic:
@@ -105,6 +106,21 @@ def get_risk_checks_topic() -> Topic:
     return _risk_checks_topic
 
 
+def _create_approved_proposals_topic() -> Topic:
+    """Create the APPROVED_PROPOSALS topic."""
+    from polytrader.types import OrderIntentEvent
+
+    return Topic[OrderIntentEvent]("approved_proposals")
+
+
+def get_approved_proposals_topic() -> Topic:
+    """Get the APPROVED_PROPOSALS topic (singleton)."""
+    global _approved_proposals_topic
+    if _approved_proposals_topic is None:
+        _approved_proposals_topic = _create_approved_proposals_topic()
+    return _approved_proposals_topic
+
+
 def __getattr__(name: str) -> Topic:
     """Lazily initialize topic constants on first access.
 
@@ -132,5 +148,7 @@ def __getattr__(name: str) -> Topic:
         return get_system_lifecycle_topic()
     elif name == "RISK_CHECKS":
         return get_risk_checks_topic()
+    elif name == "APPROVED_PROPOSALS":
+        return get_approved_proposals_topic()
     else:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

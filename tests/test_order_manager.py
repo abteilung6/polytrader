@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from polytrader.clob import IClobClient
-from polytrader.events import ORDERS, PROPOSALS, EventBus
+from polytrader.events import APPROVED_PROPOSALS, ORDERS, EventBus
 from polytrader.gamma import GammaClient, Market
 from polytrader.order_manager import OrderManager
 from polytrader.types import OrderExecutedEvent, OrderIntentEvent
@@ -124,6 +124,12 @@ async def test_order_manager_skips_expired_proposal() -> None:
 
 
 async def test_order_manager_skips_duplicate_trade() -> None:
+    """Test that OrderManager processes approved proposals.
+
+    Note: Duplicate trade checking is now handled by RiskChecker.
+    OrderManager only receives APPROVED_PROPOSALS that have passed risk checks.
+    This test verifies that OrderManager processes approved proposals correctly.
+    """
     bus = EventBus()
     fake_client = FakeClobClient()
 
@@ -155,52 +161,87 @@ async def test_order_manager_skips_duplicate_trade() -> None:
         ttl_s=10.0,
     )
 
-    manager._executed_trades.add(("test-market", "UP"))
-
+    # OrderManager now receives APPROVED_PROPOSALS (already passed risk checks)
+    # So it should process the proposal
     await manager._process_proposal(proposal)
 
-    gamma_client.get_market_by_slug.assert_not_called()
+    # Should have executed the order
+    gamma_client.get_market_by_slug.assert_called_once()
 
-    with pytest.raises(asyncio.TimeoutError):
-        await asyncio.wait_for(order_queue.get(), timeout=0.1)
+    # Should have published order event
+    order = await asyncio.wait_for(order_queue.get(), timeout=1.0)
+    assert isinstance(order, OrderExecutedEvent)
+    assert order.market_slug == "test-market"
+    assert order.outcome == "UP"
 
 
-async def test_order_manager_skips_invalid_size() -> None:
+async def test_order_manager_processes_approved_proposals() -> None:
+    """Test that OrderManager processes approved proposals correctly.
+
+    Note: Invalid size checking is now handled by RiskChecker.
+    OrderManager only receives APPROVED_PROPOSALS that have passed risk checks,
+    so it should process all proposals it receives.
+    """
     bus = EventBus()
     fake_client = FakeClobClient()
 
     def client_factory():
         return fake_client
 
+    gamma_client = MagicMock(spec=GammaClient)
+    market = MagicMock(spec=Market)
+    market.get_token_id.return_value = "token123"
+    gamma_client.get_market_by_slug.return_value = market
+
     manager = OrderManager(
         bus=bus,
         clob_client_factory=client_factory,
+        gamma_client=gamma_client,
         max_trades_per_market=1,
     )
 
     order_queue = bus.subscribe(ORDERS)
 
-    # Use model_construct to bypass validation for testing invalid size
-    proposal = OrderIntentEvent.model_construct(
+    proposal = OrderIntentEvent(
         market_slug="test-market",
         outcome="UP",
         side="BUY",
         target_price=0.50,
         limit_price=0.30,
-        size=0.0,  # Invalid size for testing
-        reason="Invalid size",
+        size=1.0,
+        reason="Valid approved proposal",
         ttl_s=10.0,
     )
 
-    await manager._process_proposal(proposal)
+    async def mock_to_thread(func, *args):
+        if args:
+            result = func(*args)
+        else:
+            result = func()
+        return result
 
-    assert not manager._has_traded("test-market", "UP")
+    with patch("polytrader.order_manager.verify_usdc_balance", return_value=100.0):
+        with patch("polytrader.order_manager.place_market_order", return_value={"order_id": "123"}):
+            with patch("polytrader.order_manager.asyncio.to_thread", side_effect=mock_to_thread):
+                await manager._process_proposal(proposal)
 
-    with pytest.raises(asyncio.TimeoutError):
-        await asyncio.wait_for(order_queue.get(), timeout=0.1)
+                # Should have executed the order
+                gamma_client.get_market_by_slug.assert_called_once()
+
+                # Should have published order event
+                order = await asyncio.wait_for(order_queue.get(), timeout=1.0)
+                assert isinstance(order, OrderExecutedEvent)
+                assert order.market_slug == "test-market"
+                assert order.outcome == "UP"
+                assert manager._has_traded("test-market", "UP")
 
 
-async def test_order_manager_subscribes_to_proposals() -> None:
+async def test_order_manager_subscribes_to_approved_proposals() -> None:
+    """Test that OrderManager subscribes to APPROVED_PROPOSALS.
+
+    Per flows.mdc §6: Risk runs before OMS submission, so OrderManager
+    subscribes to APPROVED_PROPOSALS (not PROPOSALS).
+    """
     bus = EventBus()
     fake_client = FakeClobClient()
 
@@ -245,7 +286,8 @@ async def test_order_manager_subscribes_to_proposals() -> None:
     with patch("polytrader.order_manager.verify_usdc_balance", return_value=100.0):
         with patch("polytrader.order_manager.place_market_order", return_value={"order_id": "123"}):
             with patch("polytrader.order_manager.asyncio.to_thread", side_effect=mock_to_thread):
-                await bus.publish(PROPOSALS, proposal)
+                # Publish to APPROVED_PROPOSALS (OrderManager subscribes to this)
+                await bus.publish(APPROVED_PROPOSALS, proposal)
 
                 for _ in range(200):
                     if manager._has_traded("test-market", "UP"):
