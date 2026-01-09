@@ -433,7 +433,6 @@ class PositionManager(IPositionManager):
         now = time.time()
 
         # Calculate aggregate metrics
-        total_pnl = 0.0
         positions_summary = []
 
         for key, position in self._positions.items():

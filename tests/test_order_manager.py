@@ -345,8 +345,8 @@ async def test_order_manager_executes_sell_from_position_manager_despite_no_toke
     assert order.size == 1.0
     assert order.response == {"order_id": "456", "status": "filled"}
 
-    # Verify token tracking was updated
-    assert manager._has_tokens("test-market", "UP")
+    # Verify token tracking was updated: after SELL, tokens should be removed
+    assert not manager._has_tokens("test-market", "UP")
 
     # Verify SELL order was NOT added to _executed_trades (only BUY orders are tracked)
     assert not manager._has_traded("test-market", "UP")
