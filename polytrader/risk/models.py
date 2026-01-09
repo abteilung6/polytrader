@@ -4,10 +4,15 @@ Per trading.mdc §4: Risk checks must emit allowed/denied, reason codes,
 and key inputs (mid, qty, projected position, limits version).
 """
 
+from __future__ import annotations
+
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from polytrader.types import MarketDataEvent, OrderIntentEvent, Outcome
 
 
 class RiskReasonCode(str, Enum):
@@ -154,3 +159,102 @@ class RiskLimits(BaseModel):
         le=1.0,
         description="Maximum price deviation from mid (fraction, e.g., 0.1 = 10%)",
     )
+
+
+class RiskContext(BaseModel):
+    """Context for risk checks per flows.mdc §6.
+
+    Input to risk gate per flows.mdc §6:
+    - OrderIntent
+    - current net position
+    - open orders
+    - mid price / bands
+    - limits version
+    - system health flags (data stale, kill switch)
+
+    Attributes:
+        intent: The order intent being checked
+        current_positions: Dict mapping (market_slug, outcome) -> position size (USD)
+        global_position: Total position size across all markets (USD)
+        open_orders: Set of (market_slug, outcome) tuples for open orders (for Phase 3)
+        market_data: Latest market data for the intent's market (mid price, bands)
+        owned_tokens: Set of (market_slug, outcome) tuples for tokens we own
+        kill_switch_active: Whether kill switch is active
+        circuit_breaker_active: Whether circuit breaker is active
+        reconciliation_healthy: Whether reconciliation is healthy
+        order_count_last_minute: Number of orders in the last minute
+        cancel_count_last_minute: Number of cancels in the last minute
+        limits_version: Version of the risk limits being used
+    """
+
+    intent: OrderIntentEvent = Field(description="Order intent being checked")
+    current_positions: dict[tuple[str, Outcome], float] = Field(
+        default_factory=dict,
+        description="Current positions: (market_slug, outcome) -> size (USD)",
+    )
+    global_position: float = Field(
+        default=0.0,
+        ge=0,
+        description="Total position size across all markets (USD)",
+    )
+    open_orders: set[tuple[str, Outcome]] = Field(
+        default_factory=set,
+        description="Set of (market_slug, outcome) tuples for open orders",
+    )
+    market_data: MarketDataEvent | None = Field(
+        default=None,
+        description="Latest market data for the intent's market (mid price, bands)",
+    )
+    owned_tokens: set[tuple[str, Outcome]] = Field(
+        default_factory=set,
+        description="Set of (market_slug, outcome) tuples for tokens we own",
+    )
+    kill_switch_active: bool = Field(
+        default=False,
+        description="Whether kill switch is active",
+    )
+    circuit_breaker_active: bool = Field(
+        default=False,
+        description="Whether circuit breaker is active",
+    )
+    reconciliation_healthy: bool = Field(
+        default=True,
+        description="Whether reconciliation is healthy",
+    )
+    order_count_last_minute: int = Field(
+        default=0,
+        ge=0,
+        description="Number of orders in the last minute",
+    )
+    cancel_count_last_minute: int = Field(
+        default=0,
+        ge=0,
+        description="Number of cancels in the last minute",
+    )
+    limits_version: str = Field(
+        default="1.0",
+        description="Version of the risk limits being used",
+    )
+
+
+# Rebuild model to resolve forward references
+# This must be called after types are available (at import time or lazily)
+def _rebuild_risk_context_model() -> None:
+    """Rebuild RiskContext model to resolve forward references.
+
+    This function should be called after polytrader.types is fully loaded.
+    It's safe to call multiple times.
+    """
+    try:
+        # Import types at runtime (not just TYPE_CHECKING)
+        from polytrader.types import MarketDataEvent, OrderIntentEvent, Outcome  # noqa: F401
+
+        # Rebuild the model now that types are available
+        RiskContext.model_rebuild()
+    except ImportError:
+        # Types not available yet - will be rebuilt when first used
+        pass
+
+
+# Attempt to rebuild immediately (will succeed if types are already loaded)
+_rebuild_risk_context_model()

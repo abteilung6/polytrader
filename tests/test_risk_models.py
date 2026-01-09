@@ -6,7 +6,7 @@ Per testing.mdc §1.A: Unit tests for risk models (fast, deterministic).
 import pytest
 from pydantic import ValidationError
 
-from polytrader.risk.models import RiskLimits, RiskReasonCode, RiskResult
+from polytrader.risk.models import RiskContext, RiskLimits, RiskReasonCode, RiskResult
 
 
 class TestRiskReasonCode:
@@ -181,3 +181,211 @@ class TestRiskLimits:
         # Version can be any string (for flexibility)
         limits = RiskLimits(version="2024-01-15-v2")
         assert limits.version == "2024-01-15-v2"
+
+
+class TestRiskContext:
+    """Tests for RiskContext model."""
+
+    def test_create_context_with_intent(self) -> None:
+        """Test creating a risk context with order intent."""
+        from polytrader.types import OrderIntentEvent
+
+        intent = OrderIntentEvent(
+            market_slug="test-market",
+            outcome="UP",
+            side="BUY",
+            target_price=0.5,
+            limit_price=0.45,
+            size=1.0,
+            reason="Test",
+        )
+
+        context = RiskContext(intent=intent)
+
+        assert context.intent == intent
+        assert context.current_positions == {}
+        assert context.global_position == 0.0
+        assert context.open_orders == set()
+        assert context.market_data is None
+        assert context.owned_tokens == set()
+        assert context.kill_switch_active is False
+        assert context.circuit_breaker_active is False
+        assert context.reconciliation_healthy is True
+        assert context.order_count_last_minute == 0
+        assert context.cancel_count_last_minute == 0
+        assert context.limits_version == "1.0"
+
+    def test_create_context_with_positions(self) -> None:
+        """Test creating a risk context with current positions."""
+        from polytrader.types import OrderIntentEvent
+
+        intent = OrderIntentEvent(
+            market_slug="test-market",
+            outcome="UP",
+            side="BUY",
+            target_price=0.5,
+            limit_price=0.45,
+            size=1.0,
+            reason="Test",
+        )
+
+        positions = {
+            ("test-market", "UP"): 2.0,
+            ("other-market", "DOWN"): 1.0,
+        }
+
+        context = RiskContext(
+            intent=intent,
+            current_positions=positions,
+            global_position=3.0,
+        )
+
+        assert context.current_positions == positions
+        assert context.global_position == 3.0
+
+    def test_create_context_with_market_data(self) -> None:
+        """Test creating a risk context with market data."""
+        from polytrader.types import MarketDataEvent, OrderIntentEvent
+
+        intent = OrderIntentEvent(
+            market_slug="test-market",
+            outcome="UP",
+            side="BUY",
+            target_price=0.5,
+            limit_price=0.45,
+            size=1.0,
+            reason="Test",
+        )
+
+        market_data = MarketDataEvent(
+            market_slug="test-market",
+            outcome="UP",
+            best_bid=0.44,
+            best_ask=0.46,
+        )
+
+        context = RiskContext(intent=intent, market_data=market_data)
+
+        assert context.market_data == market_data
+        assert context.market_data.mid == 0.45
+
+    def test_create_context_with_owned_tokens(self) -> None:
+        """Test creating a risk context with owned tokens."""
+        from polytrader.types import OrderIntentEvent
+
+        intent = OrderIntentEvent(
+            market_slug="test-market",
+            outcome="UP",
+            side="SELL",
+            target_price=0.7,
+            limit_price=0.65,
+            size=1.0,
+            reason="Test",
+        )
+
+        owned_tokens = {("test-market", "UP")}
+
+        context = RiskContext(intent=intent, owned_tokens=owned_tokens)
+
+        assert context.owned_tokens == owned_tokens
+
+    def test_create_context_with_system_health(self) -> None:
+        """Test creating a risk context with system health flags."""
+        from polytrader.types import OrderIntentEvent
+
+        intent = OrderIntentEvent(
+            market_slug="test-market",
+            outcome="UP",
+            side="BUY",
+            target_price=0.5,
+            limit_price=0.45,
+            size=1.0,
+            reason="Test",
+        )
+
+        context = RiskContext(
+            intent=intent,
+            kill_switch_active=True,
+            circuit_breaker_active=False,
+            reconciliation_healthy=False,
+        )
+
+        assert context.kill_switch_active is True
+        assert context.circuit_breaker_active is False
+        assert context.reconciliation_healthy is False
+
+    def test_create_context_with_rate_limits(self) -> None:
+        """Test creating a risk context with rate limit state."""
+        from polytrader.types import OrderIntentEvent
+
+        intent = OrderIntentEvent(
+            market_slug="test-market",
+            outcome="UP",
+            side="BUY",
+            target_price=0.5,
+            limit_price=0.45,
+            size=1.0,
+            reason="Test",
+        )
+
+        context = RiskContext(
+            intent=intent,
+            order_count_last_minute=50,
+            cancel_count_last_minute=10,
+        )
+
+        assert context.order_count_last_minute == 50
+        assert context.cancel_count_last_minute == 10
+
+    def test_context_validation_global_position_non_negative(self) -> None:
+        """Test that global_position must be non-negative."""
+        from polytrader.types import OrderIntentEvent
+
+        intent = OrderIntentEvent(
+            market_slug="test-market",
+            outcome="UP",
+            side="BUY",
+            target_price=0.5,
+            limit_price=0.45,
+            size=1.0,
+            reason="Test",
+        )
+
+        # Valid: >= 0
+        context = RiskContext(intent=intent, global_position=0.0)
+        assert context.global_position == 0.0
+
+        context = RiskContext(intent=intent, global_position=10.0)
+        assert context.global_position == 10.0
+
+        # Invalid: < 0
+        with pytest.raises(ValidationError):
+            RiskContext(intent=intent, global_position=-1.0)
+
+    def test_context_validation_rate_limits_non_negative(self) -> None:
+        """Test that rate limit counts must be non-negative."""
+        from polytrader.types import OrderIntentEvent
+
+        intent = OrderIntentEvent(
+            market_slug="test-market",
+            outcome="UP",
+            side="BUY",
+            target_price=0.5,
+            limit_price=0.45,
+            size=1.0,
+            reason="Test",
+        )
+
+        # Valid: >= 0
+        context = RiskContext(intent=intent, order_count_last_minute=0)
+        assert context.order_count_last_minute == 0
+
+        context = RiskContext(intent=intent, cancel_count_last_minute=0)
+        assert context.cancel_count_last_minute == 0
+
+        # Invalid: < 0
+        with pytest.raises(ValidationError):
+            RiskContext(intent=intent, order_count_last_minute=-1)
+
+        with pytest.raises(ValidationError):
+            RiskContext(intent=intent, cancel_count_last_minute=-1)
