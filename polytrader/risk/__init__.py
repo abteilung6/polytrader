@@ -13,9 +13,17 @@ from polytrader.risk.models import (
     RiskResult,
     _rebuild_risk_context_model,
 )
+from polytrader.risk.policies import check_proposal_validity, check_token_ownership
 
 # Ensure RiskContext model is rebuilt with forward references resolved
 # This is safe to call multiple times
 _rebuild_risk_context_model()
 
-__all__ = ["RiskContext", "RiskLimits", "RiskReasonCode", "RiskResult"]
+__all__ = [
+    "RiskContext",
+    "RiskLimits",
+    "RiskReasonCode",
+    "RiskResult",
+    "check_proposal_validity",
+    "check_token_ownership",
+]
