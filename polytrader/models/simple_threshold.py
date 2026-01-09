@@ -88,6 +88,7 @@ class SimpleThresholdModel(ITradingModel):
                 reason=(
                     f"Price {mid_price:.4f} below buy threshold {buy_thresh} for {event.outcome}"
                 ),
+                correlation_id=event.correlation_id,  # Propagate from MarketDataEvent
             )
             await self.bus.publish(PROPOSALS, proposal)
             logger.bind(market_slug=event.market_slug, outcome=event.outcome, price=mid_price).info(
@@ -106,6 +107,7 @@ class SimpleThresholdModel(ITradingModel):
                 reason=(
                     f"Price {mid_price:.4f} above sell threshold {sell_thresh} for {event.outcome}"
                 ),
+                correlation_id=event.correlation_id,  # Propagate from MarketDataEvent
             )
             await self.bus.publish(PROPOSALS, proposal)
             logger.bind(market_slug=event.market_slug, outcome=event.outcome, price=mid_price).info(

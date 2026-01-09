@@ -173,6 +173,7 @@ class OrderManager(IOrderManager):
                 target_price=proposal.target_price if proposal.side == "BUY" else None,
                 proposal_reason=proposal.reason,
                 response=response,
+                correlation_id=proposal.correlation_id,  # Propagate from OrderIntentEvent
             )
             await self.bus.publish(ORDERS, order)
 

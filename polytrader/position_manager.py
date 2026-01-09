@@ -365,6 +365,7 @@ class PositionManager(IPositionManager):
                     f"Target price reached: {mid_price:.4f} >= {position.target_price:.4f} "
                     f"(entry: {position.entry_price:.4f})"
                 ),
+                correlation_id=event.correlation_id,  # Propagate from MarketDataEvent
             )
 
             await self.bus.publish(PROPOSALS, proposal)
