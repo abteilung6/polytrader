@@ -167,22 +167,26 @@ class Position:
         self.order_id = order_id
 
 
-class MarketChangeEvent:
+class MarketChangeEvent(Event):
     """Event published when market transitions.
 
+    Represents a transition from one market to another, typically when
+    a market expires and a new one becomes active. This is an operational
+    event that triggers component lifecycle changes.
+
     Attributes:
-        old_market: Previous market slug (None if initial)
-        new_market: New market slug
-        timestamp: When transition occurred
+        old_market: Previous market slug (None if initial market)
+        new_market: New market slug (required)
+
+    Note:
+        - Timestamps come from Event base class (ts_wall, ts_mono)
+        - Source is automatically set to EventSource.OPS
+        - All Event base class fields are inherited (event_id, correlation_id, run_id, etc.)
     """
 
-    def __init__(
-        self,
-        old_market: str | None,
-        new_market: str,
-        timestamp: float,
-    ) -> None:
-        """Initialize MarketChangeEvent."""
-        self.old_market = old_market
-        self.new_market = new_market
-        self.timestamp = timestamp
+    source: EventSource = Field(default=EventSource.OPS)
+
+    old_market: str | None = Field(
+        default=None, description="Previous market slug (None if initial)"
+    )
+    new_market: str = Field(description="New market slug")

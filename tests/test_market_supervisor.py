@@ -234,6 +234,16 @@ async def test_supervisor_publishes_market_change_events() -> None:
     assert isinstance(event, MarketChangeEvent)
     assert event.new_market == "test-market-1"
     assert event.old_market is None
+    # Verify Event base class fields
+    assert hasattr(event, "event_id")
+    assert hasattr(event, "ts_wall")
+    assert hasattr(event, "ts_mono")
+    assert hasattr(event, "correlation_id")
+    assert hasattr(event, "run_id")
+    assert event.schema_version == "1.0"
+    from polytrader.events.types import EventSource
+
+    assert event.source == EventSource.OPS
 
     discovery.current_market = "test-market-2"
     await asyncio.sleep(0.15)
@@ -242,6 +252,14 @@ async def test_supervisor_publishes_market_change_events() -> None:
     assert isinstance(event, MarketChangeEvent)
     assert event.new_market == "test-market-2"
     assert event.old_market == "test-market-1"
+    # Verify Event base class fields
+    assert hasattr(event, "event_id")
+    assert hasattr(event, "ts_wall")
+    assert hasattr(event, "ts_mono")
+    assert hasattr(event, "correlation_id")
+    assert hasattr(event, "run_id")
+    assert event.schema_version == "1.0"
+    assert event.source == EventSource.OPS
 
     supervisor.stop()
     task.cancel()

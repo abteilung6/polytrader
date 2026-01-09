@@ -1,7 +1,6 @@
 """Market supervisor for managing component lifecycle and market transitions."""
 
 import asyncio
-import time
 from collections.abc import Callable
 
 from polytrader.adapters import IMarketDataAdapter
@@ -156,7 +155,6 @@ class MarketSupervisor:
         event = MarketChangeEvent(
             old_market=old_market,
             new_market=new_market,
-            timestamp=time.time(),
         )
         await self.bus.publish(MARKET_CHANGE, event)
 
