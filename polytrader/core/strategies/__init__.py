@@ -2,11 +2,13 @@
 
 from polytrader.core.strategy import Strategy
 
-# Import all versions from strategies module
-from polytrader.core.strategies.gabagool.v1 import GabagoolStrategy
-from polytrader.core.strategies.gabagool.v2 import GabagoolV2Strategy
-from polytrader.core.strategies.gabagool.v3 import GabagoolV3Strategy
-from polytrader.core.strategies.gabagool.v4 import GabagoolV4Strategy
+# Import all versions from strategies module (flattened structure)
+from polytrader.core.strategies.gabagool_v1 import GabagoolStrategy
+from polytrader.core.strategies.gabagool_v2 import GabagoolV2Strategy
+from polytrader.core.strategies.gabagool_v3 import GabagoolV3Strategy
+from polytrader.core.strategies.gabagool_v4 import GabagoolV4Strategy
+from polytrader.core.strategies.gabagool_v5 import GabagoolV5Strategy
+from polytrader.core.strategies.gabagool_v6 import GabagoolV6Strategy
 
 
 def create_strategy(strategy_name: str = "gabagool") -> Strategy:
@@ -18,6 +20,8 @@ def create_strategy(strategy_name: str = "gabagool") -> Strategy:
             - "gabagool-v2" or "gabagool2" → GabagoolV2Strategy (V2)
             - "gabagool-v3" or "gabagool3" → GabagoolV3Strategy (V3 - Rebalancing)
             - "gabagool-v4" or "gabagool4" → GabagoolV4Strategy (V4 - Winner at 0.6)
+            - "gabagool-v5" or "gabagool5" → GabagoolV5Strategy (V5 - V4 with auto-hedging)
+            - "gabagool-v6" or "gabagool6" → GabagoolV6Strategy (V6 - V4 with 3-minute trading cutoff)
 
     Returns:
         Strategy instance
@@ -71,7 +75,28 @@ def create_strategy(strategy_name: str = "gabagool") -> Strategy:
             winner_threshold=0.6,
             max_buy_price=0.82,
             min_trade_amount_usdc=1.0,
-            max_capital_per_market_usdc=200.0,
+            max_capital_per_market_usdc=1000.0,
+        )
+    # New Gabagool V5 (V4 with automatic loss hedging)
+    if strategy_name_lower in ("gabagool-v5", "gabagool5", "gaba-v5"):
+        return GabagoolV5Strategy(
+            target_profit_usdc=10.0,
+            winner_threshold=0.6,
+            max_buy_price=0.82,
+            min_trade_amount_usdc=1.0,
+            max_capital_per_market_usdc=2000.0,
+            hedge_loss_threshold=10.0,  # Auto-hedge when loss > $50
+            max_hedge_price=0.8,  # Max price to pay for hedging
+        )
+    # New Gabagool V6 (V4 with automatic hedging when worst-case loss exceeds threshold)
+    if strategy_name_lower in ("gabagool-v6", "gabagool6", "gaba-v6"):
+        return GabagoolV6Strategy(
+            target_profit_usdc=10.0,
+            winner_threshold=0.6,
+            max_buy_price=0.82,
+            min_trade_amount_usdc=1.0,
+            max_capital_per_market_usdc=1000.0,
+            worst_case_loss_threshold=40.0,  # Hedge when worst-case loss > $100
         )
     if strategy_name_lower in ("gabagool-small", "gabagool-small", "gaba-small"):
         return GabagoolV4Strategy(
@@ -87,77 +112,8 @@ def create_strategy(strategy_name: str = "gabagool") -> Strategy:
         f"gabagool-v2 (aliases: gabagool2, gaba-v2), "
         f"gabagool-v3 (aliases: gabagool3, gaba-v3), "
         f"gabagool-v4 (aliases: gabagool4, gaba-v4), "
+        f"gabagool-v5 (aliases: gabagool5, gaba-v5), "
+        f"gabagool-v6 (aliases: gabagool6, gaba-v6), "
         f"gabagool-small (aliases: gabagool-small, gaba-small)"
     )
-
-
-def get_strategy_info(strategy_name: str) -> dict[str, str | float]:
-    """Get information about a strategy.
-
-    Args:
-        strategy_name: Name of the strategy
-
-    Returns:
-        Dictionary with strategy information
-    """
-    strategy = create_strategy(strategy_name)
-    if isinstance(strategy, GabagoolStrategy):
-        strategy_type = "Gabagool V1 (Asymmetric Hedge)"
-        return {
-            "name": strategy_name,
-            "type": strategy_type,
-            "version": "v1",
-            "accumulate_price": strategy.accumulate_price,
-            "hedge_price": strategy.hedge_price,
-            "max_accumulate_price": strategy.max_accumulate_price,
-            "max_buy_price": strategy.max_buy_price,
-            "max_ratio": strategy.max_ratio,
-            "min_arbitrage_pair_cost": strategy.min_arbitrage_pair_cost,
-            "max_order_size": strategy.max_order_size,
-            "min_trade_size": strategy.min_trade_size,
-            "min_seconds_between_trades": strategy.min_seconds_between_trades,
-            "max_capital_per_market": strategy.max_capital_per_market,
-            "max_loss_threshold": strategy.max_loss_threshold,
-            "lock_profit_threshold": strategy.lock_profit_threshold,
-        }
-    elif GabagoolV2Strategy is not None and isinstance(strategy, GabagoolV2Strategy):
-        strategy_type = "Gabagool V2 (Continuous Buying Strategy)"
-        return {
-            "name": strategy_name,
-            "type": strategy_type,
-            "version": "v2",
-            "min_trade_amount_usdc": strategy.min_trade_amount_usdc,
-            "seconds_between_trades": strategy.seconds_between_trades,
-            "max_capital_per_market_usdc": strategy.max_capital_per_market_usdc,
-            "max_shares_per_trade": strategy.max_shares_per_trade,
-            "share_ratio": strategy.share_ratio,
-            "max_buy_price": strategy.max_buy_price,
-        }
-    elif GabagoolV3Strategy is not None and isinstance(strategy, GabagoolV3Strategy):
-        strategy_type = "Gabagool V3 (Rebalancing Continuous Buying Strategy)"
-        return {
-            "name": strategy_name,
-            "type": strategy_type,
-            "version": "v3",
-            "min_trade_amount_usdc": strategy.min_trade_amount_usdc,
-            "seconds_between_trades": strategy.seconds_between_trades,
-            "max_capital_per_market_usdc": strategy.max_capital_per_market_usdc,
-            "min_shares_per_trade": strategy.min_shares_per_trade,
-            "share_ratio": strategy.share_ratio,
-            "max_buy_price": strategy.max_buy_price,
-            "price_equality_threshold": strategy.price_equality_threshold,
-        }
-    elif GabagoolV4Strategy is not None and isinstance(strategy, GabagoolV4Strategy):
-        strategy_type = "Gabagool V4 (Winner at 0.6)"
-        return {
-            "name": strategy_name,
-            "type": strategy_type,
-            "version": "v4",
-            "target_profit_usdc": strategy.target_profit_usdc,
-            "winner_threshold": strategy.winner_threshold,
-            "max_buy_price": strategy.max_buy_price,
-            "min_trade_amount_usdc": strategy.min_trade_amount_usdc,
-            "max_capital_per_market_usdc": strategy.max_capital_per_market_usdc,
-        }
-    return {"name": strategy_name, "type": "Unknown"}
 

@@ -2,6 +2,7 @@
 
 import asyncio
 
+from cli.commands.backtest import backtest_mode
 from cli.commands.buy import buy_mode
 from cli.commands.scrape import scrape_mode
 from cli.commands.watch import watch_mode
@@ -20,6 +21,8 @@ def main() -> None:
         buy_mode(args)
     elif args.mode == "scrape":
         asyncio.run(scrape_mode(args))
+    elif args.mode == "backtest":
+        backtest_mode(args)
 
 
 if __name__ == "__main__":

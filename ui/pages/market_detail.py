@@ -5,8 +5,12 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 
-from backtest import extract_asset_from_market_id
-from ui.components.charts import render_portfolio_charts, render_price_chart
+from cli.commands.backtest import extract_asset_from_market_id
+from ui.components.charts import (
+    render_investment_chart,
+    render_portfolio_charts,
+    render_price_chart,
+)
 from ui.components.tables import render_aggregated_stats_table, render_trade_events_table
 from ui.utils import simulate_backtest_with_tracking
 
@@ -36,6 +40,10 @@ def show_market_detail(
     st.subheader("💰 Prices Over Time (with Trade Markers)")
     render_price_chart(price_points, trade_events)
 
+    # Investment performance chart
+    if trade_events:
+        render_investment_chart(price_points, trade_events, initial_balance)
+    
     # Portfolio value and position sizes side by side
     render_portfolio_charts(price_points)
 

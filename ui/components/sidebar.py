@@ -6,7 +6,7 @@ from pathlib import Path
 
 import streamlit as st
 
-from backtest import find_all_data_files
+from cli.commands.backtest import find_all_data_files
 
 
 def extract_date_from_csv_path(csv_path: str) -> str | None:
@@ -90,7 +90,7 @@ def render_sidebar() -> dict:
         # Strategy selection
         strategy_name = st.selectbox(
             "Strategy",
-            ["gabagool", "gabagool-v2", "gabagool-v3", "gabagool-v4"],
+            ["gabagool", "gabagool-v2", "gabagool-v3", "gabagool-v4", "gabagool-v5", "gabagool-v6"],
             index=2,
         )
 

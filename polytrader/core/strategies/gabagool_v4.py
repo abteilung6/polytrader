@@ -193,15 +193,6 @@ class GabagoolV4Strategy:
         Returns:
             TradeDecision if we should buy, None otherwise
         """
-        # Defensive check: validate price is within acceptable range
-        # This prevents trading if price somehow exceeds max_buy_price
-        if price > self.max_buy_price or price < self.winner_threshold:
-            # Price is out of range - reset declared winner and don't trade
-            if state.declared_winner == outcome:
-                state.declared_winner = None
-                state.buy_done = False
-            return None
-        
         # Declare winner if needed
         if state.declared_winner != outcome:
             state.declared_winner = outcome

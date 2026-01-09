@@ -45,6 +45,7 @@ def place_market_order(
     token_id: str,
     amount: float,
     side: str,
+    max_price: float | None = None,
 ) -> dict[str, Any]:
     """Place a market order on Polymarket.
 
@@ -53,15 +54,21 @@ def place_market_order(
         token_id: Token ID for the market outcome
         amount: Dollar amount to spend (for BUY orders)
         side: Order side (BUY or SELL)
+        max_price: Maximum price to pay (for BUY orders). If None, executes at market price.
 
     Returns:
         Order response from the API
     """
-    print(f"\nPlacing market order: {amount} USDC...")
+    if max_price is not None:
+        print(f"\nPlacing market order: {amount} USDC (max price: ${max_price:.4f})...")
+    else:
+        print(f"\nPlacing market order: {amount} USDC (no price limit)...")
+    
     market_order = MarketOrderArgs(
         token_id=token_id,
         amount=amount,
         side=side,
+        price=max_price if max_price is not None else 0.0,
         order_type=OrderType.FOK,
     )
     signed_order = client.create_market_order(market_order)

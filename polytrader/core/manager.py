@@ -127,25 +127,63 @@ class PortfolioManager:
         if decision is None:
             return None
 
-        # Handle both single decision and list of decisions (for arbitrage)
+        # Handle both single decision and list of decisions
         if isinstance(decision, list):
-            # Execute all trades in parallel
-            with ThreadPoolExecutor(max_workers=len(decision)) as executor:
-                futures = {
-                    executor.submit(self._execute_trade, trade, timestamp): trade
-                    for trade in decision
-                }
-                # Wait for all trades to complete
-                for future in as_completed(futures):
-                    try:
-                        future.result()  # This will raise any exceptions that occurred
-                    except Exception as e:
-                        trade = futures[future]
-                        print(f"   ⚠️  Error executing trade for {trade.outcome}: {e}")
-            return decision
+            # Execute trades sequentially (not in parallel) to maintain accurate hedging
+            # This ensures portfolio state is updated between trades
+            executed_trades = []
+            for trade in decision:
+                try:
+                    self._execute_trade(trade, timestamp=timestamp)
+                    executed_trades.append(trade)
+                    
+                    # After each trade, check if we need additional hedging
+                    # This allows strategies like v5 to maintain loss caps even if prices change
+                    if hasattr(self.strategy, 'check_hedge_after_trade'):
+                        hedge_decision = self.strategy.check_hedge_after_trade(
+                            portfolio=self.portfolio,
+                            market_id=market_id,
+                            up_price=up_price,
+                            down_price=down_price,
+                            timestamp=timestamp,
+                        )
+                        if hedge_decision:
+                            # Execute hedge trade immediately
+                            hedge_trades = hedge_decision if isinstance(hedge_decision, list) else [hedge_decision]
+                            for hedge_trade in hedge_trades:
+                                try:
+                                    self._execute_trade(hedge_trade, timestamp=timestamp)
+                                    executed_trades.append(hedge_trade)
+                                except Exception as e:
+                                    print(f"   ⚠️  Error executing hedge trade for {hedge_trade.outcome}: {e}")
+                except Exception as e:
+                    print(f"   ⚠️  Error executing trade for {trade.outcome}: {e}")
+            return executed_trades if len(executed_trades) > 1 else (executed_trades[0] if executed_trades else None)
         else:
             # Execute single trade
             self._execute_trade(decision, timestamp=timestamp)
+            
+            # After trade executes, check if we need additional hedging
+            if hasattr(self.strategy, 'check_hedge_after_trade'):
+                hedge_decision = self.strategy.check_hedge_after_trade(
+                    portfolio=self.portfolio,
+                    market_id=market_id,
+                    up_price=up_price,
+                    down_price=down_price,
+                    timestamp=timestamp,
+                )
+                if hedge_decision:
+                    # Execute hedge trade immediately
+                    hedge_trades = hedge_decision if isinstance(hedge_decision, list) else [hedge_decision]
+                    for hedge_trade in hedge_trades:
+                        try:
+                            self._execute_trade(hedge_trade, timestamp=timestamp)
+                        except Exception as e:
+                            print(f"   ⚠️  Error executing hedge trade for {hedge_trade.outcome}: {e}")
+                    # Return both trades if hedge was executed
+                    if hedge_trades:
+                        return [decision] + hedge_trades
+            
             return decision
 
     def _execute_trade(self, decision: TradeDecision, timestamp: float | None = None) -> None:
@@ -164,80 +202,66 @@ class PortfolioManager:
         taking_amount_str = ""
         making_amount_str = ""
         if self.execute_real_orders and self.clob_client and self.gamma_client:
-            # Try to place order, with one retry if it fails
-            for attempt in range(2):  # Try twice
-                try:
-                    # Get token ID for this market/outcome
-                    market = self.gamma_client.get_market_by_slug(decision.market_id)
-                    # Convert internal format ("UP"/"DOWN") to API format ("Up"/"Down")
-                    outcome_api = "Up" if decision.outcome == "UP" else "Down"
-                    token_id = market.get_token_id(outcome_api)
-                    
-                    # Place real order on Polymarket
-                    if attempt == 0:
-                        print(f"\n💸 Executing REAL order:")
-                    else:
-                        print(f"\n🔄 Retrying REAL order (attempt {attempt + 1}):")
-                    print(f"   Market: {decision.market_id}")
-                    print(f"   Outcome: {decision.outcome}")
-                    print(f"   Amount: ${decision.amount:.2f} USDC")
-                    print(f"   Price: ${decision.price:.4f}")
-                    print(f"   Token ID: {token_id}")
-                    
-                    response = place_market_order(
-                        client=self.clob_client,
-                        token_id=token_id,
-                        amount=decision.amount,
-                        side=BUY,
-                    )
-                    
-                    # Check if order was successful
-                    success = response.get("success", False)
-                    error_msg = response.get("errorMsg", "")
-                    order_id = response.get("orderID", "")
-                    status = response.get("status", "")
-                    taking_amount_str = response.get("takingAmount", "")
-                    making_amount_str = response.get("makingAmount", "")
-                    
-                    if success:
-                        order_successful = True
-                        print(f"   ✅ Order executed successfully!")
-                        print(f"   Order ID: {order_id}")
-                        print(f"   Status: {status}")
-                        if taking_amount_str:
-                            print(f"   Shares received: {taking_amount_str}")
-                        if making_amount_str:
-                            print(f"   USDC spent: {making_amount_str}")
-                        break  # Success, exit retry loop
-                    else:
-                        print(f"   ❌ Order failed!")
-                        if error_msg:
-                            print(f"   Error: {error_msg}")
-                        if order_id:
-                            print(f"   Order ID: {order_id}")
-                        if status:
-                            print(f"   Status: {status}")
-                        # Continue to retry if this was first attempt
-                        if attempt == 0:
-                            print(f"   Will retry once...")
-                        else:
-                            print(f"   Max retries reached. Skipping this trade.")
+            try:
+                # Get token ID for this market/outcome
+                market = self.gamma_client.get_market_by_slug(decision.market_id)
+                # Convert internal format ("UP"/"DOWN") to API format ("Up"/"Down")
+                outcome_api = "Up" if decision.outcome == "UP" else "Down"
+                token_id = market.get_token_id(outcome_api)
                 
-                except Exception as e:
-                    # Only print error type and message, not full exception to avoid exposing sensitive data
-                    error_type = type(e).__name__
-                    error_msg = str(e)
-                    # Sanitize error message to avoid exposing private keys or other secrets
-                    sanitized_msg = error_msg
-                    if "private" in error_msg.lower() or "key" in error_msg.lower():
-                        sanitized_msg = "Authentication error occurred"
-                    print(f"   ❌ Error executing real order: {error_type}: {sanitized_msg}")
-                    if attempt == 0:
-                        print(f"   Will retry once...")
-                    else:
-                        print(f"   Max retries reached. Skipping this trade.")
+                # Place real order on Polymarket
+                print(f"\n💸 Executing REAL order:")
+                print(f"   Market: {decision.market_id}")
+                print(f"   Outcome: {decision.outcome}")
+                print(f"   Amount: ${decision.amount:.2f} USDC")
+                print(f"   Price: ${decision.price:.4f}")
+                print(f"   Token ID: {token_id}")
+                
+                response = place_market_order(
+                    client=self.clob_client,
+                    token_id=token_id,
+                    amount=decision.amount,
+                    side=BUY,
+                    max_price=decision.price,  # Use strategy's price as max limit
+                )
+                
+                # Check if order was successful
+                success = response.get("success", False)
+                error_msg = response.get("errorMsg", "")
+                order_id = response.get("orderID", "")
+                status = response.get("status", "")
+                taking_amount_str = response.get("takingAmount", "")
+                making_amount_str = response.get("makingAmount", "")
+                
+                if success:
+                    order_successful = True
+                    print(f"   ✅ Order executed successfully!")
+                    print(f"   Order ID: {order_id}")
+                    print(f"   Status: {status}")
+                    if taking_amount_str:
+                        print(f"   Shares received: {taking_amount_str}")
+                    if making_amount_str:
+                        print(f"   USDC spent: {making_amount_str}")
+                else:
+                    print(f"   ❌ Order failed!")
+                    if error_msg:
+                        print(f"   Error: {error_msg}")
+                    if order_id:
+                        print(f"   Order ID: {order_id}")
+                    if status:
+                        print(f"   Status: {status}")
             
-            # If real order failed after retries, don't update portfolio
+            except Exception as e:
+                # Only print error type and message, not full exception to avoid exposing sensitive data
+                error_type = type(e).__name__
+                error_msg = str(e)
+                # Sanitize error message to avoid exposing private keys or other secrets
+                sanitized_msg = error_msg
+                if "private" in error_msg.lower() or "key" in error_msg.lower():
+                    sanitized_msg = "Authentication error occurred"
+                print(f"   ❌ Error executing real order: {error_type}: {sanitized_msg}")
+            
+            # If real order failed, don't update portfolio
             if not order_successful:
                 print(f"   ⚠️  Order not successful. Portfolio not updated. Waiting for next opportunity.")
                 # Notify strategy that trade failed

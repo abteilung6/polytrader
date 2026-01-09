@@ -138,6 +138,164 @@ def render_portfolio_charts(price_points: list[PricePoint]) -> None:
         st.line_chart(positions_chart, use_container_width=True, height=200)
 
 
+def render_investment_chart(
+    price_points: list[PricePoint],
+    trade_events: list[TradeEvent],
+    initial_balance: float,
+) -> None:
+    """Render chart showing invested money and value of shares over time.
+    
+    Args:
+        price_points: List of price points over time
+        trade_events: List of trade events
+        initial_balance: Starting balance
+    """
+    if not price_points:
+        return
+
+    # Create DataFrame with price points
+    df = pd.DataFrame(
+        [
+            {
+                "timestamp": pp.timestamp,
+                "datetime": datetime.fromtimestamp(pp.timestamp),
+                "up_price": pp.up_price,
+                "down_price": pp.down_price,
+                "balance": pp.balance,
+                "up_shares": pp.up_shares,
+                "down_shares": pp.down_shares,
+            }
+            for pp in price_points
+        ]
+    )
+
+    # Sort trade events by timestamp
+    sorted_trades = sorted(trade_events, key=lambda t: t.timestamp)
+    
+    # Calculate cumulative invested money (total cost): for each timestamp, sum all trades up to that point
+    df["invested"] = df["timestamp"].apply(
+        lambda ts: sum(t.amount for t in sorted_trades if t.timestamp <= ts)
+    )
+    
+    # Calculate value of shares at each point
+    # Value = (up_shares * up_price) + (down_shares * down_price)
+    df["shares_value"] = (
+        (df["up_shares"] * df["up_price"])
+        + (df["down_shares"] * df["down_price"])
+    )
+    
+    # Calculate profit scenarios if each outcome wins
+    # If UP wins: UP shares pay $1.00 each, DOWN shares pay $0.00
+    # If DOWN wins: UP shares pay $0.00, DOWN shares pay $1.00
+    # Profit = payout - total_cost
+    df["profit_if_up_wins"] = (df["up_shares"] * 1.0) - df["invested"]
+    df["profit_if_down_wins"] = (df["down_shares"] * 1.0) - df["invested"]
+
+    # Create the chart
+    fig = go.Figure()
+
+    # Add invested money line
+    fig.add_trace(
+        go.Scatter(
+            x=df["datetime"],
+            y=df["invested"],
+            mode="lines",
+            name="Invested Money",
+            line=dict(color="#8B5CF6", width=2),
+            hovertemplate="<b>Invested</b><br>"
+            + "Time: %{x}<br>"
+            + "Amount: $%{y:.2f}<extra></extra>",
+        )
+    )
+
+    # Add shares value line
+    fig.add_trace(
+        go.Scatter(
+            x=df["datetime"],
+            y=df["shares_value"],
+            mode="lines",
+            name="Value of Shares",
+            line=dict(color="#10B981", width=2),
+            hovertemplate="<b>Shares Value</b><br>"
+            + "Time: %{x}<br>"
+            + "Value: $%{y:.2f}<br>"
+            + "UP Shares: %{customdata[0]:.2f} @ $%{customdata[2]:.4f}<br>"
+            + "DOWN Shares: %{customdata[1]:.2f} @ $%{customdata[3]:.4f}<extra></extra>",
+            customdata=[[up, down, up_p, down_p] for up, down, up_p, down_p in 
+                       zip(df["up_shares"], df["down_shares"], df["up_price"], df["down_price"])],
+        )
+    )
+
+    # Add "If UP Wins" profit line
+    fig.add_trace(
+        go.Scatter(
+            x=df["datetime"],
+            y=df["profit_if_up_wins"],
+            mode="lines",
+            name="If UP Wins",
+            line=dict(color="#3B82F6", width=2, dash="dot"),
+            hovertemplate="<b>If UP Wins</b><br>"
+            + "Time: %{x}<br>"
+            + "Profit: $%{y:.2f}<br>"
+            + "UP Shares: %{customdata[0]:.2f}<br>"
+            + "UP Payout: $%{customdata[1]:.2f}<br>"
+            + "Total Cost: $%{customdata[2]:.2f}<extra></extra>",
+            customdata=[[up, up * 1.0, invested] for up, invested in 
+                       zip(df["up_shares"], df["invested"])],
+        )
+    )
+
+    # Add "If DOWN Wins" profit line
+    fig.add_trace(
+        go.Scatter(
+            x=df["datetime"],
+            y=df["profit_if_down_wins"],
+            mode="lines",
+            name="If DOWN Wins",
+            line=dict(color="#EF4444", width=2, dash="dot"),
+            hovertemplate="<b>If DOWN Wins</b><br>"
+            + "Time: %{x}<br>"
+            + "Profit: $%{y:.2f}<br>"
+            + "DOWN Shares: %{customdata[0]:.2f}<br>"
+            + "DOWN Payout: $%{customdata[1]:.2f}<br>"
+            + "Total Cost: $%{customdata[2]:.2f}<extra></extra>",
+            customdata=[[down, down * 1.0, invested] for down, invested in 
+                       zip(df["down_shares"], df["invested"])],
+        )
+    )
+
+    # Add initial balance reference line
+    fig.add_hline(
+        y=initial_balance,
+        line_dash="dash",
+        line_color="gray",
+        annotation_text=f"Initial Balance (${initial_balance:.2f})",
+        annotation_position="right",
+    )
+
+    # Add zero profit reference line
+    fig.add_hline(
+        y=0,
+        line_dash="dash",
+        line_color="gray",
+        opacity=0.5,
+        annotation_text="Break Even",
+        annotation_position="right",
+    )
+
+    fig.update_layout(
+        title="💰 Investment Performance: Invested Money vs Profit Scenarios",
+        xaxis_title="Time",
+        yaxis_title="Amount ($)",
+        hovermode="x unified",
+        height=500,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        template="plotly_white",
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+
 def render_profit_per_market_chart(df_profits: pd.DataFrame) -> None:
     """Render profit per market bar chart."""
     df_sorted = df_profits.sort_values("Profit", ascending=False)

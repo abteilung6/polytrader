@@ -1,9 +1,4 @@
-#!/usr/bin/env python3
-"""Backtest trading strategies on historical market data.
-
-This script processes all CSV files in the ./data directory and runs backtests
-on each market, simulating trades based on the strategy's decisions.
-"""
+"""Backtest command handler."""
 
 import argparse
 import csv
@@ -144,106 +139,6 @@ def extract_asset_from_market_id(market_id: str) -> str:
     
     # Default to "unknown" if can't parse
     return "unknown"
-
-
-def filter_markets_by_time_window(
-    markets: dict[str, list[str]],
-    hours_window: float = 8.0,
-) -> tuple[dict[str, list[str]], dict[str, float]]:
-    """Filter markets to only include those within the last N hours per asset.
-    
-    For each asset, finds the latest timestamp across all markets,
-    then keeps only markets that have ticks within the time window.
-    
-    Args:
-        markets: Dictionary mapping market slugs to CSV file paths
-        hours_window: Number of hours to include (default: 8.0)
-        
-    Returns:
-        Tuple of (filtered_markets, market_cutoffs) where:
-        - filtered_markets: Dictionary mapping market slugs to CSV file paths
-        - market_cutoffs: Dictionary mapping market slugs to cutoff timestamps
-    """
-    # 8 hours in seconds
-    window_seconds = hours_window * 3600.0
-    
-    # Group markets by asset and find latest timestamp per asset
-    asset_max_timestamps: dict[str, float] = {}
-    asset_markets: dict[str, list[tuple[str, list[str]]]] = defaultdict(list)
-    
-    # Group markets by asset
-    for market_id, csv_files in markets.items():
-        asset = extract_asset_from_market_id(market_id)
-        asset_markets[asset].append((market_id, csv_files))
-    
-    # Find latest timestamp per asset by sampling ticks from each market
-    print(f"🔍 Finding latest timestamps per asset...")
-    for asset, market_list in asset_markets.items():
-        max_timestamp = 0.0
-        for market_id, csv_files in market_list:
-            # Sample ticks from first CSV file to get timestamp range
-            for csv_file in csv_files[:1]:  # Just check first file for efficiency
-                try:
-                    ticks = load_ticks_from_csv(csv_file)
-                    if ticks:
-                        market_max = max(tick.ts for tick in ticks)
-                        max_timestamp = max(max_timestamp, market_max)
-                except Exception as e:
-                    print(f"⚠️  Warning: Could not load {csv_file}: {e}")
-                    continue
-        
-        if max_timestamp > 0:
-            asset_max_timestamps[asset] = max_timestamp
-            from datetime import datetime
-            latest_str = datetime.fromtimestamp(max_timestamp).strftime("%Y-%m-%d %H:%M:%S")
-            print(f"   {asset.upper()}: Latest timestamp {latest_str} (filtering to last {hours_window}h)")
-        else:
-            print(f"   {asset.upper()}: No timestamps found")
-    
-    # Filter markets: only keep those with ticks within the window
-    filtered_markets: dict[str, list[str]] = {}
-    cutoff_timestamps: dict[str, float] = {}
-    
-    for asset in asset_max_timestamps:
-        cutoff_timestamps[asset] = asset_max_timestamps[asset] - window_seconds
-    
-    print(f"\n🔍 Filtering markets to last {hours_window} hours per asset...")
-    total_markets = len(markets)
-    filtered_count = 0
-    
-    filtered_markets_with_cutoff: dict[str, tuple[list[str], float]] = {}
-    
-    for market_id, csv_files in markets.items():
-        asset = extract_asset_from_market_id(market_id)
-        
-        if asset not in cutoff_timestamps:
-            # Asset has no valid timestamps, skip
-            continue
-        
-        cutoff = cutoff_timestamps[asset]
-        
-        # Check if any tick in this market is within the time window
-        has_recent_ticks = False
-        for csv_file in csv_files:
-            try:
-                ticks = load_ticks_from_csv(csv_file)
-                if any(tick.ts >= cutoff for tick in ticks):
-                    has_recent_ticks = True
-                    break
-            except Exception as e:
-                continue
-        
-        if has_recent_ticks:
-            filtered_markets_with_cutoff[market_id] = (csv_files, cutoff)
-            filtered_count += 1
-    
-    print(f"   Kept {filtered_count} of {total_markets} markets (within last {hours_window}h)")
-    
-    # Convert back to normal format but store cutoffs separately
-    filtered_markets = {k: v[0] for k, v in filtered_markets_with_cutoff.items()}
-    market_cutoffs = {k: v[1] for k, v in filtered_markets_with_cutoff.items()}
-    
-    return filtered_markets, market_cutoffs
 
 
 def get_market_start_time(market_slug: str) -> float | None:
@@ -841,44 +736,8 @@ def print_results(results: list[BacktestResult]) -> None:
                   f"Winner: {result.winner}, Payout: ${result.total_payout:.2f}")
 
 
-def main() -> None:
-    """Main backtest function."""
-    parser = argparse.ArgumentParser(
-        description="Backtest trading strategies on historical market data"
-    )
-    parser.add_argument(
-        "--strategy",
-        type=str,
-        default="arbitrage",
-        help="Strategy to backtest (default: arbitrage)",
-    )
-    parser.add_argument(
-        "--initial-balance",
-        type=float,
-        default=1000.0,
-        help="Initial balance in USDC (default: 1000.0)",
-    )
-    parser.add_argument(
-        "--data-dir",
-        type=str,
-        default="data",
-        help="Directory containing market data (default: data)",
-    )
-    parser.add_argument(
-        "--timestamp-tolerance",
-        type=float,
-        default=0.1,
-        help="Maximum timestamp difference for matching UP/DOWN ticks in seconds (default: 0.1)",
-    )
-    parser.add_argument(
-        "--market",
-        type=str,
-        default=None,
-        help="Backtest only a specific market slug (default: all markets)",
-    )
-    
-    args = parser.parse_args()
-    
+def backtest_mode(args: argparse.Namespace) -> None:
+    """Run backtest mode."""
     print(f"🔍 Finding market data in '{args.data_dir}'...")
     markets = find_all_data_files(args.data_dir)
     
@@ -933,8 +792,4 @@ def main() -> None:
     
     # Print summary
     print_results(results)
-
-
-if __name__ == "__main__":
-    main()
 

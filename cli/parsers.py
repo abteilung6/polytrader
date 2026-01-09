@@ -100,6 +100,42 @@ def create_scrape_parser(subparsers: argparse._SubParsersAction) -> argparse.Arg
     return scrape_parser
 
 
+def create_backtest_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
+    """Create parser for backtest command."""
+    backtest_parser = subparsers.add_parser("backtest", help="Backtest trading strategies on historical market data")
+    backtest_parser.add_argument(
+        "--strategy",
+        type=str,
+        default="gabagool-v5",
+        help="Strategy to backtest (default: gabagool-v5)",
+    )
+    backtest_parser.add_argument(
+        "--initial-balance",
+        type=float,
+        default=1000.0,
+        help="Initial balance in USDC (default: 1000.0)",
+    )
+    backtest_parser.add_argument(
+        "--data-dir",
+        type=str,
+        default="data",
+        help="Directory containing market data (default: data)",
+    )
+    backtest_parser.add_argument(
+        "--timestamp-tolerance",
+        type=float,
+        default=0.1,
+        help="Maximum timestamp difference for matching UP/DOWN ticks in seconds (default: 0.1)",
+    )
+    backtest_parser.add_argument(
+        "--market",
+        type=str,
+        default=None,
+        help="Backtest only a specific market slug (default: all markets)",
+    )
+    return backtest_parser
+
+
 def create_parser() -> argparse.ArgumentParser:
     """Create main argument parser with all subcommands."""
     parser = argparse.ArgumentParser(description="Polymarket trading system")
@@ -108,6 +144,7 @@ def create_parser() -> argparse.ArgumentParser:
     create_watch_parser(subparsers)
     create_buy_parser(subparsers)
     create_scrape_parser(subparsers)
+    create_backtest_parser(subparsers)
     
     return parser
 

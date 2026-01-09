@@ -7,7 +7,7 @@ from polytrader.core.manager import PortfolioManager
 from polytrader.core.strategies import create_strategy
 from polytrader.types import MarketTick, Outcome
 
-from backtest import get_market_expiration_time, load_ticks_from_csv
+from cli.commands.backtest import get_market_expiration_time, load_ticks_from_csv
 from ui.models import MarketProfitResult, PricePoint, TradeEvent
 
 
