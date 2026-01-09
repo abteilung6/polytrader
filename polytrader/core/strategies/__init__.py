@@ -71,7 +71,7 @@ def create_strategy(strategy_name: str = "gabagool") -> Strategy:
             winner_threshold=0.6,
             max_buy_price=0.82,
             min_trade_amount_usdc=1.0,
-            max_capital_per_market_usdc=4000.0,
+            max_capital_per_market_usdc=200.0,
         )
     if strategy_name_lower in ("gabagool-small", "gabagool-small", "gaba-small"):
         return GabagoolV4Strategy(
