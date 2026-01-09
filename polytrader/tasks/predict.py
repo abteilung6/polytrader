@@ -16,7 +16,7 @@ from polytrader.market_discovery import MarketDiscoveryService
 from polytrader.models import create_model_factory
 from polytrader.observer import create_observer_factory
 from polytrader.order_manager import create_noop_order_manager_factory
-from polytrader.store import MemoryTickStore
+from polytrader.store import MemoryMarketDataStore
 from polytrader.supervisor import MarketSupervisor
 from polytrader.types import MarketChangeEvent, TradeProposal
 
@@ -91,7 +91,7 @@ async def predict_task(
         market_change_handler = default_market_change_handler
 
     bus = EventBus()
-    store = MemoryTickStore()
+    store = MemoryMarketDataStore()
     event_store = MemoryEventStore()
     discovery = MarketDiscoveryService()
 

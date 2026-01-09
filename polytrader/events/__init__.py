@@ -4,9 +4,9 @@ from polytrader.events.bus import EventBus, Topic
 from polytrader.events.store import IEventStore, MemoryEventStore
 from polytrader.events.topics import (
     MARKET_CHANGE,
+    MARKET_DATA,
     ORDERS,
     PROPOSALS,
-    TICKS,
 )
 from polytrader.events.types import (
     ConfigLoadedEvent,
@@ -23,11 +23,11 @@ __all__ = [
     "EventSource",
     "IEventStore",
     "MARKET_CHANGE",
+    "MARKET_DATA",
     "MemoryEventStore",
     "ORDERS",
     "PROPOSALS",
     "SystemStartedEvent",
     "SystemStoppedEvent",
-    "TICKS",
     "Topic",
 ]

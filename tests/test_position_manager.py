@@ -11,7 +11,7 @@ from polytrader.clob import IClobClient, IClobClientFactory
 from polytrader.events import PROPOSALS, EventBus
 from polytrader.gamma import GammaClient
 from polytrader.position_manager import PositionManager
-from polytrader.types import MarketTick, Order, Outcome, TradeProposal
+from polytrader.types import MarketDataEvent, Order, Outcome, TradeProposal
 
 
 class FakeClobClient(IClobClient):
@@ -167,9 +167,8 @@ async def test_position_manager_generates_sell_proposal_when_target_reached() ->
     # Subscribe to proposals
     proposal_queue = bus.subscribe(PROPOSALS)
 
-    # Create a tick with price above target
-    tick = MarketTick(
-        ts=time.time(),
+    # Create an event with price above target
+    event = MarketDataEvent(
         market_slug="test-market",
         outcome="UP",
         best_bid=0.49,
@@ -177,7 +176,7 @@ async def test_position_manager_generates_sell_proposal_when_target_reached() ->
     )
 
     # Check target prices
-    await manager._check_target_prices(tick)
+    await manager._check_target_prices(event)
 
     # Check that SELL proposal was generated
     proposal = await asyncio.wait_for(proposal_queue.get(), timeout=1.0)
@@ -218,9 +217,8 @@ async def test_position_manager_does_not_generate_proposal_below_target() -> Non
     # Subscribe to proposals
     proposal_queue = bus.subscribe(PROPOSALS)
 
-    # Create a tick with price below target
-    tick = MarketTick(
-        ts=time.time(),
+    # Create an event with price below target
+    event = MarketDataEvent(
         market_slug="test-market",
         outcome="UP",
         best_bid=0.39,
@@ -228,7 +226,7 @@ async def test_position_manager_does_not_generate_proposal_below_target() -> Non
     )
 
     # Check target prices
-    await manager._check_target_prices(tick)
+    await manager._check_target_prices(event)
 
     # Check that no proposal was generated (queue should be empty)
     try:

@@ -3,17 +3,17 @@
 from polytrader.events.bus import Topic
 
 # Lazy initialization to avoid circular imports
-_ticks_topic: Topic | None = None
+_market_data_topic: Topic | None = None
 _proposals_topic: Topic | None = None
 _orders_topic: Topic | None = None
 _market_change_topic: Topic | None = None
 
 
-def _create_ticks_topic() -> Topic:
-    """Create the TICKS topic."""
-    from polytrader.types import MarketTick
+def _create_market_data_topic() -> Topic:
+    """Create the MARKET_DATA topic."""
+    from polytrader.types import MarketDataEvent
 
-    return Topic[MarketTick]("ticks")
+    return Topic[MarketDataEvent]("market_data")
 
 
 def _create_proposals_topic() -> Topic:
@@ -37,12 +37,12 @@ def _create_market_change_topic() -> Topic:
     return Topic[MarketChangeEvent]("market_change")
 
 
-def get_ticks_topic() -> Topic:
-    """Get the TICKS topic (singleton)."""
-    global _ticks_topic
-    if _ticks_topic is None:
-        _ticks_topic = _create_ticks_topic()
-    return _ticks_topic
+def get_market_data_topic() -> Topic:
+    """Get the MARKET_DATA topic (singleton)."""
+    global _market_data_topic
+    if _market_data_topic is None:
+        _market_data_topic = _create_market_data_topic()
+    return _market_data_topic
 
 
 def get_proposals_topic() -> Topic:
@@ -69,8 +69,8 @@ def get_market_change_topic() -> Topic:
     return _market_change_topic
 
 
-# Topic constants (for backward compatibility)
-TICKS = get_ticks_topic()
+# Topic constants
+MARKET_DATA = get_market_data_topic()
 PROPOSALS = get_proposals_topic()
 ORDERS = get_orders_topic()
 MARKET_CHANGE = get_market_change_topic()

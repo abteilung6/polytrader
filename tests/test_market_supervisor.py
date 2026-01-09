@@ -2,16 +2,16 @@ import asyncio
 
 from polytrader.adapters import IMarketDataAdapter
 from polytrader.clob import IClobClient
-from polytrader.events import MARKET_CHANGE, ORDERS, PROPOSALS, TICKS, EventBus
+from polytrader.events import MARKET_CHANGE, MARKET_DATA, ORDERS, PROPOSALS, EventBus
 from polytrader.gamma import GammaClient
 from polytrader.market_discovery import IMarketDiscoveryService
 from polytrader.models.protocol import ITradingModel
 from polytrader.observer import IObserver
 from polytrader.order_manager import IOrderManager, NoOpOrderManager
 from polytrader.position_manager import IPositionManager, PositionManager
-from polytrader.store import MemoryTickStore
+from polytrader.store import MemoryMarketDataStore
 from polytrader.supervisor import MarketSupervisor
-from polytrader.types import MarketChangeEvent, MarketTick, Order, Outcome, TradeProposal
+from polytrader.types import MarketChangeEvent, MarketDataEvent, Order, Outcome, TradeProposal
 
 
 class FakeAdapter(IMarketDataAdapter):
@@ -90,7 +90,7 @@ class FakeDiscoveryService(IMarketDiscoveryService):
 async def test_supervisor_initializes_with_market() -> None:
     """Test supervisor initializes with a discovered market."""
     bus = EventBus()
-    store = MemoryTickStore()
+    store = MemoryMarketDataStore()
     discovery = FakeDiscoveryService(initial_market="test-market-1")
 
     def adapter_factory(slug: str) -> FakeAdapter:
@@ -139,7 +139,7 @@ async def test_supervisor_initializes_with_market() -> None:
 async def test_supervisor_transitions_on_market_change() -> None:
     """Test supervisor transitions when market changes."""
     bus = EventBus()
-    store = MemoryTickStore()
+    store = MemoryMarketDataStore()
     discovery = FakeDiscoveryService(initial_market="test-market-1")
 
     def adapter_factory(slug: str) -> FakeAdapter:
@@ -192,7 +192,7 @@ async def test_supervisor_transitions_on_market_change() -> None:
 async def test_supervisor_publishes_market_change_events() -> None:
     """Test supervisor publishes market change events."""
     bus = EventBus()
-    store = MemoryTickStore()
+    store = MemoryMarketDataStore()
     discovery = FakeDiscoveryService(initial_market="test-market-1")
 
     def adapter_factory(slug: str) -> FakeAdapter:
@@ -248,7 +248,7 @@ async def test_supervisor_publishes_market_change_events() -> None:
 async def test_supervisor_stops_components_on_transition() -> None:
     """Test supervisor stops old components before starting new ones."""
     bus = EventBus()
-    store = MemoryTickStore()
+    store = MemoryMarketDataStore()
     discovery = FakeDiscoveryService(initial_market="test-market-1")
 
     def adapter_factory(slug: str) -> FakeAdapter:
@@ -311,7 +311,7 @@ async def test_supervisor_stops_components_on_transition() -> None:
 async def test_supervisor_with_noop_order_manager_does_not_execute_orders() -> None:
     """Test that supervisor with NoOpOrderManager consumes proposals but doesn't execute orders."""
     bus = EventBus()
-    store = MemoryTickStore()
+    store = MemoryMarketDataStore()
     discovery = FakeDiscoveryService(initial_market="test-market-1")
 
     def adapter_factory(slug: str) -> FakeAdapter:
@@ -408,7 +408,7 @@ async def test_supervisor_with_position_manager_end_to_end() -> None:
     from unittest.mock import MagicMock
 
     bus = EventBus()
-    store = MemoryTickStore()
+    store = MemoryMarketDataStore()
     market_slug = "test-market-1"
     discovery = FakeDiscoveryService(initial_market=market_slug)
 
@@ -451,14 +451,13 @@ async def test_supervisor_with_position_manager_end_to_end() -> None:
                     outcome: Outcome = outcome_str  # type: ignore[assignment]
                     # Start with price below target (0.40), then above target (0.55)
                     price = 0.40 if tick_count < 2 else 0.55
-                    tick = MarketTick(
-                        ts=time.time(),
+                    event = MarketDataEvent(
                         market_slug=self.market_slug,
                         outcome=outcome,
                         best_bid=price - 0.01,
                         best_ask=price + 0.01,
                     )
-                    yield tick
+                    yield event
                 tick_count += 1
                 if tick_count >= 3:
                     break
@@ -475,9 +474,9 @@ async def test_supervisor_with_position_manager_end_to_end() -> None:
 
         async def run(self) -> None:
             self._running = True
-            async for tick in self.adapter.ticks():
-                await self.bus.publish(TICKS, tick)
-                store.add(tick)
+            async for event in self.adapter.ticks():
+                await self.bus.publish(MARKET_DATA, event)
+                store.add(event)
 
         def stop(self) -> None:
             self._running = False
@@ -493,19 +492,19 @@ async def test_supervisor_with_position_manager_end_to_end() -> None:
         async def run(self) -> None:
             self._running = True
             # Subscribe to ticks and publish a proposal on first tick
-            tick_queue = self.bus.subscribe(TICKS)
+            market_data_queue = self.bus.subscribe(MARKET_DATA)
             while self._running:
                 try:
-                    tick = await asyncio.wait_for(tick_queue.get(), timeout=0.1)
-                    if not self._proposal_sent and tick.outcome == "UP":
+                    event = await asyncio.wait_for(market_data_queue.get(), timeout=0.1)
+                    if not self._proposal_sent and event.outcome == "UP":
                         # Publish BUY proposal with target_price
                         proposal = TradeProposal(
-                            ts=tick.ts,
-                            market_slug=tick.market_slug,
-                            outcome=tick.outcome,
+                            ts=event.ts_mono,  # Use monotonic timestamp from event
+                            market_slug=event.market_slug,
+                            outcome=event.outcome,
                             side="BUY",
                             target_price=0.50,
-                            limit_price=tick.best_ask,
+                            limit_price=event.best_ask,
                             size=1.0,
                             reason="Test BUY proposal",
                             ttl_s=10.0,

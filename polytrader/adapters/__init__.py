@@ -1,7 +1,7 @@
 from collections.abc import AsyncIterator, Callable
 from typing import TYPE_CHECKING, Protocol
 
-from polytrader.types import MarketTick
+from polytrader.types import MarketDataEvent
 
 if TYPE_CHECKING:
     from polytrader.config import PolymarketSecrets
@@ -13,15 +13,15 @@ class IMarketDataAdapter(Protocol):
     Adapters provide a stream of market ticks asynchronously.
     """
 
-    def ticks(self) -> AsyncIterator[MarketTick]:
+    def ticks(self) -> AsyncIterator[MarketDataEvent]:
         """Yield market ticks asynchronously.
 
-        This is an async generator that yields MarketTick objects
+        This is an async generator that yields MarketDataEvent objects
         continuously. The adapter should handle its own connection
         management, error handling, and retry logic.
 
         Yields:
-            MarketTick: Market data updates
+            MarketDataEvent: Market data updates
 
         Raises:
             AdapterError: If connection fails and cannot recover
