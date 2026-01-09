@@ -90,13 +90,15 @@ async def predict_task(
     if market_change_handler is None:
         market_change_handler = default_market_change_handler
 
-    bus = EventBus()
     store = MemoryMarketDataStore()
     event_store = MemoryEventStore()
+    bus = EventBus(store=event_store)
     discovery = MarketDiscoveryService()
 
-    # Emit system started event
+    # Emit system started event (will be auto-persisted by EventBus when published)
     started_event = SystemStartedEvent()
+    # Note: Lifecycle events are not published via EventBus, so we still append manually
+    # TODO: Consider creating a SYSTEM_LIFECYCLE topic for lifecycle events
     await event_store.append(started_event)
 
     adapter_factory = create_adapter_factory(secrets, polling_frequency_hz=frequency)
@@ -147,11 +149,12 @@ async def predict_task(
         await asyncio.gather(supervisor_task, proposals_task, market_changes_task)
     except KeyboardInterrupt:
         supervisor.stop()
-        # Emit system stopped event
+        # Emit system stopped event (will be auto-persisted by EventBus when published)
         stopped_event = SystemStoppedEvent(reason="KeyboardInterrupt")
         await event_store.append(stopped_event)
     except Exception as e:
         # Emit system stopped event with error reason
+        # (will be auto-persisted by EventBus when published)
         stopped_event = SystemStoppedEvent(reason=f"Error: {type(e).__name__}: {str(e)}")
         await event_store.append(stopped_event)
         raise
@@ -166,6 +169,7 @@ async def predict_task(
         except asyncio.CancelledError:
             pass
         # Emit system stopped event if not already emitted
+        # (will be auto-persisted by EventBus when published)
         if not any(
             isinstance(e, SystemStoppedEvent)
             for e in event_store.read_stream(event_type=SystemStoppedEvent)
