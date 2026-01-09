@@ -46,11 +46,6 @@ def create_strategy(strategy_name: str = "gabagool") -> Strategy:
     
     # New Gabagool V2
     if strategy_name_lower in ("gabagool-v2", "gabagool2", "gaba-v2"):
-        if GabagoolV2Strategy is None:
-            raise ValueError(
-                f"GabagoolV2Strategy not yet implemented. "
-                f"Available strategies: gabagool (aliases: gaba, paircost, asymmetric, gabagool-v1)"
-            )
         return GabagoolV2Strategy(
             seconds_between_trades=10.0,
             min_trade_amount_usdc=1.0,
@@ -61,12 +56,6 @@ def create_strategy(strategy_name: str = "gabagool") -> Strategy:
         )
     # New Gabagool V3 (Rebalancing)
     if strategy_name_lower in ("gabagool-v3", "gabagool3", "gaba-v3"):
-        if GabagoolV3Strategy is None:
-            raise ValueError(
-                f"GabagoolV3Strategy not yet implemented. "
-                f"Available strategies: gabagool (aliases: gaba, paircost, asymmetric, gabagool-v1), "
-                f"gabagool-v2 (aliases: gabagool2, gaba-v2)"
-            )
         return GabagoolV3Strategy(
             seconds_between_trades=10.0,
             min_trade_amount_usdc=1.0,
@@ -77,13 +66,6 @@ def create_strategy(strategy_name: str = "gabagool") -> Strategy:
         )
     # New Gabagool V4 (Winner at 0.6)
     if strategy_name_lower in ("gabagool-v4", "gabagool4", "gaba-v4"):
-        if GabagoolV4Strategy is None:
-            raise ValueError(
-                f"GabagoolV4Strategy not yet implemented. "
-                f"Available strategies: gabagool (aliases: gaba, paircost, asymmetric, gabagool-v1), "
-                f"gabagool-v2 (aliases: gabagool2, gaba-v2), "
-                f"gabagool-v3 (aliases: gabagool3, gaba-v3)"
-            )
         return GabagoolV4Strategy(
             target_profit_usdc=10.0,
             winner_threshold=0.6,
@@ -91,12 +73,21 @@ def create_strategy(strategy_name: str = "gabagool") -> Strategy:
             min_trade_amount_usdc=1.0,
             max_capital_per_market_usdc=4000.0,
         )
+    if strategy_name_lower in ("gabagool-small", "gabagool-small", "gaba-small"):
+        return GabagoolV4Strategy(
+            target_profit_usdc=5.0,
+            winner_threshold=0.6,
+            max_buy_price=0.82,
+            min_trade_amount_usdc=1.0,
+            max_capital_per_market_usdc=200.0,
+        )
     raise ValueError(
         f"Unknown strategy: {strategy_name}. "
         f"Available strategies: gabagool (aliases: gaba, paircost, asymmetric, gabagool-v1), "
         f"gabagool-v2 (aliases: gabagool2, gaba-v2), "
         f"gabagool-v3 (aliases: gabagool3, gaba-v3), "
-        f"gabagool-v4 (aliases: gabagool4, gaba-v4)"
+        f"gabagool-v4 (aliases: gabagool4, gaba-v4), "
+        f"gabagool-small (aliases: gabagool-small, gaba-small)"
     )
 
 
