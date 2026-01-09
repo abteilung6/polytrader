@@ -18,8 +18,14 @@ def show_dashboard(
     """Show main dashboard with aggregated statistics."""
     st.header("📊 Market Performance Dashboard")
 
-    # Calculate profits for all markets
-    if "market_profits" not in st.session_state:
+    # Create a cache key based on markets, strategy, and initial balance
+    markets_key = tuple(sorted(markets.keys()))
+    markets_hash = hash(markets_key)
+    cache_key = f"market_profits_{markets_hash}_{strategy_name}_{initial_balance}"
+    
+    # Check if we need to recalculate (markets changed or cache missing)
+    current_markets_hash = st.session_state.get("current_markets_hash")
+    if cache_key not in st.session_state or current_markets_hash != markets_hash:
         with st.spinner("Calculating profits for all markets..."):
             market_profits = []
             progress_bar = st.progress(0)
@@ -39,10 +45,11 @@ def show_dashboard(
 
                 progress_bar.progress((idx + 1) / total_markets)
 
-            st.session_state.market_profits = market_profits
+            st.session_state[cache_key] = market_profits
+            st.session_state.current_markets_hash = markets_hash
             progress_bar.empty()
 
-    market_profits: list[MarketProfitResult] = st.session_state.market_profits
+    market_profits: list[MarketProfitResult] = st.session_state.get(cache_key, [])
 
     # Apply filters
     filtered_profits = market_profits.copy()
