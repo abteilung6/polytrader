@@ -7,6 +7,7 @@ from polytrader.events.topics import (
     MARKET_DATA,
     ORDERS,
     PROPOSALS,
+    SYSTEM_LIFECYCLE,
 )
 from polytrader.events.types import (
     ConfigLoadedEvent,
@@ -27,6 +28,7 @@ __all__ = [
     "MemoryEventStore",
     "ORDERS",
     "PROPOSALS",
+    "SYSTEM_LIFECYCLE",
     "SystemStartedEvent",
     "SystemStoppedEvent",
     "Topic",

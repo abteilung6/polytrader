@@ -7,6 +7,7 @@ _market_data_topic: Topic | None = None
 _proposals_topic: Topic | None = None
 _orders_topic: Topic | None = None
 _market_change_topic: Topic | None = None
+_system_lifecycle_topic: Topic | None = None
 
 
 def _create_market_data_topic() -> Topic:
@@ -35,6 +36,17 @@ def _create_market_change_topic() -> Topic:
     from polytrader.types import MarketChangeEvent
 
     return Topic[MarketChangeEvent]("market_change")
+
+
+def _create_system_lifecycle_topic() -> Topic:
+    """Create the SYSTEM_LIFECYCLE topic.
+
+    This topic is used for system lifecycle events such as
+    SystemStartedEvent, SystemStoppedEvent, and ConfigLoadedEvent.
+    """
+    from polytrader.events.types import Event
+
+    return Topic[Event]("system_lifecycle")
 
 
 def get_market_data_topic() -> Topic:
@@ -69,8 +81,17 @@ def get_market_change_topic() -> Topic:
     return _market_change_topic
 
 
+def get_system_lifecycle_topic() -> Topic:
+    """Get the SYSTEM_LIFECYCLE topic (singleton)."""
+    global _system_lifecycle_topic
+    if _system_lifecycle_topic is None:
+        _system_lifecycle_topic = _create_system_lifecycle_topic()
+    return _system_lifecycle_topic
+
+
 # Topic constants
 MARKET_DATA = get_market_data_topic()
 PROPOSALS = get_proposals_topic()
 ORDERS = get_orders_topic()
 MARKET_CHANGE = get_market_change_topic()
+SYSTEM_LIFECYCLE = get_system_lifecycle_topic()

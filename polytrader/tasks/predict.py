@@ -6,6 +6,7 @@ from polytrader.config import PolymarketSecrets
 from polytrader.events import (
     MARKET_CHANGE,
     PROPOSALS,
+    SYSTEM_LIFECYCLE,
     EventBus,
     MemoryEventStore,
     SystemStartedEvent,
@@ -95,11 +96,9 @@ async def predict_task(
     bus = EventBus(store=event_store)
     discovery = MarketDiscoveryService()
 
-    # Emit system started event (will be auto-persisted by EventBus when published)
+    # Emit system started event (auto-persisted by EventBus)
     started_event = SystemStartedEvent()
-    # Note: Lifecycle events are not published via EventBus, so we still append manually
-    # TODO: Consider creating a SYSTEM_LIFECYCLE topic for lifecycle events
-    await event_store.append(started_event)
+    await bus.publish(SYSTEM_LIFECYCLE, started_event)
 
     adapter_factory = create_adapter_factory(secrets, polling_frequency_hz=frequency)
     observer_factory = create_observer_factory(bus, store)
@@ -149,14 +148,13 @@ async def predict_task(
         await asyncio.gather(supervisor_task, proposals_task, market_changes_task)
     except KeyboardInterrupt:
         supervisor.stop()
-        # Emit system stopped event (will be auto-persisted by EventBus when published)
+        # Emit system stopped event (auto-persisted by EventBus)
         stopped_event = SystemStoppedEvent(reason="KeyboardInterrupt")
-        await event_store.append(stopped_event)
+        await bus.publish(SYSTEM_LIFECYCLE, stopped_event)
     except Exception as e:
-        # Emit system stopped event with error reason
-        # (will be auto-persisted by EventBus when published)
+        # Emit system stopped event with error reason (auto-persisted by EventBus)
         stopped_event = SystemStoppedEvent(reason=f"Error: {type(e).__name__}: {str(e)}")
-        await event_store.append(stopped_event)
+        await bus.publish(SYSTEM_LIFECYCLE, stopped_event)
         raise
     finally:
         supervisor_task.cancel()
@@ -168,11 +166,10 @@ async def predict_task(
             await market_changes_task
         except asyncio.CancelledError:
             pass
-        # Emit system stopped event if not already emitted
-        # (will be auto-persisted by EventBus when published)
+        # Emit system stopped event if not already emitted (auto-persisted by EventBus)
         if not any(
             isinstance(e, SystemStoppedEvent)
             for e in event_store.read_stream(event_type=SystemStoppedEvent)
         ):
             stopped_event = SystemStoppedEvent(reason="Normal shutdown")
-            await event_store.append(stopped_event)
+            await bus.publish(SYSTEM_LIFECYCLE, stopped_event)
