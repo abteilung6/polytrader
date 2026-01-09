@@ -7,6 +7,10 @@ Per flows.mdc §6:
 
 Per architecture.mdc §1.C:
 - risk/engine.py runs policies, aggregates result
+
+Per observability.mdc §2, §3:
+- All logs must include correlation_id when applicable
+- Structured logging with required fields
 """
 
 import asyncio
@@ -14,6 +18,7 @@ from typing import Any
 
 from polytrader.events import APPROVED_PROPOSALS, ORDERS, PROPOSALS, RISK_CHECKS, EventBus
 from polytrader.events.types import RiskCheckEvent
+from polytrader.logging_config import logger
 from polytrader.obs.metrics import (
     record_projected_exposure,
     record_risk_check,
@@ -178,6 +183,10 @@ class RiskChecker:
         This is the pure method that accepts context as parameter.
         Use this for explicit checks with full control over context.
 
+        Per observability.mdc §2, §3:
+        - All logs include correlation_id
+        - Structured logging with required fields
+
         Args:
             intent: Order intent to check
             context: Risk context with current state
@@ -185,6 +194,17 @@ class RiskChecker:
         Returns:
             True if allowed, False if denied
         """
+        # Build structured log context with correlation_id per observability.mdc §2
+        log_context = logger.bind(
+            correlation_id=intent.correlation_id,
+            market_slug=intent.market_slug,
+            outcome=intent.outcome,
+            side=intent.side,
+            event_type="RiskCheck",
+        )
+
+        log_context.debug("Starting risk check for order intent")
+
         result = self.engine.check(context)
 
         # Emit metrics per observability.mdc §4
@@ -195,6 +215,16 @@ class RiskChecker:
             for reason_code in result.reason_codes:
                 if reason_code != RiskReasonCode.RISK_ALLOWED:
                     record_risk_denial(reason=reason_code.value)
+
+            # Log denial with correlation_id and reason codes per observability.mdc §2, §3
+            reason_codes_str = ", ".join([rc.value for rc in result.reason_codes])
+            log_context.warning(
+                "Risk check denied: {reason_codes}",
+                reason_codes=reason_codes_str,
+            )
+        else:
+            # Log allowance with correlation_id per observability.mdc §2, §3
+            log_context.info("Risk check allowed")
 
         # Record projected exposure if available per observability.mdc §4
         if "projected_exposure" in result.projections:
@@ -212,6 +242,9 @@ class RiskChecker:
         if result.allowed:
             await self.bus.publish(APPROVED_PROPOSALS, intent)
             self._order_count_last_minute += 1
+            log_context.debug("Published approved proposal to APPROVED_PROPOSALS")
+        else:
+            log_context.debug("Proposal denied, not publishing to APPROVED_PROPOSALS")
 
         return result.allowed
 
@@ -222,10 +255,13 @@ class RiskChecker:
         from the event bus, building RiskContext from available sources.
 
         Per flows.mdc §6: Risk runs before OMS submission.
+        Per observability.mdc §2, §3: All logs include correlation_id.
         """
         self._running = True
         proposal_queue = self.bus.subscribe(PROPOSALS)
         orders_queue = self.bus.subscribe(ORDERS)  # Track executed trades
+
+        logger.info("RiskChecker started, subscribing to PROPOSALS")
 
         async def track_orders() -> None:
             """Track executed orders for context building."""
@@ -234,6 +270,12 @@ class RiskChecker:
                     order = await orders_queue.get()
                     if order.side == "BUY":
                         self._executed_trades.add((order.market_slug, order.outcome))
+                        logger.bind(
+                            correlation_id=order.correlation_id,
+                            market_slug=order.market_slug,
+                            outcome=order.outcome,
+                            event_type="RiskCheck",
+                        ).debug("Tracked executed BUY order for risk context")
                 except asyncio.CancelledError:
                     break
 
@@ -246,8 +288,13 @@ class RiskChecker:
                 # Build RiskContext from available sources
                 context = self._build_context(proposal)
 
-                # Check and emit event
+                # Check and emit event (logging happens inside check() with correlation_id)
                 await self.check(proposal, context)
+        except asyncio.CancelledError:
+            logger.info("RiskChecker cancelled")
+        except Exception:
+            logger.exception("RiskChecker error")
+            raise
         finally:
             self._running = False
             orders_task.cancel()
@@ -255,6 +302,7 @@ class RiskChecker:
                 await orders_task
             except asyncio.CancelledError:
                 pass
+            logger.info("RiskChecker stopped")
 
     def _build_context(self, intent: OrderIntentEvent) -> RiskContext:
         """Build RiskContext from available sources.
