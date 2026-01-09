@@ -224,7 +224,14 @@ class PortfolioManager:
                             print(f"   Max retries reached. Skipping this trade.")
                 
                 except Exception as e:
-                    print(f"   ❌ Error executing real order: {e}")
+                    # Only print error type and message, not full exception to avoid exposing sensitive data
+                    error_type = type(e).__name__
+                    error_msg = str(e)
+                    # Sanitize error message to avoid exposing private keys or other secrets
+                    sanitized_msg = error_msg
+                    if "private" in error_msg.lower() or "key" in error_msg.lower():
+                        sanitized_msg = "Authentication error occurred"
+                    print(f"   ❌ Error executing real order: {error_type}: {sanitized_msg}")
                     if attempt == 0:
                         print(f"   Will retry once...")
                     else:

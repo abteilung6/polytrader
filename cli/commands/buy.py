@@ -41,5 +41,26 @@ def buy_mode(args: argparse.Namespace) -> None:
     verify_usdc_balance(client, required_amount=args.amount)
 
     response = place_market_order(client, token_id=token_id, amount=args.amount, side=BUY)
-    print(f"Order placed! Response: {response}")
+    
+    # Safely print response without exposing sensitive data
+    success = response.get("success", False)
+    order_id = response.get("orderID", "")
+    status = response.get("status", "")
+    taking_amount = response.get("takingAmount", "")
+    making_amount = response.get("makingAmount", "")
+    
+    print(f"Order placed! Success: {success}")
+    if order_id:
+        print(f"Order ID: {order_id}")
+    if status:
+        print(f"Status: {status}")
+    if taking_amount:
+        print(f"Shares received: {taking_amount}")
+    if making_amount:
+        print(f"USDC spent: {making_amount}")
+    
+    if not success:
+        error_msg = response.get("errorMsg", "")
+        if error_msg:
+            print(f"Error: {error_msg}")
 
