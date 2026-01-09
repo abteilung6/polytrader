@@ -3,31 +3,41 @@ from collections.abc import Callable
 
 from polytrader.adapters import create_adapter_factory
 from polytrader.config import PolymarketSecrets
-from polytrader.events import MARKET_CHANGE, TICKS, EventBus
+from polytrader.events import (
+    MARKET_CHANGE,
+    MARKET_DATA,
+    SYSTEM_LIFECYCLE,
+    EventBus,
+    MemoryEventStore,
+    SystemStartedEvent,
+    SystemStoppedEvent,
+)
 from polytrader.logging_config import logger
 from polytrader.market_discovery import MarketDiscoveryService
 from polytrader.observer import create_observer_factory
-from polytrader.store import MemoryTickStore
-from polytrader.types import MarketChangeEvent, MarketTick
+from polytrader.store import MemoryMarketDataStore
+from polytrader.types import MarketChangeEvent, MarketDataEvent
 
 
-def default_tick_handler(tick: MarketTick, count: int) -> None:
-    """Default handler for tick events - logs using structured logging."""
-    market_short = tick.market_slug.split("-")[-1] if "-" in tick.market_slug else tick.market_slug
+def default_tick_handler(event: MarketDataEvent, count: int) -> None:
+    """Default handler for market data events - logs using structured logging."""
+    market_short = (
+        event.market_slug.split("-")[-1] if "-" in event.market_slug else event.market_slug
+    )
     logger.bind(
-        market_slug=tick.market_slug,
-        outcome=tick.outcome,
+        market_slug=event.market_slug,
+        outcome=event.outcome,
         count=count,
     ).info(
         "#{count:4d}  {market:15s}  {outcome:4s}  "
         "bid:{bid:.4f} ask:{ask:.4f} mid:{mid:.4f} spread:{spread:.4f}",
         count=count,
         market=market_short,
-        outcome=tick.outcome,
-        bid=tick.best_bid,
-        ask=tick.best_ask,
-        mid=tick.mid,
-        spread=abs(tick.spread),
+        outcome=event.outcome,
+        bid=event.best_bid,
+        ask=event.best_ask,
+        mid=event.mid,
+        spread=abs(event.spread),
     )
 
 
@@ -48,7 +58,7 @@ async def watch_task(
     market_pattern: str,
     frequency: float = 1.0,
     limit: int | None = None,
-    tick_handler: Callable[[MarketTick, int], None] | None = None,
+    tick_handler: Callable[[MarketDataEvent, int], None] | None = None,
     market_change_handler: Callable[[MarketChangeEvent], None] | None = None,
     secrets: PolymarketSecrets | None = None,
 ) -> None:
@@ -71,9 +81,14 @@ async def watch_task(
     if market_change_handler is None:
         market_change_handler = default_market_change_handler
 
-    bus = EventBus()
-    store = MemoryTickStore()
+    store = MemoryMarketDataStore()
+    event_store = MemoryEventStore()
+    bus = EventBus(store=event_store)
     discovery = MarketDiscoveryService()
+
+    # Emit system started event (auto-persisted by EventBus)
+    started_event = SystemStartedEvent()
+    await bus.publish(SYSTEM_LIFECYCLE, started_event)
 
     # For watch mode, we only need adapter and observer - no model or order manager
     adapter_factory = create_adapter_factory(secrets, polling_frequency_hz=frequency)
@@ -89,19 +104,19 @@ async def watch_task(
     adapter = adapter_factory(market)
     observer = observer_factory(adapter)
 
-    tick_queue = bus.subscribe(TICKS)
+    market_data_queue = bus.subscribe(MARKET_DATA)
     market_change_queue = bus.subscribe(MARKET_CHANGE)
 
     # Start observer (this will fetch ticks and publish them)
     observer_task = asyncio.create_task(observer.run())
 
     async def handle_ticks() -> None:
-        """Handle tick events."""
+        """Handle market data events."""
         count = 0
         while True:
-            tick = await tick_queue.get()
+            event = await market_data_queue.get()
             count += 1
-            tick_handler(tick, count)
+            tick_handler(event, count)
 
             if limit and count >= limit:
                 observer.stop()
@@ -120,6 +135,14 @@ async def watch_task(
         await asyncio.gather(observer_task, ticks_task, market_changes_task)
     except KeyboardInterrupt:
         observer.stop()
+        # Emit system stopped event (auto-persisted by EventBus)
+        stopped_event = SystemStoppedEvent(reason="KeyboardInterrupt")
+        await bus.publish(SYSTEM_LIFECYCLE, stopped_event)
+    except Exception as e:
+        # Emit system stopped event with error reason (auto-persisted by EventBus)
+        stopped_event = SystemStoppedEvent(reason=f"Error: {type(e).__name__}: {str(e)}")
+        await bus.publish(SYSTEM_LIFECYCLE, stopped_event)
+        raise
     finally:
         observer_task.cancel()
         ticks_task.cancel()
@@ -130,3 +153,10 @@ async def watch_task(
             await market_changes_task
         except asyncio.CancelledError:
             pass
+        # Emit system stopped event if not already emitted (auto-persisted by EventBus)
+        if not any(
+            isinstance(e, SystemStoppedEvent)
+            for e in event_store.read_stream(event_type=SystemStoppedEvent)
+        ):
+            stopped_event = SystemStoppedEvent(reason="Normal shutdown")
+            await bus.publish(SYSTEM_LIFECYCLE, stopped_event)

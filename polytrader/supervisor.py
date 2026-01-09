@@ -1,7 +1,6 @@
 """Market supervisor for managing component lifecycle and market transitions."""
 
 import asyncio
-import time
 from collections.abc import Callable
 
 from polytrader.adapters import IMarketDataAdapter
@@ -12,7 +11,7 @@ from polytrader.models.protocol import ITradingModel
 from polytrader.observer import IObserver
 from polytrader.order_manager import IOrderManager
 from polytrader.position_manager import IPositionManager
-from polytrader.store import ITickStore
+from polytrader.store import IMarketDataStore
 from polytrader.types import MarketChangeEvent
 
 
@@ -32,7 +31,7 @@ class MarketSupervisor:
         model_factory: Callable[[str], ITradingModel],
         order_manager_factory: Callable[[], IOrderManager],
         bus: EventBus,
-        store: ITickStore,
+        store: IMarketDataStore,
         position_manager_factory: Callable[[], IPositionManager] | None = None,
         monitor_interval: float = 1.0,
     ) -> None:
@@ -46,7 +45,7 @@ class MarketSupervisor:
             model_factory: Factory function to create models
             order_manager_factory: Factory function to create order managers
             bus: Event bus for communication
-            store: Tick store for historical data
+            store: Market data store for historical data
             position_manager_factory: Factory function to create position managers (optional)
             monitor_interval: How often to check for market changes (seconds, default: 1.0)
         """
@@ -156,7 +155,6 @@ class MarketSupervisor:
         event = MarketChangeEvent(
             old_market=old_market,
             new_market=new_market,
-            timestamp=time.time(),
         )
         await self.bus.publish(MARKET_CHANGE, event)
 

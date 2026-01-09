@@ -4,19 +4,27 @@ from collections.abc import Callable
 from polytrader.adapters import create_adapter_factory
 from polytrader.clob import create_clob_client_factory
 from polytrader.config import PolymarketSecrets
-from polytrader.events import MARKET_CHANGE, ORDERS, EventBus
+from polytrader.events import (
+    MARKET_CHANGE,
+    ORDERS,
+    SYSTEM_LIFECYCLE,
+    EventBus,
+    MemoryEventStore,
+    SystemStartedEvent,
+    SystemStoppedEvent,
+)
 from polytrader.logging_config import logger
 from polytrader.market_discovery import MarketDiscoveryService
 from polytrader.models import create_model_factory
 from polytrader.observer import create_observer_factory
 from polytrader.order_manager import create_order_manager_factory
 from polytrader.position_manager import create_position_manager_factory
-from polytrader.store import MemoryTickStore
+from polytrader.store import MemoryMarketDataStore
 from polytrader.supervisor import MarketSupervisor
-from polytrader.types import MarketChangeEvent, Order
+from polytrader.types import MarketChangeEvent, OrderExecutedEvent
 
 
-def default_order_handler(order: Order) -> None:
+def default_order_handler(order: OrderExecutedEvent) -> None:
     """Default handler for order events - logs using structured logging."""
     market_short = (
         order.market_slug.split("-")[-1] if "-" in order.market_slug else order.market_slug
@@ -98,7 +106,7 @@ async def auto_buy_task(
     size: float = 1.0,
     min_history: int = 30,
     max_trades: int = 1,
-    order_handler: Callable[[Order], None] | None = None,
+    order_handler: Callable[[OrderExecutedEvent], None] | None = None,
     market_change_handler: Callable[[MarketChangeEvent], None] | None = None,
     secrets: PolymarketSecrets | None = None,
 ) -> None:
@@ -125,9 +133,14 @@ async def auto_buy_task(
     if market_change_handler is None:
         market_change_handler = default_market_change_handler
 
-    bus = EventBus()
-    store = MemoryTickStore()
+    store = MemoryMarketDataStore()
+    event_store = MemoryEventStore()
+    bus = EventBus(store=event_store)
     discovery = MarketDiscoveryService()
+
+    # Emit system started event (auto-persisted by EventBus)
+    started_event = SystemStartedEvent()
+    await bus.publish(SYSTEM_LIFECYCLE, started_event)
 
     adapter_factory = create_adapter_factory(secrets, polling_frequency_hz=frequency)
     observer_factory = create_observer_factory(bus, store)
@@ -183,6 +196,14 @@ async def auto_buy_task(
         await asyncio.gather(supervisor_task, orders_task, market_changes_task)
     except KeyboardInterrupt:
         supervisor.stop()
+        # Emit system stopped event (auto-persisted by EventBus)
+        stopped_event = SystemStoppedEvent(reason="KeyboardInterrupt")
+        await bus.publish(SYSTEM_LIFECYCLE, stopped_event)
+    except Exception as e:
+        # Emit system stopped event with error reason (auto-persisted by EventBus)
+        stopped_event = SystemStoppedEvent(reason=f"Error: {type(e).__name__}: {str(e)}")
+        await bus.publish(SYSTEM_LIFECYCLE, stopped_event)
+        raise
     finally:
         supervisor_task.cancel()
         orders_task.cancel()
@@ -193,3 +214,10 @@ async def auto_buy_task(
             await market_changes_task
         except asyncio.CancelledError:
             pass
+        # Emit system stopped event if not already emitted (auto-persisted by EventBus)
+        if not any(
+            isinstance(e, SystemStoppedEvent)
+            for e in event_store.read_stream(event_type=SystemStoppedEvent)
+        ):
+            stopped_event = SystemStoppedEvent(reason="Normal shutdown")
+            await bus.publish(SYSTEM_LIFECYCLE, stopped_event)

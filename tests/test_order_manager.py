@@ -1,5 +1,4 @@
 import asyncio
-import time
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -8,7 +7,7 @@ from polytrader.clob import IClobClient
 from polytrader.events import ORDERS, PROPOSALS, EventBus
 from polytrader.gamma import GammaClient, Market
 from polytrader.order_manager import OrderManager
-from polytrader.types import Order, TradeProposal
+from polytrader.types import OrderExecutedEvent, OrderIntentEvent
 
 
 class FakeClobClient(IClobClient):
@@ -53,8 +52,7 @@ async def test_order_manager_executes_valid_proposal() -> None:
         max_trades_per_market=1,
     )
 
-    proposal = TradeProposal(
-        ts=time.time(),
+    proposal = OrderIntentEvent(
         market_slug="test-market",
         outcome="UP",
         side="BUY",
@@ -76,7 +74,7 @@ async def test_order_manager_executes_valid_proposal() -> None:
     market.get_token_id.assert_called_once_with("UP")
 
     order = await asyncio.wait_for(order_queue.get(), timeout=1.0)
-    assert isinstance(order, Order)
+    assert isinstance(order, OrderExecutedEvent)
     assert order.market_slug == "test-market"
     assert order.outcome == "UP"
     assert order.side == "BUY"
@@ -100,16 +98,21 @@ async def test_order_manager_skips_expired_proposal() -> None:
 
     order_queue = bus.subscribe(ORDERS)
 
-    proposal = TradeProposal(
-        ts=time.time() - 5.0,
-        market_slug="test-market",
-        outcome="UP",
-        side="BUY",
-        target_price=0.50,
-        limit_price=0.30,
-        size=1.0,
-        reason="Expired proposal",
-        ttl_s=2.0,
+    import time as time_module
+
+    # Create proposal with old timestamp to simulate expiration
+    proposal = OrderIntentEvent.model_validate(
+        {
+            "market_slug": "test-market",
+            "outcome": "UP",
+            "side": "BUY",
+            "target_price": 0.50,
+            "limit_price": 0.30,
+            "size": 1.0,
+            "reason": "Expired proposal",
+            "ttl_s": 2.0,
+            "ts_mono": time_module.monotonic() - 5.0,  # 5 seconds ago
+        }
     )
 
     await manager._process_proposal(proposal)
@@ -141,8 +144,7 @@ async def test_order_manager_skips_duplicate_trade() -> None:
 
     order_queue = bus.subscribe(ORDERS)
 
-    proposal = TradeProposal(
-        ts=time.time(),
+    proposal = OrderIntentEvent(
         market_slug="test-market",
         outcome="UP",
         side="BUY",
@@ -178,14 +180,14 @@ async def test_order_manager_skips_invalid_size() -> None:
 
     order_queue = bus.subscribe(ORDERS)
 
-    proposal = TradeProposal(
-        ts=time.time(),
+    # Use model_construct to bypass validation for testing invalid size
+    proposal = OrderIntentEvent.model_construct(
         market_slug="test-market",
         outcome="UP",
         side="BUY",
         target_price=0.50,
         limit_price=0.30,
-        size=0.0,
+        size=0.0,  # Invalid size for testing
         reason="Invalid size",
         ttl_s=10.0,
     )
@@ -217,8 +219,7 @@ async def test_order_manager_subscribes_to_proposals() -> None:
         max_trades_per_market=1,
     )
 
-    proposal = TradeProposal(
-        ts=time.time(),
+    proposal = OrderIntentEvent(
         market_slug="test-market",
         outcome="UP",
         side="BUY",
@@ -254,7 +255,7 @@ async def test_order_manager_subscribes_to_proposals() -> None:
     assert manager._has_traded("test-market", "UP")
 
     order = await asyncio.wait_for(order_queue.get(), timeout=1.0)
-    assert isinstance(order, Order)
+    assert isinstance(order, OrderExecutedEvent)
     assert order.market_slug == "test-market"
     assert order.outcome == "UP"
     assert order.side == "BUY"
@@ -318,8 +319,7 @@ async def test_order_manager_executes_sell_from_position_manager_despite_no_toke
     order_queue = bus.subscribe(ORDERS)
 
     # SELL proposal from position manager (identified by "Target price reached" in reason)
-    proposal = TradeProposal(
-        ts=time.time(),
+    proposal = OrderIntentEvent(
         market_slug="test-market",
         outcome="UP",
         side="SELL",
@@ -338,15 +338,15 @@ async def test_order_manager_executes_sell_from_position_manager_despite_no_toke
 
     # Verify order was executed
     order = await asyncio.wait_for(order_queue.get(), timeout=1.0)
-    assert isinstance(order, Order)
+    assert isinstance(order, OrderExecutedEvent)
     assert order.market_slug == "test-market"
     assert order.outcome == "UP"
     assert order.side == "SELL"
     assert order.size == 1.0
     assert order.response == {"order_id": "456", "status": "filled"}
 
-    # Verify token tracking was updated
-    assert manager._has_tokens("test-market", "UP")
+    # Verify token tracking was updated: after SELL, tokens should be removed
+    assert not manager._has_tokens("test-market", "UP")
 
     # Verify SELL order was NOT added to _executed_trades (only BUY orders are tracked)
     assert not manager._has_traded("test-market", "UP")
@@ -382,8 +382,7 @@ async def test_order_manager_executes_sell_after_buy() -> None:
     order_queue = bus.subscribe(ORDERS)
 
     # First, execute a BUY order
-    buy_proposal = TradeProposal(
-        ts=time.time(),
+    buy_proposal = OrderIntentEvent(
         market_slug="test-market",
         outcome="UP",
         side="BUY",
@@ -409,8 +408,7 @@ async def test_order_manager_executes_sell_after_buy() -> None:
     assert buy_order.side == "BUY"
 
     # Now try to SELL - this should work even though we've already traded
-    sell_proposal = TradeProposal(
-        ts=time.time(),
+    sell_proposal = OrderIntentEvent(
         market_slug="test-market",
         outcome="UP",
         side="SELL",
@@ -429,7 +427,7 @@ async def test_order_manager_executes_sell_after_buy() -> None:
 
     # Verify SELL was executed
     sell_order = await asyncio.wait_for(order_queue.get(), timeout=1.0)
-    assert isinstance(sell_order, Order)
+    assert isinstance(sell_order, OrderExecutedEvent)
     assert sell_order.market_slug == "test-market"
     assert sell_order.outcome == "UP"
     assert sell_order.side == "SELL"
@@ -460,8 +458,7 @@ async def test_order_manager_skips_sell_without_tokens_unless_from_position_mana
     order_queue = bus.subscribe(ORDERS)
 
     # SELL proposal from model (not position manager) - should be skipped
-    proposal = TradeProposal(
-        ts=time.time(),
+    proposal = OrderIntentEvent(
         market_slug="test-market",
         outcome="UP",
         side="SELL",

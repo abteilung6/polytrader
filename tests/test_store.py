@@ -1,95 +1,95 @@
-from polytrader.store import MemoryTickStore
-from polytrader.types import MarketTick
+from polytrader.store import MemoryMarketDataStore
+from polytrader.types import MarketDataEvent
 
 
-def test_memory_tick_store_add() -> None:
-    store = MemoryTickStore()
-    tick = MarketTick(ts=1.0, market_slug="test", outcome="UP", best_bid=0.49, best_ask=0.51)
+def test_memory_market_data_store_add() -> None:
+    store = MemoryMarketDataStore()
+    event = MarketDataEvent(market_slug="test", outcome="UP", best_bid=0.49, best_ask=0.51)
 
-    store.add(tick)
-
-    latest = store.latest("test", "UP")
-    assert latest == tick
-
-
-def test_memory_tick_store_latest() -> None:
-    store = MemoryTickStore()
-    tick1 = MarketTick(ts=1.0, market_slug="test", outcome="UP", best_bid=0.49, best_ask=0.51)
-    tick2 = MarketTick(ts=2.0, market_slug="test", outcome="UP", best_bid=0.50, best_ask=0.52)
-
-    store.add(tick1)
-    store.add(tick2)
+    store.add(event)
 
     latest = store.latest("test", "UP")
-    assert latest == tick2
+    assert latest == event
 
 
-def test_memory_tick_store_latest_none() -> None:
-    store = MemoryTickStore()
+def test_memory_market_data_store_latest() -> None:
+    store = MemoryMarketDataStore()
+    event1 = MarketDataEvent(market_slug="test", outcome="UP", best_bid=0.49, best_ask=0.51)
+    event2 = MarketDataEvent(market_slug="test", outcome="UP", best_bid=0.50, best_ask=0.52)
+
+    store.add(event1)
+    store.add(event2)
+
+    latest = store.latest("test", "UP")
+    assert latest == event2
+
+
+def test_memory_market_data_store_latest_none() -> None:
+    store = MemoryMarketDataStore()
 
     latest = store.latest("nonexistent", "UP")
     assert latest is None
 
 
-def test_memory_tick_store_history() -> None:
-    store = MemoryTickStore()
-    tick1 = MarketTick(ts=1.0, market_slug="test", outcome="UP", best_bid=0.49, best_ask=0.51)
-    tick2 = MarketTick(ts=2.0, market_slug="test", outcome="UP", best_bid=0.50, best_ask=0.52)
-    tick3 = MarketTick(ts=3.0, market_slug="test", outcome="UP", best_bid=0.51, best_ask=0.53)
+def test_memory_market_data_store_history() -> None:
+    store = MemoryMarketDataStore()
+    event1 = MarketDataEvent(market_slug="test", outcome="UP", best_bid=0.49, best_ask=0.51)
+    event2 = MarketDataEvent(market_slug="test", outcome="UP", best_bid=0.50, best_ask=0.52)
+    event3 = MarketDataEvent(market_slug="test", outcome="UP", best_bid=0.51, best_ask=0.53)
 
-    store.add(tick1)
-    store.add(tick2)
-    store.add(tick3)
+    store.add(event1)
+    store.add(event2)
+    store.add(event3)
 
     history = store.history("test", "UP")
-    assert history == [tick1, tick2, tick3]
+    assert history == [event1, event2, event3]
 
 
-def test_memory_tick_store_history_empty() -> None:
-    store = MemoryTickStore()
+def test_memory_market_data_store_history_empty() -> None:
+    store = MemoryMarketDataStore()
 
     history = store.history("nonexistent", "UP")
     assert history == []
 
 
-def test_memory_tick_store_separate_markets() -> None:
-    store = MemoryTickStore()
-    tick1 = MarketTick(ts=1.0, market_slug="market1", outcome="UP", best_bid=0.49, best_ask=0.51)
-    tick2 = MarketTick(ts=2.0, market_slug="market2", outcome="UP", best_bid=0.50, best_ask=0.52)
+def test_memory_market_data_store_separate_markets() -> None:
+    store = MemoryMarketDataStore()
+    event1 = MarketDataEvent(market_slug="market1", outcome="UP", best_bid=0.49, best_ask=0.51)
+    event2 = MarketDataEvent(market_slug="market2", outcome="UP", best_bid=0.50, best_ask=0.52)
 
-    store.add(tick1)
-    store.add(tick2)
+    store.add(event1)
+    store.add(event2)
 
-    assert store.latest("market1", "UP") == tick1
-    assert store.latest("market2", "UP") == tick2
-
-
-def test_memory_tick_store_separate_outcomes() -> None:
-    store = MemoryTickStore()
-    tick_up = MarketTick(ts=1.0, market_slug="test", outcome="UP", best_bid=0.49, best_ask=0.51)
-    tick_down = MarketTick(ts=2.0, market_slug="test", outcome="DOWN", best_bid=0.50, best_ask=0.52)
-
-    store.add(tick_up)
-    store.add(tick_down)
-
-    assert store.latest("test", "UP") == tick_up
-    assert store.latest("test", "DOWN") == tick_down
+    assert store.latest("market1", "UP") == event1
+    assert store.latest("market2", "UP") == event2
 
 
-def test_memory_tick_store_window_limit() -> None:
-    store = MemoryTickStore(window=3)
+def test_memory_market_data_store_separate_outcomes() -> None:
+    store = MemoryMarketDataStore()
+    event_up = MarketDataEvent(market_slug="test", outcome="UP", best_bid=0.49, best_ask=0.51)
+    event_down = MarketDataEvent(market_slug="test", outcome="DOWN", best_bid=0.50, best_ask=0.52)
 
-    tick1 = MarketTick(ts=1.0, market_slug="test", outcome="UP", best_bid=0.49, best_ask=0.51)
-    tick2 = MarketTick(ts=2.0, market_slug="test", outcome="UP", best_bid=0.50, best_ask=0.52)
-    tick3 = MarketTick(ts=3.0, market_slug="test", outcome="UP", best_bid=0.51, best_ask=0.53)
-    tick4 = MarketTick(ts=4.0, market_slug="test", outcome="UP", best_bid=0.52, best_ask=0.54)
+    store.add(event_up)
+    store.add(event_down)
 
-    store.add(tick1)
-    store.add(tick2)
-    store.add(tick3)
-    store.add(tick4)
+    assert store.latest("test", "UP") == event_up
+    assert store.latest("test", "DOWN") == event_down
+
+
+def test_memory_market_data_store_window_limit() -> None:
+    store = MemoryMarketDataStore(window=3)
+
+    event1 = MarketDataEvent(market_slug="test", outcome="UP", best_bid=0.49, best_ask=0.51)
+    event2 = MarketDataEvent(market_slug="test", outcome="UP", best_bid=0.50, best_ask=0.52)
+    event3 = MarketDataEvent(market_slug="test", outcome="UP", best_bid=0.51, best_ask=0.53)
+    event4 = MarketDataEvent(market_slug="test", outcome="UP", best_bid=0.52, best_ask=0.54)
+
+    store.add(event1)
+    store.add(event2)
+    store.add(event3)
+    store.add(event4)
 
     history = store.history("test", "UP")
     assert len(history) == 3
-    assert history == [tick2, tick3, tick4]
-    assert tick1 not in history
+    assert history == [event2, event3, event4]
+    assert event1 not in history

@@ -3,18 +3,26 @@ from collections.abc import Callable
 
 from polytrader.adapters import create_adapter_factory
 from polytrader.config import PolymarketSecrets
-from polytrader.events import MARKET_CHANGE, PROPOSALS, EventBus
+from polytrader.events import (
+    MARKET_CHANGE,
+    PROPOSALS,
+    SYSTEM_LIFECYCLE,
+    EventBus,
+    MemoryEventStore,
+    SystemStartedEvent,
+    SystemStoppedEvent,
+)
 from polytrader.logging_config import logger
 from polytrader.market_discovery import MarketDiscoveryService
 from polytrader.models import create_model_factory
 from polytrader.observer import create_observer_factory
 from polytrader.order_manager import create_noop_order_manager_factory
-from polytrader.store import MemoryTickStore
+from polytrader.store import MemoryMarketDataStore
 from polytrader.supervisor import MarketSupervisor
-from polytrader.types import MarketChangeEvent, TradeProposal
+from polytrader.types import MarketChangeEvent, OrderIntentEvent
 
 
-def default_proposal_handler(proposal: TradeProposal) -> None:
+def default_proposal_handler(proposal: OrderIntentEvent) -> None:
     """Default handler for proposal events - logs using structured logging."""
     market_short = (
         proposal.market_slug.split("-")[-1] if "-" in proposal.market_slug else proposal.market_slug
@@ -57,7 +65,7 @@ async def predict_task(
     sell_threshold: float = 0.50,
     size: float = 1.0,
     min_history: int = 30,
-    proposal_handler: Callable[[TradeProposal], None] | None = None,
+    proposal_handler: Callable[[OrderIntentEvent], None] | None = None,
     market_change_handler: Callable[[MarketChangeEvent], None] | None = None,
     secrets: PolymarketSecrets | None = None,
 ) -> None:
@@ -83,9 +91,14 @@ async def predict_task(
     if market_change_handler is None:
         market_change_handler = default_market_change_handler
 
-    bus = EventBus()
-    store = MemoryTickStore()
+    store = MemoryMarketDataStore()
+    event_store = MemoryEventStore()
+    bus = EventBus(store=event_store)
     discovery = MarketDiscoveryService()
+
+    # Emit system started event (auto-persisted by EventBus)
+    started_event = SystemStartedEvent()
+    await bus.publish(SYSTEM_LIFECYCLE, started_event)
 
     adapter_factory = create_adapter_factory(secrets, polling_frequency_hz=frequency)
     observer_factory = create_observer_factory(bus, store)
@@ -135,6 +148,14 @@ async def predict_task(
         await asyncio.gather(supervisor_task, proposals_task, market_changes_task)
     except KeyboardInterrupt:
         supervisor.stop()
+        # Emit system stopped event (auto-persisted by EventBus)
+        stopped_event = SystemStoppedEvent(reason="KeyboardInterrupt")
+        await bus.publish(SYSTEM_LIFECYCLE, stopped_event)
+    except Exception as e:
+        # Emit system stopped event with error reason (auto-persisted by EventBus)
+        stopped_event = SystemStoppedEvent(reason=f"Error: {type(e).__name__}: {str(e)}")
+        await bus.publish(SYSTEM_LIFECYCLE, stopped_event)
+        raise
     finally:
         supervisor_task.cancel()
         proposals_task.cancel()
@@ -145,3 +166,10 @@ async def predict_task(
             await market_changes_task
         except asyncio.CancelledError:
             pass
+        # Emit system stopped event if not already emitted (auto-persisted by EventBus)
+        if not any(
+            isinstance(e, SystemStoppedEvent)
+            for e in event_store.read_stream(event_type=SystemStoppedEvent)
+        ):
+            stopped_event = SystemStoppedEvent(reason="Normal shutdown")
+            await bus.publish(SYSTEM_LIFECYCLE, stopped_event)

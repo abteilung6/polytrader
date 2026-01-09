@@ -1,11 +1,11 @@
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Protocol
 
-from polytrader.types import MarketTick, Outcome
+from polytrader.types import MarketDataEvent, Outcome
 
 if TYPE_CHECKING:
     from polytrader.events import EventBus
-    from polytrader.store import ITickStore
+    from polytrader.store import IMarketDataStore
 
 
 class ITradingModel(Protocol):
@@ -13,7 +13,7 @@ class ITradingModel(Protocol):
         """Start the trading model."""
         ...
 
-    async def on_tick(self, tick: MarketTick) -> None:
+    async def on_tick(self, event: MarketDataEvent) -> None:
         """Process a market tick."""
         ...
 
@@ -24,7 +24,7 @@ class ITradingModel(Protocol):
 
 def create_model_factory(
     bus: "EventBus",
-    store: "ITickStore",
+    store: "IMarketDataStore",
     buy_threshold: float = 0.30,
     sell_threshold: float = 0.50,
     size: float = 1.0,
@@ -36,7 +36,7 @@ def create_model_factory(
 
     Args:
         bus: Event bus for publishing proposals
-        store: Tick store for historical data
+        store: Market data store for historical data
         buy_threshold: Buy threshold price
         sell_threshold: Sell threshold price
         size: Trade size in USD

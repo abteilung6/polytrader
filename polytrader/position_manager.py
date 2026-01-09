@@ -5,10 +5,16 @@ from collections.abc import Callable
 from typing import Any, Protocol
 
 from polytrader.clob import ExternalOrder, IClobClientFactory, get_active_orders
-from polytrader.events import ORDERS, PROPOSALS, TICKS, EventBus
+from polytrader.events import MARKET_DATA, ORDERS, PROPOSALS, EventBus
 from polytrader.gamma import GammaClient
 from polytrader.logging_config import logger
-from polytrader.types import MarketTick, Order, Outcome, Position, TradeProposal
+from polytrader.types import (
+    MarketDataEvent,
+    OrderExecutedEvent,
+    OrderIntentEvent,
+    Outcome,
+    Position,
+)
 
 
 class IPositionManager(Protocol):
@@ -102,7 +108,7 @@ class PositionManager(IPositionManager):
 
         # Subscribe to orders and ticks
         orders_queue = self.bus.subscribe(ORDERS)
-        ticks_queue = self.bus.subscribe(TICKS)
+        market_data_queue = self.bus.subscribe(MARKET_DATA)
 
         # Start sync task if enabled
         sync_task: asyncio.Task | None = None
@@ -120,7 +126,7 @@ class PositionManager(IPositionManager):
                 done, pending = await asyncio.wait(
                     [
                         asyncio.create_task(orders_queue.get()),
-                        asyncio.create_task(ticks_queue.get()),
+                        asyncio.create_task(market_data_queue.get()),
                     ],
                     return_when=asyncio.FIRST_COMPLETED,
                 )
@@ -129,9 +135,9 @@ class PositionManager(IPositionManager):
                 for task in done:
                     try:
                         result = await task
-                        if isinstance(result, Order):
+                        if isinstance(result, OrderExecutedEvent):
                             await self._handle_order(result)
-                        elif isinstance(result, MarketTick):
+                        elif isinstance(result, MarketDataEvent):
                             await self._check_target_prices(result)
                     except Exception as e:
                         logger.bind(error_type=type(e).__name__, error=str(e)).exception(
@@ -160,7 +166,7 @@ class PositionManager(IPositionManager):
                 except asyncio.CancelledError:
                     pass
 
-    async def _handle_order(self, order: Order) -> None:
+    async def _handle_order(self, order: OrderExecutedEvent) -> None:
         """Handle an executed order.
 
         Creates positions from BUY orders and removes positions from SELL orders.
@@ -194,7 +200,7 @@ class PositionManager(IPositionManager):
                 size=order.size,
                 target_price=order.target_price if order.target_price is not None else 0.5,
                 entry_price=entry_price,
-                entry_time=order.ts,
+                entry_time=order.ts_mono,
                 order_id=order_id if order_id != "unknown" else None,
             )
 
@@ -253,7 +259,7 @@ class PositionManager(IPositionManager):
                 )
 
                 # Calculate position duration
-                duration_seconds = order.ts - position.entry_time
+                duration_seconds = order.ts_mono - position.entry_time
                 duration_minutes = duration_seconds / 60.0
 
                 position_count = len(self._positions)
@@ -309,33 +315,33 @@ class PositionManager(IPositionManager):
                     "SELL order for position we don't track (may be external)"
                 )
 
-    async def _check_target_prices(self, tick: MarketTick) -> None:
+    async def _check_target_prices(self, event: MarketDataEvent) -> None:
         """Check if any positions have reached their target price.
 
         Generates SELL proposals when target prices are reached.
         """
-        key = (tick.market_slug, tick.outcome)
+        key = (event.market_slug, event.outcome)
 
         if key not in self._positions:
             # No position for this market/outcome - nothing to sell
             logger.bind(
-                market_slug=tick.market_slug,
-                outcome=tick.outcome,
+                market_slug=event.market_slug,
+                outcome=event.outcome,
             ).debug(
                 "No position to check: {market_slug}/{outcome}",
-                market_slug=tick.market_slug,
-                outcome=tick.outcome,
+                market_slug=event.market_slug,
+                outcome=event.outcome,
             )
             return
 
         position = self._positions[key]
-        mid_price = tick.mid
+        mid_price = event.mid
 
         # Check if target price is reached (for BUY positions, sell when price >= target)
         if mid_price >= position.target_price:
             logger.bind(
-                market_slug=tick.market_slug,
-                outcome=tick.outcome,
+                market_slug=event.market_slug,
+                outcome=event.outcome,
                 current_price=mid_price,
                 target_price=position.target_price,
             ).info(
@@ -343,30 +349,30 @@ class PositionManager(IPositionManager):
                 "for {market_slug}/{outcome}",
                 current_price=mid_price,
                 target_price=position.target_price,
-                market_slug=tick.market_slug,
-                outcome=tick.outcome,
+                market_slug=event.market_slug,
+                outcome=event.outcome,
             )
 
             # Generate SELL proposal
-            proposal = TradeProposal(
-                ts=tick.ts,
-                market_slug=tick.market_slug,
-                outcome=tick.outcome,
+            proposal = OrderIntentEvent(
+                market_slug=event.market_slug,
+                outcome=event.outcome,
                 side="SELL",
                 target_price=position.target_price,
-                limit_price=tick.best_bid,
+                limit_price=event.best_bid,
                 size=position.size,
                 reason=(
                     f"Target price reached: {mid_price:.4f} >= {position.target_price:.4f} "
                     f"(entry: {position.entry_price:.4f})"
                 ),
+                correlation_id=event.correlation_id,  # Propagate from MarketDataEvent
             )
 
             await self.bus.publish(PROPOSALS, proposal)
 
             logger.bind(
-                market_slug=tick.market_slug,
-                outcome=tick.outcome,
+                market_slug=event.market_slug,
+                outcome=event.outcome,
                 price=mid_price,
             ).info(
                 "Published SELL proposal: target reached at {price:.4f}",
@@ -385,8 +391,8 @@ class PositionManager(IPositionManager):
             )
 
             logger.bind(
-                market_slug=tick.market_slug,
-                outcome=tick.outcome,
+                market_slug=event.market_slug,
+                outcome=event.outcome,
                 current_price=mid_price,
                 target_price=position.target_price,
                 entry_price=position.entry_price,
@@ -399,8 +405,8 @@ class PositionManager(IPositionManager):
                 "current={current_price:.4f} < target={target_price:.4f} "
                 "(need +{price_diff:.4f}, {price_pct:.1f}% more) | "
                 "entry={entry_price:.4f} | profit={profit_pct:+.1f}% | size=${size:.2f}",
-                market_slug=tick.market_slug,
-                outcome=tick.outcome,
+                market_slug=event.market_slug,
+                outcome=event.outcome,
                 current_price=mid_price,
                 target_price=position.target_price,
                 entry_price=position.entry_price,
@@ -433,7 +439,6 @@ class PositionManager(IPositionManager):
         now = time.time()
 
         # Calculate aggregate metrics
-        total_pnl = 0.0
         positions_summary = []
 
         for key, position in self._positions.items():

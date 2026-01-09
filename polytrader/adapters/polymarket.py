@@ -1,7 +1,6 @@
 """Polymarket market data adapter."""
 
 import asyncio
-import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 
@@ -14,7 +13,7 @@ from polytrader.adapters.prices import unmarshall_token_prices
 from polytrader.config import CHAIN_ID, CLOB_API_URL, PolymarketSecrets
 from polytrader.gamma import GammaClient
 from polytrader.logging_config import logger
-from polytrader.types import MarketTick, Outcome
+from polytrader.types import MarketDataEvent, Outcome
 
 
 @dataclass
@@ -68,14 +67,14 @@ class PolymarketMarketDataAdapter(IMarketDataAdapter):
                 self._token_ids[outcome] = market.get_token_id(outcome)
         return self._token_ids
 
-    async def ticks(self) -> AsyncIterator[MarketTick]:
-        """Yield market ticks asynchronously for all configured outcomes.
+    async def ticks(self) -> AsyncIterator[MarketDataEvent]:
+        """Yield market data events asynchronously for all configured outcomes.
 
         Polls the Polymarket API at the configured frequency and yields
-        MarketTick objects for each outcome with bid/ask prices.
+        MarketDataEvent objects for each outcome with bid/ask prices.
 
         Yields:
-            MarketTick: Market data updates (one per outcome per polling cycle)
+            MarketDataEvent: Market data updates (one per outcome per polling cycle)
 
         Raises:
             ValueError: If market or any outcome not found
@@ -109,8 +108,7 @@ class PolymarketMarketDataAdapter(IMarketDataAdapter):
                     best_bid = token_prices.get_best_bid()
                     best_ask = token_prices.get_best_ask()
 
-                    yield MarketTick(
-                        ts=time.time(),
+                    yield MarketDataEvent(
                         market_slug=self.market_slug,
                         outcome=outcome,
                         best_bid=best_bid,

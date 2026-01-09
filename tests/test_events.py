@@ -2,8 +2,8 @@ import asyncio
 
 import pytest
 
-from polytrader.events import TICKS, EventBus, Topic
-from polytrader.types import MarketTick
+from polytrader.events import MARKET_DATA, EventBus, Topic
+from polytrader.types import MarketDataEvent
 
 
 def test_subscribe_creates_queue() -> None:
@@ -78,28 +78,27 @@ async def test_multiple_messages_same_topic() -> None:
 
 async def test_complex_message_types() -> None:
     bus = EventBus()
-    queue = bus.subscribe(TICKS)
+    queue = bus.subscribe(MARKET_DATA)
 
-    tick = MarketTick(
-        ts=1234567890.0,
+    event = MarketDataEvent(
         market_slug="test-market",
         outcome="UP",
         best_bid=0.49,
         best_ask=0.51,
     )
 
-    await bus.publish(TICKS, tick)
+    await bus.publish(MARKET_DATA, event)
     received = await queue.get()
 
-    assert received == tick
-    assert isinstance(received, MarketTick)
+    assert received == event
+    assert isinstance(received, MarketDataEvent)
     assert received.market_slug == "test-market"
 
 
 async def test_multiple_topics_multiple_subscribers() -> None:
     bus = EventBus()
 
-    tick_queue = bus.subscribe(TICKS)
+    market_data_queue = bus.subscribe(MARKET_DATA)
     proposals_topic = Topic[str]("proposals")
     orders_topic = Topic[str]("orders")
     proposal_queue = bus.subscribe(proposals_topic)
@@ -107,13 +106,13 @@ async def test_multiple_topics_multiple_subscribers() -> None:
     order_queue2 = bus.subscribe(orders_topic)
 
     await bus.publish(
-        TICKS, MarketTick(ts=1.0, market_slug="test", outcome="UP", best_bid=0.49, best_ask=0.51)
+        MARKET_DATA, MarketDataEvent(market_slug="test", outcome="UP", best_bid=0.49, best_ask=0.51)
     )
     await bus.publish(proposals_topic, "proposal1")
     await bus.publish(orders_topic, "order1")
 
-    tick = await tick_queue.get()
-    assert isinstance(tick, MarketTick)
+    event = await market_data_queue.get()
+    assert isinstance(event, MarketDataEvent)
     assert await proposal_queue.get() == "proposal1"
     assert await order_queue1.get() == "order1"
     assert await order_queue2.get() == "order1"
