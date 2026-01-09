@@ -8,6 +8,7 @@ _proposals_topic: Topic | None = None
 _orders_topic: Topic | None = None
 _market_change_topic: Topic | None = None
 _system_lifecycle_topic: Topic | None = None
+_risk_checks_topic: Topic | None = None
 
 
 def _create_market_data_topic() -> Topic:
@@ -89,6 +90,21 @@ def get_system_lifecycle_topic() -> Topic:
     return _system_lifecycle_topic
 
 
+def _create_risk_checks_topic() -> Topic:
+    """Create the RISK_CHECKS topic."""
+    from polytrader.events.types import RiskCheckEvent
+
+    return Topic[RiskCheckEvent]("risk_checks")
+
+
+def get_risk_checks_topic() -> Topic:
+    """Get the RISK_CHECKS topic (singleton)."""
+    global _risk_checks_topic
+    if _risk_checks_topic is None:
+        _risk_checks_topic = _create_risk_checks_topic()
+    return _risk_checks_topic
+
+
 def __getattr__(name: str) -> Topic:
     """Lazily initialize topic constants on first access.
 
@@ -114,5 +130,7 @@ def __getattr__(name: str) -> Topic:
         return get_market_change_topic()
     elif name == "SYSTEM_LIFECYCLE":
         return get_system_lifecycle_topic()
+    elif name == "RISK_CHECKS":
+        return get_risk_checks_topic()
     else:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -1,13 +1,20 @@
 """Event type definitions and base classes."""
 
+from __future__ import annotations
+
 import time
 import uuid
 from datetime import UTC, datetime
 from enum import Enum
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
 from polytrader.common.ids import generate_correlation_id, get_run_id
+
+if TYPE_CHECKING:
+    from polytrader.risk.models import RiskReasonCode, RiskResult
+    from polytrader.types import OrderIntentEvent
 
 
 class EventSource(str, Enum):
@@ -118,3 +125,33 @@ class SystemStoppedEvent(Event):
 
     source: EventSource = Field(default=EventSource.OPS)
     reason: str | None = Field(default=None, description="Optional reason for shutdown")
+
+
+class RiskCheckEvent(Event):
+    """Event emitted for every risk check per flows.mdc §6 and observability.mdc §1.
+
+    This event is always emitted (for both allowed and denied orders)
+    to provide a complete audit trail of all risk decisions.
+
+    Per flows.mdc §6: Emit RiskCheckEvent ALWAYS.
+    Per observability.mdc §1: RiskCheckEvent is a core event type.
+
+    Attributes:
+        intent: The order intent that was checked
+        result: The risk check result (allowed, reason_codes, projections, metadata)
+    """
+
+    source: EventSource = Field(default=EventSource.RISK)
+
+    intent: OrderIntentEvent = Field(description="Order intent that was checked")
+    result: RiskResult = Field(description="Risk check result")
+
+    @property
+    def allowed(self) -> bool:
+        """Convenience property to check if order was allowed."""
+        return self.result.allowed
+
+    @property
+    def reason_codes(self) -> list[RiskReasonCode]:
+        """Convenience property to get reason codes."""
+        return self.result.reason_codes
