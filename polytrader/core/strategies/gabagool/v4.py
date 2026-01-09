@@ -255,17 +255,15 @@ class GabagoolV4Strategy:
         elif down_valid and not up_valid:
             return self._process_outcome(portfolio, market_id, state, "DOWN", down_price)
         elif up_valid and down_valid:
-            # Both valid - prefer the one that's closer to threshold (more momentum)
-            # Or if no declared winner, prefer the cheaper one (better entry)
-            if state.declared_winner is None:
-                # No declared winner - prefer the one with better price (lower is better for buying)
-                if up_price <= down_price:
-                    return self._process_outcome(portfolio, market_id, state, "UP", up_price)
-                else:
-                    return self._process_outcome(portfolio, market_id, state, "DOWN", down_price)
+            # Both valid - if we have a declared winner that's still valid, it was processed
+            # on lines 249-252. If we reach here, either:
+            # 1. No declared winner yet (state.declared_winner is None) - first time seeing both valid
+            # 2. Declared winner was just reset to None (because it became invalid, then both became valid again)
+            # In either case, pick the one with better price (lower is better for buying)
+            if up_price <= down_price:
+                return self._process_outcome(portfolio, market_id, state, "UP", up_price)
             else:
-                # Already have a declared winner but it's no longer valid - pick the other one
-                return None
+                return self._process_outcome(portfolio, market_id, state, "DOWN", down_price)
         
         return None
 

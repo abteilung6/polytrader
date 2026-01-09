@@ -155,7 +155,6 @@ def get_strategy_info(strategy_name: str) -> dict[str, str | float]:
             "version": "v4",
             "target_profit_usdc": strategy.target_profit_usdc,
             "winner_threshold": strategy.winner_threshold,
-            "other_side_hold_duration_seconds": strategy.other_side_hold_duration_seconds,
             "max_buy_price": strategy.max_buy_price,
             "min_trade_amount_usdc": strategy.min_trade_amount_usdc,
             "max_capital_per_market_usdc": strategy.max_capital_per_market_usdc,
