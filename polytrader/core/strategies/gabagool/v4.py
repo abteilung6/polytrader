@@ -212,7 +212,6 @@ class GabagoolV4Strategy:
         up_price: float,
         down_price: float,
         timestamp: float | None = None,
-        candle_data: CandleData | None = None,
     ) -> TradeDecision | list[TradeDecision] | None:
         """Make trading decision based on price thresholds.
         
@@ -222,7 +221,7 @@ class GabagoolV4Strategy:
             up_price: Current best ask price for UP outcome
             down_price: Current best ask price for DOWN outcome
             timestamp: Optional timestamp for backtesting
-            candle_data: Optional ETH/USD candle data (OHLCV) for price context
+            : Optional ETH/USD candle data (OHLCV) for price context
         """
         # Early exit checks
         if portfolio.balance < self.min_trade_amount_usdc:

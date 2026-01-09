@@ -452,19 +452,6 @@ async def watch_mode(args: argparse.Namespace) -> None:
                         print(f"   Profit if UP: ${profit_if_up:+.2f}")
                         print(f"   Profit if DOWN: ${profit_if_down:+.2f}")
                         
-                        # Show gabagool-specific metrics if using GabagoolStrategy
-                        from polytrader.core.strategy import GabagoolStrategy
-                        if isinstance(portfolio_manager.strategy, GabagoolStrategy):
-                            metrics = portfolio_manager.strategy.get_metrics(portfolio, tick.market_id)
-                            pair_cost = metrics["pair_cost"]
-                            locked = "🔒 LOCKED" if metrics["locked_profit"] else ""
-                            print(f"\n📊 Gabagool Metrics: Pair Cost={pair_cost:.4f} {locked}")
-                            print(f"   Qty YES: {metrics['qty_yes']:.2f} (Cost: ${metrics['cost_yes']:.2f})")
-                            print(f"   Qty NO: {metrics['qty_no']:.2f} (Cost: ${metrics['cost_no']:.2f})")
-                            if metrics['estimated_profit'] > 0:
-                                print(f"   Estimated Profit: ${metrics['estimated_profit']:.2f}")
-                            print(f"   Trades Executed: {metrics['trade_count']}")
-                        
                         # Show positions for current market
                         if up_tick and down_tick:
                             print(f"\n   Positions in {tick.market_id}:")

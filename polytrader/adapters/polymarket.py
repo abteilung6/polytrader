@@ -89,14 +89,7 @@ class PolymarketMarketDataAdapter(IMarketDataAdapter):
                     BookParams(token_id=token_id, side="BUY"),
                     BookParams(token_id=token_id, side="SELL"),
                 ]
-                # Use a lock to serialize access to the client when running in threads
-                # This prevents race conditions in httpx HTTP/2 connection handling
-                def _get_prices_safe():
-                    with _client_lock:
-                        return self.client.get_prices(params)
-                
-                response = await asyncio.to_thread(_get_prices_safe)
-
+                response = await asyncio.to_thread(self.client.get_prices, params)
                 token_prices = unmarshall_token_prices(response, token_id)
                 if token_prices is None:
                     logger.warning(f"No prices found for token_id {token_id}")

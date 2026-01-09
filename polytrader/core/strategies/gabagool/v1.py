@@ -506,7 +506,6 @@ class GabagoolStrategy:
             up_price: float,
             down_price: float,
             timestamp: float | None = None,
-            candle_data: "CandleData | None" = None,
     ) -> TradeDecision | None:
             """Make gabagool-style trading decision."""
             now = timestamp if timestamp is not None else time.time()

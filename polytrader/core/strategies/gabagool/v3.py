@@ -204,7 +204,6 @@ class GabagoolV3Strategy:
         up_price: float,
         down_price: float,
         timestamp: float | None = None,
-        candle_data: "CandleData | None" = None,
     ) -> TradeDecision | list[TradeDecision] | None:
         """Make trading decision: buy both sides to maintain share_ratio."""
         now = timestamp if timestamp is not None else time.time()
