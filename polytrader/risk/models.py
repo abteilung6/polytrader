@@ -201,6 +201,13 @@ class RiskContext(BaseModel):
         default_factory=set,
         description="Set of (market_slug, outcome) tuples for open orders",
     )
+    executed_trades: set[tuple[str, Outcome]] = Field(
+        default_factory=set,
+        description=(
+            "Set of (market_slug, outcome) tuples for executed trades "
+            "(for max_trades_per_market check)"
+        ),
+    )
     market_data: MarketDataEvent | None = Field(
         default=None,
         description="Latest market data for the intent's market (mid price, bands)",

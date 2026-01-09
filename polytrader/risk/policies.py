@@ -116,3 +116,152 @@ def check_token_ownership(context: RiskContext, limits: RiskLimits) -> RiskResul
         reason_codes=[RiskReasonCode.RISK_ALLOWED],
         metadata=metadata,
     )
+
+
+def check_position_limits(context: RiskContext, limits: RiskLimits) -> RiskResult:
+    """Check position limits (per-market and global) per flows.mdc §6.
+
+    Args:
+        context: Risk context with current positions
+        limits: Risk limits configuration
+
+    Returns:
+        RiskResult with allowed=False if limits would be exceeded
+    """
+    intent = context.intent
+    reasons: list[RiskReasonCode] = []
+    metadata: dict[str, Any] = {}
+    projections: dict[str, Any] = {}
+
+    # Calculate new position after this order
+    key = (intent.market_slug, intent.outcome)
+    current_position = context.current_positions.get(key, 0.0)
+
+    if intent.side == "BUY":
+        new_position = current_position + intent.size
+    else:  # SELL
+        new_position = current_position - intent.size
+        # Can't go negative (handled by token ownership check, but be safe)
+        if new_position < 0:
+            new_position = 0.0
+
+    projections["current_position"] = current_position
+    projections["new_position"] = new_position
+    projections["position_delta"] = intent.size if intent.side == "BUY" else -intent.size
+
+    # Check per-market limit (RISK_MAX_POSITION per trading.mdc §4)
+    if abs(new_position) > limits.max_position_per_market:
+        reasons.append(RiskReasonCode.RISK_MAX_POSITION)
+        metadata["new_position"] = new_position
+        metadata["max_position_per_market"] = limits.max_position_per_market
+        metadata["limits_version"] = limits.version
+        return RiskResult(
+            allowed=False,
+            reason_codes=reasons,
+            projections=projections,
+            metadata=metadata,
+        )
+
+    # Calculate new global position
+    new_global_position = context.global_position
+    if intent.side == "BUY":
+        new_global_position += intent.size
+    else:  # SELL
+        new_global_position -= intent.size
+        if new_global_position < 0:
+            new_global_position = 0.0
+
+    projections["current_global_position"] = context.global_position
+    projections["new_global_position"] = new_global_position
+
+    # Check global limit (RISK_MAX_POSITION per trading.mdc §4)
+    if new_global_position > limits.max_position_global:
+        reasons.append(RiskReasonCode.RISK_MAX_POSITION)
+        metadata["new_global_position"] = new_global_position
+        metadata["max_position_global"] = limits.max_position_global
+        metadata["limits_version"] = limits.version
+        return RiskResult(
+            allowed=False,
+            reason_codes=reasons,
+            projections=projections,
+            metadata=metadata,
+        )
+
+    # Check notional exposure (RISK_MAX_NOTIONAL per trading.mdc §4)
+    if intent.side == "BUY":
+        new_notional = new_global_position
+        if new_notional > limits.max_notional_exposure:
+            reasons.append(RiskReasonCode.RISK_MAX_NOTIONAL)
+            metadata["new_notional_exposure"] = new_notional
+            metadata["max_notional_exposure"] = limits.max_notional_exposure
+            metadata["limits_version"] = limits.version
+            return RiskResult(
+                allowed=False,
+                reason_codes=reasons,
+                projections=projections,
+                metadata=metadata,
+            )
+
+    # Include key inputs per trading.mdc §4 (mid, qty, projected position, limits version)
+    if context.market_data:
+        metadata["mid_price"] = context.market_data.mid
+    metadata["qty"] = intent.size
+    metadata["projected_position"] = new_position
+    metadata["limits_version"] = limits.version
+
+    return RiskResult(
+        allowed=True,
+        reason_codes=[RiskReasonCode.RISK_ALLOWED],
+        projections=projections,
+        metadata=metadata,
+    )
+
+
+def check_max_trades_per_market(context: RiskContext, limits: RiskLimits) -> RiskResult:
+    """Check max trades per market/outcome (for BUY orders only).
+
+    This is a simple check: if we've already traded this market/outcome,
+    deny additional BUY orders. SELL orders are allowed.
+
+    Note: This uses executed_trades from RiskContext. In Phase 3 (OMS),
+    this will come from OMS state.
+
+    Args:
+        context: Risk context
+        limits: Risk limits configuration
+
+    Returns:
+        RiskResult with allowed=False if max trades exceeded
+    """
+    intent = context.intent
+    reasons: list[RiskReasonCode] = []
+    metadata: dict[str, Any] = {}
+
+    # Only check BUY orders
+    if intent.side != "BUY":
+        return RiskResult(
+            allowed=True,
+            reason_codes=[RiskReasonCode.RISK_ALLOWED],
+            metadata=metadata,
+        )
+
+    # Check if we've already traded this market/outcome
+    key = (intent.market_slug, intent.outcome)
+
+    if key in context.executed_trades:
+        reasons.append(RiskReasonCode.RISK_MAX_POSITION)  # Reuse code
+        metadata["market_slug"] = intent.market_slug
+        metadata["outcome"] = intent.outcome
+        metadata["max_trades_per_market"] = limits.max_trades_per_market
+        metadata["limits_version"] = limits.version
+        return RiskResult(
+            allowed=False,
+            reason_codes=reasons,
+            metadata=metadata,
+        )
+
+    return RiskResult(
+        allowed=True,
+        reason_codes=[RiskReasonCode.RISK_ALLOWED],
+        metadata=metadata,
+    )

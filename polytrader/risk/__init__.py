@@ -13,7 +13,12 @@ from polytrader.risk.models import (
     RiskResult,
     _rebuild_risk_context_model,
 )
-from polytrader.risk.policies import check_proposal_validity, check_token_ownership
+from polytrader.risk.policies import (
+    check_max_trades_per_market,
+    check_position_limits,
+    check_proposal_validity,
+    check_token_ownership,
+)
 
 # Ensure RiskContext model is rebuilt with forward references resolved
 # This is safe to call multiple times
@@ -24,6 +29,8 @@ __all__ = [
     "RiskLimits",
     "RiskReasonCode",
     "RiskResult",
+    "check_max_trades_per_market",
+    "check_position_limits",
     "check_proposal_validity",
     "check_token_ownership",
 ]
