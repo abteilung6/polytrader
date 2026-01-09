@@ -87,10 +87,9 @@ def create_strategy(strategy_name: str = "gabagool") -> Strategy:
         return GabagoolV4Strategy(
             target_profit_usdc=5.0,
             winner_threshold=0.6,
-            other_side_hold_duration_seconds=20.0,
-            max_buy_price=0.80,
+            max_buy_price=0.82,
             min_trade_amount_usdc=1.0,
-            max_capital_per_market_usdc=500.0,
+            max_capital_per_market_usdc=4000.0,
         )
     raise ValueError(
         f"Unknown strategy: {strategy_name}. "

@@ -7,11 +7,10 @@ from datetime import datetime, timezone
 from py_clob_client.client import ClobClient  # type: ignore[import-untyped]
 from py_clob_client.order_builder.constants import BUY  # type: ignore[import-untyped]
 
-from polytrader.adapters.coinbase import CoinbaseCandleFetcher
 from polytrader.adapters.polymarket import PolymarketAdapterConfig, PolymarketMarketDataAdapter
 from polytrader.clob import place_market_order, verify_usdc_balance
 from polytrader.config import CHAIN_ID, CLOB_API_URL, PolymarketSecrets
-from polytrader.core import GabagoolStrategy, PortfolioManager
+from polytrader.core import PortfolioManager
 from polytrader.core.position import Position
 from polytrader.core.strategies import create_strategy
 from polytrader.events import TICKS, EventBus
@@ -19,7 +18,7 @@ from polytrader.gamma import GammaClient
 from polytrader.market_discovery import MarketSlugGenerator
 from polytrader.observer import Observer
 from polytrader.store import MemoryTickStore
-from polytrader.types import CandleData, MarketTick, Outcome
+from polytrader.types import MarketTick, Outcome
 
 
 def get_current_interval_id(asset: str, time_period: str) -> str:
@@ -197,11 +196,6 @@ async def watch_mode(args: argparse.Namespace) -> None:
     # Track when we last successfully received a tick for each outcome (to detect API errors)
     last_successful_tick_time: dict[str, float] = {}
     
-    # Initialize Coinbase candle fetcher (default to 15min timeframe)
-    candle_fetcher = CoinbaseCandleFetcher(timeframe='eth')
-    last_candle_fetch_count = 0
-    latest_candle: dict | None = None
-    
     # Print table header
     if len(outcomes_to_watch) > 1:
         # Table format for multiple outcomes
@@ -319,11 +313,6 @@ async def watch_mode(args: argparse.Namespace) -> None:
             market_prices[(tick.market_id, tick.outcome)] = tick.mid
             # Mark that we successfully received a tick for this outcome
             last_successful_tick_time[outcome_key] = tick.ts
-            
-            # Fetch latest candle periodically (every 10 ticks)
-            if count - last_candle_fetch_count >= 10:
-                latest_candle = candle_fetcher.fetch_latest_candle()
-                last_candle_fetch_count = count
 
             # Process with portfolio manager if we have both UP and DOWN prices
             trade_executed = False
@@ -350,24 +339,10 @@ async def watch_mode(args: argparse.Namespace) -> None:
                 if has_fresh_up and has_fresh_down and timestamps_match:
                     # Both ticks are fresh and have matching timestamps - safe to trade
                     # Use best_ask (best_bid + spread) for buying - accounts for spread
-                    
-                    # Convert latest_candle dict to CandleData if available
-                    candle_data: CandleData | None = None
-                    if latest_candle:
-                        candle_data = CandleData(
-                            timestamp=latest_candle['timestamp'],
-                            open=latest_candle['open'],
-                            high=latest_candle['high'],
-                            low=latest_candle['low'],
-                            close=latest_candle['close'],
-                            volume=latest_candle['volume'],
-                        )
-                    
                     decision = portfolio_manager.process_prices(
                         market_id=tick.market_id,
                         up_price=up_tick.best_ask,
                         down_price=down_tick.best_ask,
-                        candle_data=candle_data,
                     )
                     if decision:
                         trade_executed = True
@@ -478,6 +453,7 @@ async def watch_mode(args: argparse.Namespace) -> None:
                         print(f"   Profit if DOWN: ${profit_if_down:+.2f}")
                         
                         # Show gabagool-specific metrics if using GabagoolStrategy
+                        from polytrader.core.strategy import GabagoolStrategy
                         if isinstance(portfolio_manager.strategy, GabagoolStrategy):
                             metrics = portfolio_manager.strategy.get_metrics(portfolio, tick.market_id)
                             pair_cost = metrics["pair_cost"]
@@ -507,22 +483,6 @@ async def watch_mode(args: argparse.Namespace) -> None:
                             print(f"✅ Trades executed on {tick.market_id}: {outcomes} (total: ${total_cost:.2f})")
                         else:
                             print(f"✅ Trade executed on {tick.market_id}: {decision.outcome}")
-                
-                # Display latest ETH candle if available
-                if latest_candle:
-                    candle_time = latest_candle['timestamp'].strftime('%Y-%m-%d %H:%M:%S UTC')
-                    price_change = latest_candle['close'] - latest_candle['open']
-                    price_change_pct = (price_change / latest_candle['open']) * 100 if latest_candle['open'] > 0 else 0
-                    change_symbol = "📈" if price_change >= 0 else "📉"
-                    
-                    print(f"\n🕯️  Latest ETH/USD Candle ({candle_fetcher.config['name']}):")
-                    print(f"   Time:     {candle_time}")
-                    print(f"   Open:     ${latest_candle['open']:,.2f}")
-                    print(f"   High:     ${latest_candle['high']:,.2f}")
-                    print(f"   Low:      ${latest_candle['low']:,.2f}")
-                    print(f"   Close:    ${latest_candle['close']:,.2f} {change_symbol} {price_change_pct:+.2f}%")
-                    print(f"   Volume:   {latest_candle['volume']:,.2f} ETH")
-                    print(f"   Range:    ${latest_candle['high'] - latest_candle['low']:,.2f}")
             else:
                 # Single outcome - simple row format
                 print(
