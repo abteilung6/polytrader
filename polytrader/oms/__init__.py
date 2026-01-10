@@ -13,13 +13,16 @@ from polytrader.oms.fsm import (
 )
 from polytrader.oms.idempotency import IdempotencyStore, generate_client_order_id
 from polytrader.oms.models import Fill, Order, OrderState
+from polytrader.oms.store import IOrderStore, InMemoryOrderStore
 
 __all__ = [
-    "Order",
     "Fill",
-    "OrderState",
+    "IOrderStore",
     "IdempotencyStore",
+    "InMemoryOrderStore",
     "InvalidTransitionError",
+    "Order",
+    "OrderState",
     "can_transition",
     "generate_client_order_id",
     "get_valid_transitions",
