@@ -3,9 +3,9 @@ from typing import Any
 from py_clob_client.client import ClobClient  # type: ignore[import-untyped]
 from py_clob_client.order_builder.constants import BUY  # type: ignore[import-untyped]
 
+from polytrader.adapters.polymarket.market_data import GammaClient
 from polytrader.clob import place_market_order, verify_usdc_balance
 from polytrader.config import CHAIN_ID, CLOB_API_URL, PolymarketSecrets
-from polytrader.gamma import GammaClient
 
 
 def buy_task(

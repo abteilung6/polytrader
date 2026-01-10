@@ -28,6 +28,7 @@ class EventSource(str, Enum):
     PORTFOLIO = "portfolio"  # Portfolio Construction
     RISK = "risk"  # Risk Engine
     OMS = "oms"  # Order Management System
+    EXECUTION = "execution"  # Execution / Routing
     EXEC = "exec"  # Execution
     POSTTRADE = "posttrade"  # Post-Trade
     OPS = "ops"  # Operations/Control
@@ -269,6 +270,70 @@ class OrderCanceledEvent(Event):
 
     order_id: str = Field(description="Internal UUID for the order")
     reason: str | None = Field(default=None, description="Optional cancellation reason")
+
+
+class ExecutionRequestEvent(Event):
+    """Event emitted when execution sends request to venue.
+
+    Per flows.mdc §8: Execution emits structured logs for request/response/latency.
+
+    Attributes:
+        order_id: Internal UUID for the order
+        client_order_id: Idempotency key
+        venue: Venue name (e.g., "polymarket")
+        request_type: Type of request (submit, cancel)
+    """
+
+    source: EventSource = Field(default=EventSource.EXECUTION)
+
+    order_id: str = Field(description="Internal UUID for the order")
+    client_order_id: str = Field(description="Idempotency key")
+    venue: str = Field(description="Venue name")
+    request_type: str = Field(description="Type of request (submit, cancel)")
+
+
+class ExecutionResponseEvent(Event):
+    """Event emitted when execution receives response from venue.
+
+    Per flows.mdc §8: Execution emits structured logs for request/response/latency.
+
+    Attributes:
+        order_id: Internal UUID for the order
+        client_order_id: Idempotency key
+        venue_order_id: Venue-assigned order ID
+        latency_ms: Request latency in milliseconds
+        success: Whether request succeeded
+    """
+
+    source: EventSource = Field(default=EventSource.EXECUTION)
+
+    order_id: str = Field(description="Internal UUID for the order")
+    client_order_id: str = Field(description="Idempotency key")
+    venue_order_id: str | None = Field(default=None, description="Venue-assigned order ID")
+    latency_ms: float = Field(description="Request latency in milliseconds")
+    success: bool = Field(description="Whether request succeeded")
+
+
+class ExecutionErrorEvent(Event):
+    """Event emitted when execution encounters an error.
+
+    Per flows.mdc §8: Execution emits structured logs with error classification.
+
+    Attributes:
+        order_id: Internal UUID for the order
+        client_order_id: Idempotency key
+        error_type: Error classification (retryable, fatal)
+        error_message: Error message
+        venue: Venue name
+    """
+
+    source: EventSource = Field(default=EventSource.EXECUTION)
+
+    order_id: str = Field(description="Internal UUID for the order")
+    client_order_id: str = Field(description="Idempotency key")
+    error_type: str = Field(description="Error classification (retryable, fatal)")
+    error_message: str = Field(description="Error message")
+    venue: str = Field(description="Venue name")
 
 
 # Rebuild models to resolve forward references

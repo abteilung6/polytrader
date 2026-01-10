@@ -6,6 +6,9 @@ from polytrader.events.types import (
     ConfigLoadedEvent,
     Event,
     EventSource,
+    ExecutionErrorEvent,
+    ExecutionRequestEvent,
+    ExecutionResponseEvent,
     FillEvent,
     OrderAckEvent,
     OrderCanceledEvent,
@@ -24,6 +27,12 @@ __all__ = [
     "Event",
     "EventBus",
     "EventSource",
+    "EXECUTION_ERRORS",
+    "EXECUTION_REQUESTS",
+    "EXECUTION_RESPONSES",
+    "ExecutionErrorEvent",
+    "ExecutionRequestEvent",
+    "ExecutionResponseEvent",
     "FillEvent",
     "FILLS",
     "IEventStore",
@@ -127,4 +136,16 @@ def __getattr__(name: str):
         from polytrader.events.topics import get_cancel_order_commands_topic
 
         return get_cancel_order_commands_topic()
+    elif name == "EXECUTION_REQUESTS":
+        from polytrader.events.topics import get_execution_requests_topic
+
+        return get_execution_requests_topic()
+    elif name == "EXECUTION_RESPONSES":
+        from polytrader.events.topics import get_execution_responses_topic
+
+        return get_execution_responses_topic()
+    elif name == "EXECUTION_ERRORS":
+        from polytrader.events.topics import get_execution_errors_topic
+
+        return get_execution_errors_topic()
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

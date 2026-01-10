@@ -5,11 +5,12 @@ from collections.abc import Callable
 
 from polytrader.adapters import IMarketDataAdapter
 from polytrader.events import MARKET_CHANGE, EventBus
+from polytrader.execution import ExecutionRouter
 from polytrader.logging_config import logger
 from polytrader.market_discovery import IMarketDiscoveryService
 from polytrader.models.protocol import ITradingModel
 from polytrader.observer import IObserver
-from polytrader.order_manager import IOrderManager
+from polytrader.order_manager import NoOpOrderManager
 from polytrader.position_manager import IPositionManager
 from polytrader.store import IMarketDataStore
 from polytrader.types import MarketChangeEvent
@@ -29,7 +30,7 @@ class MarketSupervisor:
         adapter_factory: Callable[[str], IMarketDataAdapter],
         observer_factory: Callable[[IMarketDataAdapter], IObserver],
         model_factory: Callable[[str], ITradingModel],
-        order_manager_factory: Callable[[], IOrderManager],
+        order_manager_factory: Callable[[], ExecutionRouter | NoOpOrderManager],
         bus: EventBus,
         store: IMarketDataStore,
         position_manager_factory: Callable[[], IPositionManager] | None = None,
@@ -65,7 +66,7 @@ class MarketSupervisor:
         self.adapter: IMarketDataAdapter | None = None
         self.observer: IObserver | None = None
         self.model: ITradingModel | None = None
-        self.order_manager: IOrderManager | None = None
+        self.order_manager: ExecutionRouter | NoOpOrderManager | None = None
         self.position_manager: IPositionManager | None = None
 
         # Tasks
@@ -146,7 +147,8 @@ class MarketSupervisor:
         # Start new components
         self._observer_task = asyncio.create_task(self.observer.run())
         self._model_task = asyncio.create_task(self.model.run())
-        self._order_manager_task = asyncio.create_task(self.order_manager.run())
+        if self.order_manager is not None:
+            self._order_manager_task = asyncio.create_task(self.order_manager.run())
 
         if self.position_manager:
             self._position_manager_task = asyncio.create_task(self.position_manager.run())

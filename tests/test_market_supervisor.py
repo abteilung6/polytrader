@@ -3,11 +3,12 @@ import asyncio
 from polytrader.adapters import IMarketDataAdapter
 from polytrader.clob import IClobClient
 from polytrader.events import MARKET_CHANGE, MARKET_DATA, ORDERS, PROPOSALS, EventBus
+from polytrader.execution import ExecutionRouter
 from polytrader.gamma import GammaClient
 from polytrader.market_discovery import IMarketDiscoveryService
 from polytrader.models.protocol import ITradingModel
 from polytrader.observer import IObserver
-from polytrader.order_manager import IOrderManager, NoOpOrderManager
+from polytrader.order_manager import NoOpOrderManager
 from polytrader.position_manager import IPositionManager, PositionManager
 from polytrader.store import MemoryMarketDataStore
 from polytrader.supervisor import MarketSupervisor
@@ -65,7 +66,7 @@ class FakeModel(ITradingModel):
         self._running = False
 
 
-class FakeOrderManager(IOrderManager):
+class FakeOrderManager(ExecutionRouter):
     def __init__(self) -> None:
         self._running = False
 
@@ -542,14 +543,24 @@ async def test_supervisor_with_position_manager_end_to_end() -> None:
             self._running = False
 
     # Fake order manager that executes orders
-    class ExecutingOrderManager(IOrderManager):
+    class ExecutingOrderManager(ExecutionRouter):
+        """Fake execution router that publishes OrderExecutedEvent for testing."""
+
         def __init__(self, bus: EventBus) -> None:
-            self.bus = bus
+            from unittest.mock import MagicMock
+
+            from polytrader.adapters.polymarket.trading import ClobVenueAdapter
+
+            # Create a minimal fake adapter
+            fake_adapter = MagicMock(spec=ClobVenueAdapter)
+            super().__init__(bus=bus, adapter=fake_adapter)
             self._running = False
+            self.orders_published: list[OrderExecutedEvent] = []
 
         async def run(self) -> None:
+            # Override run to simulate order execution for testing
             self._running = True
-            proposal_queue = self.bus.subscribe(PROPOSALS)
+            proposal_queue = bus.subscribe(PROPOSALS)
             while self._running:
                 try:
                     proposal = await asyncio.wait_for(proposal_queue.get(), timeout=0.1)
@@ -563,7 +574,8 @@ async def test_supervisor_with_position_manager_end_to_end() -> None:
                         proposal_reason=proposal.reason,
                         response={"order_id": f"order-{proposal.side}", "status": "filled"},
                     )
-                    await self.bus.publish(ORDERS, order)
+                    await bus.publish(ORDERS, order)
+                    self.orders_published.append(order)
                 except TimeoutError:
                     continue
 
@@ -579,7 +591,7 @@ async def test_supervisor_with_position_manager_end_to_end() -> None:
     def model_factory(slug: str) -> ITradingModel:
         return ProposalPublishingModel(slug, bus)
 
-    def order_manager_factory() -> IOrderManager:
+    def order_manager_factory() -> ExecutionRouter:
         return ExecutingOrderManager(bus)
 
     gamma_client = MagicMock(spec=GammaClient)

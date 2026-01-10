@@ -18,6 +18,9 @@ _fills_topic: Topic | None = None
 _order_cancels_topic: Topic | None = None
 _submit_order_commands_topic: Topic | None = None
 _cancel_order_commands_topic: Topic | None = None
+_execution_requests_topic: Topic | None = None
+_execution_responses_topic: Topic | None = None
+_execution_errors_topic: Topic | None = None
 
 
 def _create_market_data_topic() -> Topic:
@@ -249,6 +252,51 @@ def get_cancel_order_commands_topic() -> Topic:
     return _cancel_order_commands_topic
 
 
+def _create_execution_requests_topic() -> Topic:
+    """Create the EXECUTION_REQUESTS topic."""
+    from polytrader.events.types import ExecutionRequestEvent
+
+    return Topic[ExecutionRequestEvent]("execution_requests")
+
+
+def get_execution_requests_topic() -> Topic:
+    """Get the EXECUTION_REQUESTS topic (singleton)."""
+    global _execution_requests_topic
+    if _execution_requests_topic is None:
+        _execution_requests_topic = _create_execution_requests_topic()
+    return _execution_requests_topic
+
+
+def _create_execution_responses_topic() -> Topic:
+    """Create the EXECUTION_RESPONSES topic."""
+    from polytrader.events.types import ExecutionResponseEvent
+
+    return Topic[ExecutionResponseEvent]("execution_responses")
+
+
+def get_execution_responses_topic() -> Topic:
+    """Get the EXECUTION_RESPONSES topic (singleton)."""
+    global _execution_responses_topic
+    if _execution_responses_topic is None:
+        _execution_responses_topic = _create_execution_responses_topic()
+    return _execution_responses_topic
+
+
+def _create_execution_errors_topic() -> Topic:
+    """Create the EXECUTION_ERRORS topic."""
+    from polytrader.events.types import ExecutionErrorEvent
+
+    return Topic[ExecutionErrorEvent]("execution_errors")
+
+
+def get_execution_errors_topic() -> Topic:
+    """Get the EXECUTION_ERRORS topic (singleton)."""
+    global _execution_errors_topic
+    if _execution_errors_topic is None:
+        _execution_errors_topic = _create_execution_errors_topic()
+    return _execution_errors_topic
+
+
 def __getattr__(name: str) -> Topic:
     """Lazily initialize topic constants on first access.
 
@@ -294,5 +342,11 @@ def __getattr__(name: str) -> Topic:
         return get_submit_order_commands_topic()
     elif name == "CANCEL_ORDER_COMMANDS":
         return get_cancel_order_commands_topic()
+    elif name == "EXECUTION_REQUESTS":
+        return get_execution_requests_topic()
+    elif name == "EXECUTION_RESPONSES":
+        return get_execution_responses_topic()
+    elif name == "EXECUTION_ERRORS":
+        return get_execution_errors_topic()
     else:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

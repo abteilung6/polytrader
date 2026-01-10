@@ -4,9 +4,9 @@ import asyncio
 from collections.abc import Callable
 from typing import Any, Protocol
 
+from polytrader.adapters.polymarket.market_data import GammaClient
 from polytrader.clob import ExternalOrder, IClobClientFactory, get_active_orders
 from polytrader.events import MARKET_DATA, ORDERS, PROPOSALS, EventBus
-from polytrader.gamma import GammaClient
 from polytrader.logging_config import logger
 from polytrader.types import (
     MarketDataEvent,
