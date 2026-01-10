@@ -5,7 +5,8 @@ from collections.abc import Callable
 from typing import Any, Protocol
 
 from polytrader.adapters.polymarket.market_data import GammaClient
-from polytrader.clob import ExternalOrder, IClobClientFactory, get_active_orders
+from polytrader.adapters.polymarket.trading import ClobVenueAdapter
+from polytrader.clob import ExternalOrder, IClobClientFactory
 from polytrader.events import MARKET_DATA, ORDERS, PROPOSALS, EventBus
 from polytrader.logging_config import logger
 from polytrader.types import (
@@ -85,6 +86,8 @@ class PositionManager(IPositionManager):
         self.clob_client_factory = clob_client_factory
         self.gamma_client = gamma_client
         self.sync_interval = sync_interval
+        # Create adapter for external API calls
+        self._adapter: ClobVenueAdapter | None = None
 
         # Internal position tracking: (market_slug, outcome) -> Position
         self._positions: dict[tuple[str, Outcome], Position] = {}
@@ -497,10 +500,13 @@ class PositionManager(IPositionManager):
         )
 
         try:
-            client = self.clob_client_factory()
+            # Create adapter if not already created
+            if self._adapter is None:
+                client = self.clob_client_factory()
+                self._adapter = ClobVenueAdapter(clob_client=client, gamma_client=self.gamma_client)
 
-            # Get all active orders from external API
-            external_orders = await asyncio.to_thread(lambda: get_active_orders(client))
+            # Get all active orders from external API via adapter
+            external_orders = await self._adapter.get_open_orders()
 
             logger.bind(external_count=len(external_orders)).debug(
                 "Retrieved {external_count} external orders",

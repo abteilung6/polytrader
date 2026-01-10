@@ -6,9 +6,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from polytrader.adapters.polymarket.market_data import GammaClient
 from polytrader.clob import IClobClient, IClobClientFactory
 from polytrader.events import PROPOSALS, EventBus
-from polytrader.gamma import GammaClient
 from polytrader.position_manager import PositionManager
 from polytrader.types import MarketDataEvent, OrderExecutedEvent, OrderIntentEvent, Outcome
 

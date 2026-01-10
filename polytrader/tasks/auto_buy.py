@@ -13,13 +13,13 @@ from polytrader.events import (
     SystemStartedEvent,
     SystemStoppedEvent,
 )
+from polytrader.execution import create_execution_router_factory
 from polytrader.logging_config import logger
 from polytrader.market_discovery import MarketDiscoveryService
 from polytrader.models import create_model_factory
 from polytrader.observer import create_observer_factory
 from polytrader.oms import InMemoryOrderStore, OMSCore
 from polytrader.oms.idempotency import IdempotencyStore
-from polytrader.order_manager import create_execution_router_factory
 from polytrader.position_manager import create_position_manager_factory
 from polytrader.risk import RiskChecker, RiskEngine, get_default_limits
 from polytrader.store import MemoryMarketDataStore
@@ -180,7 +180,7 @@ async def auto_buy_task(
         adapter_factory=adapter_factory,
         observer_factory=observer_factory,
         model_factory=model_factory,
-        order_manager_factory=execution_router_factory,
+        execution_router_factory=execution_router_factory,
         bus=bus,
         store=store,
         position_manager_factory=position_manager_factory,

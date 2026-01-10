@@ -100,8 +100,9 @@ class OrderIntentEvent(Event):
 class OrderExecutedEvent(Event):
     """Order executed event from execution layer.
 
-    Represents an order that has been executed by the OrderManager.
+    Represents an order that has been executed by the ExecutionRouter.
     This is the canonical representation of executed orders in the system.
+    Note: This event type may be deprecated in favor of OMS events (OrderAckEvent, FillEvent).
 
     Attributes:
         market_slug: Polymarket market identifier

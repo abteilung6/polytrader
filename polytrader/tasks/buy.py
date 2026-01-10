@@ -1,14 +1,13 @@
 from typing import Any
 
-from py_clob_client.client import ClobClient  # type: ignore[import-untyped]
-from py_clob_client.order_builder.constants import BUY  # type: ignore[import-untyped]
-
 from polytrader.adapters.polymarket.market_data import GammaClient
-from polytrader.clob import place_market_order, verify_usdc_balance
-from polytrader.config import CHAIN_ID, CLOB_API_URL, PolymarketSecrets
+from polytrader.adapters.polymarket.trading import ClobVenueAdapter
+from polytrader.clob import create_clob_client_factory
+from polytrader.config import PolymarketSecrets
+from polytrader.types import OrderIntentEvent
 
 
-def buy_task(
+async def buy_task(
     market_slug: str,
     outcome: str,
     amount: float,
@@ -23,7 +22,7 @@ def buy_task(
         secrets: Polymarket secrets (defaults to loading from env)
 
     Returns:
-        Order response dictionary
+        Order response dictionary (raw_response from VenueResponse)
 
     Raises:
         ValueError: If market or outcome not found
@@ -32,22 +31,29 @@ def buy_task(
     if secrets is None:
         secrets = PolymarketSecrets()
 
-    gamma = GammaClient()
-    market = gamma.get_market_by_slug(market_slug)
-    token_id = market.get_token_id(outcome)
+    # Create CLOB client factory
+    clob_client_factory = create_clob_client_factory(secrets)
+    clob_client = clob_client_factory()
 
-    client = ClobClient(
-        host=CLOB_API_URL,
-        key=secrets.private_key.get_secret_value(),
-        chain_id=CHAIN_ID,
-        signature_type=secrets.signature_type,
-        funder=secrets.funder,
+    # Create adapter
+    gamma_client = GammaClient()
+    adapter = ClobVenueAdapter(clob_client=clob_client, gamma_client=gamma_client)
+
+    # Create order intent
+    intent = OrderIntentEvent(
+        market_slug=market_slug,
+        outcome=outcome,
+        side="BUY",
+        target_price=0.5,  # Not used for market orders
+        limit_price=0.5,  # Not used for market orders
+        size=amount,
+        reason="Manual buy order",
+        ttl_s=60.0,
     )
 
-    creds = client.create_or_derive_api_creds()
-    client.set_api_creds(creds)
+    # Submit order via adapter
+    client_order_id = f"buy-{market_slug}-{outcome}-{amount}"
+    venue_response = await adapter.submit_order(client_order_id=client_order_id, intent=intent)
 
-    verify_usdc_balance(client, required_amount=amount)
-
-    response = place_market_order(client, token_id=token_id, amount=amount, side=BUY)
-    return response
+    # Return raw response for backward compatibility
+    return venue_response.raw_response

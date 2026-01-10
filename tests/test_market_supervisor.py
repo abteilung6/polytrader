@@ -1,14 +1,13 @@
 import asyncio
 
 from polytrader.adapters import IMarketDataAdapter
+from polytrader.adapters.polymarket.market_data import GammaClient
 from polytrader.clob import IClobClient
 from polytrader.events import MARKET_CHANGE, MARKET_DATA, ORDERS, PROPOSALS, EventBus
 from polytrader.execution import ExecutionRouter
-from polytrader.gamma import GammaClient
 from polytrader.market_discovery import IMarketDiscoveryService
 from polytrader.models.protocol import ITradingModel
 from polytrader.observer import IObserver
-from polytrader.order_manager import NoOpOrderManager
 from polytrader.position_manager import IPositionManager, PositionManager
 from polytrader.store import MemoryMarketDataStore
 from polytrader.supervisor import MarketSupervisor
@@ -66,7 +65,7 @@ class FakeModel(ITradingModel):
         self._running = False
 
 
-class FakeOrderManager(ExecutionRouter):
+class FakeExecutionRouter(ExecutionRouter):
     def __init__(self) -> None:
         self._running = False
 
@@ -109,8 +108,8 @@ async def test_supervisor_initializes_with_market() -> None:
     def model_factory(slug: str) -> FakeModel:
         return FakeModel(slug)
 
-    def order_manager_factory() -> FakeOrderManager:
-        return FakeOrderManager()
+    def execution_router_factory() -> FakeExecutionRouter:
+        return FakeExecutionRouter()
 
     supervisor = MarketSupervisor(
         pattern="test-pattern",
@@ -118,7 +117,7 @@ async def test_supervisor_initializes_with_market() -> None:
         adapter_factory=adapter_factory,
         observer_factory=observer_factory,
         model_factory=model_factory,
-        order_manager_factory=order_manager_factory,
+        execution_router_factory=execution_router_factory,
         bus=bus,
         store=store,
         monitor_interval=0.1,
@@ -133,7 +132,7 @@ async def test_supervisor_initializes_with_market() -> None:
     assert supervisor.adapter is not None
     assert supervisor.observer is not None
     assert supervisor.model is not None
-    assert supervisor.order_manager is not None
+    assert supervisor.execution_router is not None
 
     supervisor.stop()
     task.cancel()
@@ -158,8 +157,8 @@ async def test_supervisor_transitions_on_market_change() -> None:
     def model_factory(slug: str) -> FakeModel:
         return FakeModel(slug)
 
-    def order_manager_factory() -> FakeOrderManager:
-        return FakeOrderManager()
+    def execution_router_factory() -> FakeExecutionRouter:
+        return FakeExecutionRouter()
 
     supervisor = MarketSupervisor(
         pattern="test-pattern",
@@ -167,7 +166,7 @@ async def test_supervisor_transitions_on_market_change() -> None:
         adapter_factory=adapter_factory,
         observer_factory=observer_factory,
         model_factory=model_factory,
-        order_manager_factory=order_manager_factory,
+        execution_router_factory=execution_router_factory,
         bus=bus,
         store=store,
         monitor_interval=0.1,
@@ -211,8 +210,8 @@ async def test_supervisor_publishes_market_change_events() -> None:
     def model_factory(slug: str) -> FakeModel:
         return FakeModel(slug)
 
-    def order_manager_factory() -> FakeOrderManager:
-        return FakeOrderManager()
+    def execution_router_factory() -> FakeExecutionRouter:
+        return FakeExecutionRouter()
 
     supervisor = MarketSupervisor(
         pattern="test-pattern",
@@ -220,7 +219,7 @@ async def test_supervisor_publishes_market_change_events() -> None:
         adapter_factory=adapter_factory,
         observer_factory=observer_factory,
         model_factory=model_factory,
-        order_manager_factory=order_manager_factory,
+        execution_router_factory=execution_router_factory,
         bus=bus,
         store=store,
         monitor_interval=0.1,
@@ -285,8 +284,8 @@ async def test_supervisor_stops_components_on_transition() -> None:
     def model_factory(slug: str) -> FakeModel:
         return FakeModel(slug)
 
-    def order_manager_factory() -> FakeOrderManager:
-        return FakeOrderManager()
+    def execution_router_factory() -> FakeExecutionRouter:
+        return FakeExecutionRouter()
 
     supervisor = MarketSupervisor(
         pattern="test-pattern",
@@ -294,7 +293,7 @@ async def test_supervisor_stops_components_on_transition() -> None:
         adapter_factory=adapter_factory,
         observer_factory=observer_factory,
         model_factory=model_factory,
-        order_manager_factory=order_manager_factory,
+        execution_router_factory=execution_router_factory,
         bus=bus,
         store=store,
         monitor_interval=0.1,
@@ -305,25 +304,25 @@ async def test_supervisor_stops_components_on_transition() -> None:
 
     old_observer = supervisor.observer
     old_model = supervisor.model
-    old_order_manager = supervisor.order_manager
+    old_execution_router = supervisor.execution_router
 
     assert isinstance(old_observer, FakeObserver)
     assert isinstance(old_model, FakeModel)
-    assert isinstance(old_order_manager, FakeOrderManager)
+    assert isinstance(old_execution_router, FakeExecutionRouter)
     assert old_observer._running
     assert old_model._running
-    assert old_order_manager._running
+    assert old_execution_router._running
 
     discovery.current_market = "test-market-2"
     await asyncio.sleep(0.15)
 
     assert not old_observer._running
     assert not old_model._running
-    assert not old_order_manager._running
+    assert not old_execution_router._running
 
     assert supervisor.observer is not None
     assert supervisor.model is not None
-    assert supervisor.order_manager is not None
+    assert supervisor.execution_router is not None
 
     supervisor.stop()
     task.cancel()
@@ -333,8 +332,8 @@ async def test_supervisor_stops_components_on_transition() -> None:
         pass
 
 
-async def test_supervisor_with_noop_order_manager_does_not_execute_orders() -> None:
-    """Test that supervisor with NoOpOrderManager consumes proposals but doesn't execute orders."""
+async def test_supervisor_without_execution_router_does_not_execute_orders() -> None:
+    """Test that supervisor without execution router (predict mode) doesn't execute orders."""
     bus = EventBus()
     store = MemoryMarketDataStore()
     discovery = FakeDiscoveryService(initial_market="test-market-1")
@@ -348,16 +347,13 @@ async def test_supervisor_with_noop_order_manager_does_not_execute_orders() -> N
     def model_factory(slug: str) -> FakeModel:
         return FakeModel(slug)
 
-    def noop_order_manager_factory() -> NoOpOrderManager:
-        return NoOpOrderManager(bus=bus)
-
     supervisor = MarketSupervisor(
         pattern="test-pattern",
         discovery_service=discovery,
         adapter_factory=adapter_factory,
         observer_factory=observer_factory,
         model_factory=model_factory,
-        order_manager_factory=noop_order_manager_factory,
+        execution_router_factory=None,  # No execution in predict mode
         bus=bus,
         store=store,
         monitor_interval=0.1,
@@ -381,9 +377,8 @@ async def test_supervisor_with_noop_order_manager_does_not_execute_orders() -> N
     task = asyncio.create_task(supervisor.run())
     await asyncio.sleep(0.05)
 
-    # Verify NoOpOrderManager was created
-    assert supervisor.order_manager is not None
-    assert isinstance(supervisor.order_manager, NoOpOrderManager)
+    # Verify no execution router was created
+    assert supervisor.execution_router is None
 
     # Publish a proposal (simulating what the model would do)
     proposal = OrderIntentEvent(
@@ -403,7 +398,7 @@ async def test_supervisor_with_noop_order_manager_does_not_execute_orders() -> N
 
     # Verify no orders were published
     assert len(orders_published) == 0, (
-        f"Expected no orders with NoOpOrderManager, but got {len(orders_published)} orders"
+        f"Expected no orders without execution router, but got {len(orders_published)} orders"
     )
 
     supervisor.stop()
@@ -543,7 +538,7 @@ async def test_supervisor_with_position_manager_end_to_end() -> None:
             self._running = False
 
     # Fake order manager that executes orders
-    class ExecutingOrderManager(ExecutionRouter):
+    class ExecutingExecutionRouter(ExecutionRouter):
         """Fake execution router that publishes OrderExecutedEvent for testing."""
 
         def __init__(self, bus: EventBus) -> None:
@@ -591,8 +586,8 @@ async def test_supervisor_with_position_manager_end_to_end() -> None:
     def model_factory(slug: str) -> ITradingModel:
         return ProposalPublishingModel(slug, bus)
 
-    def order_manager_factory() -> ExecutionRouter:
-        return ExecutingOrderManager(bus)
+    def execution_router_factory() -> ExecutionRouter:
+        return ExecutingExecutionRouter(bus)
 
     gamma_client = MagicMock(spec=GammaClient)
 
@@ -610,7 +605,7 @@ async def test_supervisor_with_position_manager_end_to_end() -> None:
         adapter_factory=adapter_factory,
         observer_factory=observer_factory,
         model_factory=model_factory,
-        order_manager_factory=order_manager_factory,
+        execution_router_factory=execution_router_factory,
         bus=bus,
         store=store,
         position_manager_factory=position_manager_factory,
