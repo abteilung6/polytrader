@@ -269,3 +269,21 @@ class OrderCanceledEvent(Event):
 
     order_id: str = Field(description="Internal UUID for the order")
     reason: str | None = Field(default=None, description="Optional cancellation reason")
+
+
+# Rebuild models to resolve forward references
+# This is needed because OrderCreatedEvent uses OrderIntentEvent
+# which is defined in polytrader.types
+def _rebuild_models() -> None:
+    """Rebuild Pydantic models to resolve forward references."""
+    try:
+        from polytrader.types import OrderIntentEvent  # noqa: F401
+
+        OrderCreatedEvent.model_rebuild()
+    except ImportError:
+        # Types module not available yet, will be rebuilt on first use
+        pass
+
+
+# Rebuild on module import
+_rebuild_models()

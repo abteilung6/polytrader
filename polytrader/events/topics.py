@@ -16,6 +16,8 @@ _order_acks_topic: Topic | None = None
 _order_rejects_topic: Topic | None = None
 _fills_topic: Topic | None = None
 _order_cancels_topic: Topic | None = None
+_submit_order_commands_topic: Topic | None = None
+_cancel_order_commands_topic: Topic | None = None
 
 
 def _create_market_data_topic() -> Topic:
@@ -217,6 +219,36 @@ def get_order_cancels_topic() -> Topic:
     return _order_cancels_topic
 
 
+def _create_submit_order_commands_topic() -> Topic:
+    """Create the SUBMIT_ORDER_COMMANDS topic."""
+    from polytrader.oms.commands import SubmitOrderCommand
+
+    return Topic[SubmitOrderCommand]("submit_order_commands")
+
+
+def get_submit_order_commands_topic() -> Topic:
+    """Get the SUBMIT_ORDER_COMMANDS topic (singleton)."""
+    global _submit_order_commands_topic
+    if _submit_order_commands_topic is None:
+        _submit_order_commands_topic = _create_submit_order_commands_topic()
+    return _submit_order_commands_topic
+
+
+def _create_cancel_order_commands_topic() -> Topic:
+    """Create the CANCEL_ORDER_COMMANDS topic."""
+    from polytrader.oms.commands import CancelOrderCommand
+
+    return Topic[CancelOrderCommand]("cancel_order_commands")
+
+
+def get_cancel_order_commands_topic() -> Topic:
+    """Get the CANCEL_ORDER_COMMANDS topic (singleton)."""
+    global _cancel_order_commands_topic
+    if _cancel_order_commands_topic is None:
+        _cancel_order_commands_topic = _create_cancel_order_commands_topic()
+    return _cancel_order_commands_topic
+
+
 def __getattr__(name: str) -> Topic:
     """Lazily initialize topic constants on first access.
 
@@ -258,5 +290,9 @@ def __getattr__(name: str) -> Topic:
         return get_fills_topic()
     elif name == "ORDER_CANCELS":
         return get_order_cancels_topic()
+    elif name == "SUBMIT_ORDER_COMMANDS":
+        return get_submit_order_commands_topic()
+    elif name == "CANCEL_ORDER_COMMANDS":
+        return get_cancel_order_commands_topic()
     else:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

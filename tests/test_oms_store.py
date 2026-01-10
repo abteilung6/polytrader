@@ -165,7 +165,7 @@ class TestOrderStoreQueries:
 
         reject_event = OrderRejectedEvent(order_id=order2.order_id, reason="Test rejection")
         # Store will automatically transition NEW → PENDING_SUBMIT → SUBMITTED → REJECTED
-        order_store._handle_order_rejected(reject_event)
+        order_store.handle_order_rejected(reject_event)
 
         open_orders = order_store.get_open_orders()
 
@@ -181,7 +181,7 @@ class TestOrderStoreQueries:
         from polytrader.events.types import OrderSubmittedEvent
 
         submit_event = OrderSubmittedEvent(order_id=order.order_id, client_order_id="client-123")
-        order_store._handle_order_submitted(submit_event)
+        order_store.handle_order_submitted(submit_event)
 
         history = order_store.get_order_history(order.order_id)
 
@@ -196,66 +196,66 @@ class TestOrderStoreQueries:
 class TestOrderStoreEventHandlers:
     """Tests for event handler methods."""
 
-    async def test_handle_order_submitted(self, order_store: InMemoryOrderStore) -> None:
+    async def testhandle_order_submitted(self, order_store: InMemoryOrderStore) -> None:
         """Test handling OrderSubmittedEvent."""
         intent = create_test_intent()
         order = await order_store.create_order(intent, "client-123")
 
         event = OrderSubmittedEvent(order_id=order.order_id, client_order_id="client-123")
-        order_store._handle_order_submitted(event)
+        order_store.handle_order_submitted(event)
 
         updated_order = order_store.get_order(order.order_id)
         assert updated_order is not None
         # Store should handle NEW → PENDING_SUBMIT → SUBMITTED automatically
         assert updated_order.state == OrderState.SUBMITTED
 
-    async def test_handle_order_ack(self, order_store: InMemoryOrderStore) -> None:
+    async def testhandle_order_ack(self, order_store: InMemoryOrderStore) -> None:
         """Test handling OrderAckEvent."""
         intent = create_test_intent()
         order = await order_store.create_order(intent, "client-123")
 
         # First submit
         submit_event = OrderSubmittedEvent(order_id=order.order_id, client_order_id="client-123")
-        order_store._handle_order_submitted(submit_event)
+        order_store.handle_order_submitted(submit_event)
 
         # Then ack
         ack_event = OrderAckEvent(order_id=order.order_id, venue_order_id="venue-456")
-        order_store._handle_order_ack(ack_event)
+        order_store.handle_order_ack(ack_event)
 
         updated_order = order_store.get_order(order.order_id)
         assert updated_order is not None
         assert updated_order.state == OrderState.ACKED
         assert updated_order.venue_order_id == "venue-456"
 
-    async def test_handle_order_rejected(self, order_store: InMemoryOrderStore) -> None:
+    async def testhandle_order_rejected(self, order_store: InMemoryOrderStore) -> None:
         """Test handling OrderRejectedEvent."""
         intent = create_test_intent()
         order = await order_store.create_order(intent, "client-123")
 
         # Submit first
         submit_event = OrderSubmittedEvent(order_id=order.order_id, client_order_id="client-123")
-        order_store._handle_order_submitted(submit_event)
+        order_store.handle_order_submitted(submit_event)
 
         # Then reject
         reject_event = OrderRejectedEvent(order_id=order.order_id, reason="Insufficient balance")
-        order_store._handle_order_rejected(reject_event)
+        order_store.handle_order_rejected(reject_event)
 
         updated_order = order_store.get_order(order.order_id)
         assert updated_order is not None
         assert updated_order.state == OrderState.REJECTED
         assert updated_order.reject_reason == "Insufficient balance"
 
-    async def test_handle_fill_partial(self, order_store: InMemoryOrderStore) -> None:
+    async def testhandle_fill_partial(self, order_store: InMemoryOrderStore) -> None:
         """Test handling FillEvent for partial fill."""
         intent = create_test_intent(size=10.0)
         order = await order_store.create_order(intent, "client-123")
 
         # Submit and ack first
         submit_event = OrderSubmittedEvent(order_id=order.order_id, client_order_id="client-123")
-        order_store._handle_order_submitted(submit_event)
+        order_store.handle_order_submitted(submit_event)
 
         ack_event = OrderAckEvent(order_id=order.order_id, venue_order_id="venue-456")
-        order_store._handle_order_ack(ack_event)
+        order_store.handle_order_ack(ack_event)
 
         # Partial fill
         fill_event = FillEvent(
@@ -265,7 +265,7 @@ class TestOrderStoreEventHandlers:
             price=0.45,
             fee=0.01,
         )
-        order_store._handle_fill(fill_event)
+        order_store.handle_fill(fill_event)
 
         updated_order = order_store.get_order(order.order_id)
         assert updated_order is not None
@@ -273,17 +273,17 @@ class TestOrderStoreEventHandlers:
         assert updated_order.filled_size == 5.0
         assert updated_order.avg_fill_price == 0.45
 
-    async def test_handle_fill_full(self, order_store: InMemoryOrderStore) -> None:
+    async def testhandle_fill_full(self, order_store: InMemoryOrderStore) -> None:
         """Test handling FillEvent for full fill."""
         intent = create_test_intent(size=10.0)
         order = await order_store.create_order(intent, "client-123")
 
         # Submit and ack first
         submit_event = OrderSubmittedEvent(order_id=order.order_id, client_order_id="client-123")
-        order_store._handle_order_submitted(submit_event)
+        order_store.handle_order_submitted(submit_event)
 
         ack_event = OrderAckEvent(order_id=order.order_id, venue_order_id="venue-456")
-        order_store._handle_order_ack(ack_event)
+        order_store.handle_order_ack(ack_event)
 
         # Full fill
         fill_event = FillEvent(
@@ -293,7 +293,7 @@ class TestOrderStoreEventHandlers:
             price=0.45,
             fee=0.01,
         )
-        order_store._handle_fill(fill_event)
+        order_store.handle_fill(fill_event)
 
         updated_order = order_store.get_order(order.order_id)
         assert updated_order is not None
@@ -301,17 +301,17 @@ class TestOrderStoreEventHandlers:
         assert updated_order.filled_size == 10.0
         assert updated_order.avg_fill_price == 0.45
 
-    async def test_handle_fill_multiple(self, order_store: InMemoryOrderStore) -> None:
+    async def testhandle_fill_multiple(self, order_store: InMemoryOrderStore) -> None:
         """Test handling multiple FillEvents (weighted average price)."""
         intent = create_test_intent(size=10.0)
         order = await order_store.create_order(intent, "client-123")
 
         # Submit and ack first
         submit_event = OrderSubmittedEvent(order_id=order.order_id, client_order_id="client-123")
-        order_store._handle_order_submitted(submit_event)
+        order_store.handle_order_submitted(submit_event)
 
         ack_event = OrderAckEvent(order_id=order.order_id, venue_order_id="venue-456")
-        order_store._handle_order_ack(ack_event)
+        order_store.handle_order_ack(ack_event)
 
         # First fill: 5.0 @ 0.45
         fill1 = FillEvent(
@@ -321,7 +321,7 @@ class TestOrderStoreEventHandlers:
             price=0.45,
             fee=0.01,
         )
-        order_store._handle_fill(fill1)
+        order_store.handle_fill(fill1)
 
         # Second fill: 5.0 @ 0.50
         fill2 = FillEvent(
@@ -331,7 +331,7 @@ class TestOrderStoreEventHandlers:
             price=0.50,
             fee=0.01,
         )
-        order_store._handle_fill(fill2)
+        order_store.handle_fill(fill2)
 
         updated_order = order_store.get_order(order.order_id)
         assert updated_order is not None
@@ -340,21 +340,21 @@ class TestOrderStoreEventHandlers:
         # Weighted average: (5.0 * 0.45 + 5.0 * 0.50) / 10.0 = 0.475
         assert updated_order.avg_fill_price == pytest.approx(0.475)
 
-    async def test_handle_order_canceled(self, order_store: InMemoryOrderStore) -> None:
+    async def testhandle_order_canceled(self, order_store: InMemoryOrderStore) -> None:
         """Test handling OrderCanceledEvent."""
         intent = create_test_intent()
         order = await order_store.create_order(intent, "client-123")
 
         # Submit and ack first
         submit_event = OrderSubmittedEvent(order_id=order.order_id, client_order_id="client-123")
-        order_store._handle_order_submitted(submit_event)
+        order_store.handle_order_submitted(submit_event)
 
         ack_event = OrderAckEvent(order_id=order.order_id, venue_order_id="venue-456")
-        order_store._handle_order_ack(ack_event)
+        order_store.handle_order_ack(ack_event)
 
         # Cancel
         cancel_event = OrderCanceledEvent(order_id=order.order_id, reason="User requested")
-        order_store._handle_order_canceled(cancel_event)
+        order_store.handle_order_canceled(cancel_event)
 
         updated_order = order_store.get_order(order.order_id)
         assert updated_order is not None

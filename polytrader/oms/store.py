@@ -83,8 +83,73 @@ class IOrderStore(Protocol):
         """
         ...
 
+    def update_order(self, order: Order) -> None:
+        """Update order in store (with FSM validation).
 
-class InMemoryOrderStore(IOrderStore):
+        This method allows OMS Core to update order state after FSM transitions.
+        The store validates the transition is valid before updating.
+
+        Args:
+            order: Updated Order instance
+
+        Raises:
+            ValueError: If order not found or transition is invalid
+        """
+        ...
+
+
+class IEventHandlingOrderStore(IOrderStore):
+    """Interface for order stores that can handle OMS events.
+
+    This protocol extends IOrderStore with event handler methods.
+    Stores that implement this protocol can be used by OMSCore to handle
+    OMS lifecycle events (ack, reject, fill, cancel, etc.).
+
+    Per flows.mdc §7: OMS store maintains order state from OMS events.
+    """
+
+    def handle_order_submitted(self, event: "OrderSubmittedEvent") -> None:
+        """Handle OrderSubmittedEvent - transition to SUBMITTED.
+
+        Args:
+            event: OrderSubmittedEvent from OMS
+        """
+        ...
+
+    def handle_order_ack(self, event: "OrderAckEvent") -> None:
+        """Handle OrderAckEvent - update venue_order_id, transition to ACKED.
+
+        Args:
+            event: OrderAckEvent from venue
+        """
+        ...
+
+    def handle_order_rejected(self, event: "OrderRejectedEvent") -> None:
+        """Handle OrderRejectedEvent - transition to REJECTED.
+
+        Args:
+            event: OrderRejectedEvent from venue
+        """
+        ...
+
+    def handle_fill(self, event: "FillEvent") -> None:
+        """Handle FillEvent - update filled_size, avg_fill_price, transition state.
+
+        Args:
+            event: FillEvent from venue
+        """
+        ...
+
+    def handle_order_canceled(self, event: "OrderCanceledEvent") -> None:
+        """Handle OrderCanceledEvent - transition to CANCELLED.
+
+        Args:
+            event: OrderCanceledEvent from OMS
+        """
+        ...
+
+
+class InMemoryOrderStore(IEventHandlingOrderStore):
     """In-memory order store with event-sourced projections.
 
     Per flows.mdc §7: Maintains order state from OMS events.
@@ -200,6 +265,39 @@ class InMemoryOrderStore(IOrderStore):
         events = self._order_events.get(order_id, [])
         return sorted(events, key=lambda e: e.ts_mono)
 
+    def update_order(self, order: Order) -> None:
+        """Update order in store (with FSM validation).
+
+        This method allows OMS Core to update order state after FSM transitions.
+        The store validates the transition is valid before updating.
+
+        Args:
+            order: Updated Order instance
+
+        Raises:
+            ValueError: If order not found or transition is invalid
+        """
+        if order.order_id not in self._orders:
+            raise ValueError(f"Order {order.order_id} not found in store")
+
+        # Validate transition (if state changed)
+        existing_order = self._orders[order.order_id]
+        if existing_order.state != order.state:
+            from polytrader.oms.fsm import can_transition
+
+            if not can_transition(existing_order.state, order.state):
+                raise ValueError(f"Invalid transition: {existing_order.state} → {order.state}")
+
+        # Update order
+        self._orders[order.order_id] = order
+        # Update client_order_id mapping if changed
+        if order.client_order_id != existing_order.client_order_id:
+            # Remove old mapping
+            if existing_order.client_order_id in self._client_order_ids:
+                del self._client_order_ids[existing_order.client_order_id]
+            # Add new mapping
+            self._client_order_ids[order.client_order_id] = order.order_id
+
     def rebuild_from_events(self, events: list[Event]) -> None:
         """Rebuild order state from event log.
 
@@ -227,15 +325,15 @@ class InMemoryOrderStore(IOrderStore):
             if isinstance(event, OrderCreatedEvent):
                 self._handle_order_created(event)
             elif isinstance(event, OrderSubmittedEvent):
-                self._handle_order_submitted(event)
+                self.handle_order_submitted(event)
             elif isinstance(event, OrderAckEvent):
-                self._handle_order_ack(event)
+                self.handle_order_ack(event)
             elif isinstance(event, OrderRejectedEvent):
-                self._handle_order_rejected(event)
+                self.handle_order_rejected(event)
             elif isinstance(event, FillEvent):
-                self._handle_fill(event)
+                self.handle_fill(event)
             elif isinstance(event, OrderCanceledEvent):
-                self._handle_order_canceled(event)
+                self.handle_order_canceled(event)
 
     def _handle_order_created(self, event: "OrderCreatedEvent") -> None:
         """Handle OrderCreatedEvent - create order in NEW state."""
@@ -260,7 +358,7 @@ class InMemoryOrderStore(IOrderStore):
         # Record event
         self._order_events[event.order_id].append(event)
 
-    def _handle_order_submitted(self, event: "OrderSubmittedEvent") -> None:
+    def handle_order_submitted(self, event: "OrderSubmittedEvent") -> None:
         """Handle OrderSubmittedEvent - transition to SUBMITTED."""
         order = self._orders.get(event.order_id)
         if order:
@@ -272,7 +370,7 @@ class InMemoryOrderStore(IOrderStore):
             self._orders[event.order_id] = order
             self._order_events[event.order_id].append(event)
 
-    def _handle_order_ack(self, event: "OrderAckEvent") -> None:
+    def handle_order_ack(self, event: "OrderAckEvent") -> None:
         """Handle OrderAckEvent - update venue_order_id, transition to ACKED."""
         order = self._orders.get(event.order_id)
         if order:
@@ -282,7 +380,7 @@ class InMemoryOrderStore(IOrderStore):
             self._orders[event.order_id] = order
             self._order_events[event.order_id].append(event)
 
-    def _handle_order_rejected(self, event: "OrderRejectedEvent") -> None:
+    def handle_order_rejected(self, event: "OrderRejectedEvent") -> None:
         """Handle OrderRejectedEvent - transition to REJECTED."""
         order = self._orders.get(event.order_id)
         if order:
@@ -299,7 +397,7 @@ class InMemoryOrderStore(IOrderStore):
             self._orders[event.order_id] = order
             self._order_events[event.order_id].append(event)
 
-    def _handle_fill(self, event: "FillEvent") -> None:
+    def handle_fill(self, event: "FillEvent") -> None:
         """Handle FillEvent - update filled_size, avg_fill_price, transition state."""
         order = self._orders.get(event.order_id)
         if order:
@@ -336,7 +434,7 @@ class InMemoryOrderStore(IOrderStore):
             self._orders[event.order_id] = order
             self._order_events[event.order_id].append(event)
 
-    def _handle_order_canceled(self, event: "OrderCanceledEvent") -> None:
+    def handle_order_canceled(self, event: "OrderCanceledEvent") -> None:
         """Handle OrderCanceledEvent - transition to CANCELLED."""
         order = self._orders.get(event.order_id)
         if order:

@@ -19,6 +19,7 @@ from polytrader.events.types import (
 
 __all__ = [
     "APPROVED_PROPOSALS",
+    "CANCEL_ORDER_COMMANDS",
     "ConfigLoadedEvent",
     "Event",
     "EventBus",
@@ -43,6 +44,7 @@ __all__ = [
     "PROPOSALS",
     "RISK_CHECKS",
     "RiskCheckEvent",
+    "SUBMIT_ORDER_COMMANDS",
     "SYSTEM_LIFECYCLE",
     "SystemStartedEvent",
     "SystemStoppedEvent",
@@ -117,4 +119,12 @@ def __getattr__(name: str):
         from polytrader.events.topics import get_order_cancels_topic
 
         return get_order_cancels_topic()
+    elif name == "SUBMIT_ORDER_COMMANDS":
+        from polytrader.events.topics import get_submit_order_commands_topic
+
+        return get_submit_order_commands_topic()
+    elif name == "CANCEL_ORDER_COMMANDS":
+        from polytrader.events.topics import get_cancel_order_commands_topic
+
+        return get_cancel_order_commands_topic()
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
