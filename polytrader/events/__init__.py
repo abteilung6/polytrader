@@ -6,6 +6,12 @@ from polytrader.events.types import (
     ConfigLoadedEvent,
     Event,
     EventSource,
+    FillEvent,
+    OrderAckEvent,
+    OrderCanceledEvent,
+    OrderCreatedEvent,
+    OrderRejectedEvent,
+    OrderSubmittedEvent,
     RiskCheckEvent,
     SystemStartedEvent,
     SystemStoppedEvent,
@@ -17,10 +23,22 @@ __all__ = [
     "Event",
     "EventBus",
     "EventSource",
+    "FillEvent",
+    "FILLS",
     "IEventStore",
     "MARKET_CHANGE",
     "MARKET_DATA",
     "MemoryEventStore",
+    "OrderAckEvent",
+    "ORDER_ACKS",
+    "ORDER_CANCELS",
+    "ORDER_CREATED",
+    "ORDER_REJECTS",
+    "ORDER_SUBMITTED",
+    "OrderCanceledEvent",
+    "OrderCreatedEvent",
+    "OrderRejectedEvent",
+    "OrderSubmittedEvent",
     "ORDERS",
     "PROPOSALS",
     "RISK_CHECKS",
@@ -75,4 +93,28 @@ def __getattr__(name: str):
         from polytrader.events.topics import get_approved_proposals_topic
 
         return get_approved_proposals_topic()
+    elif name == "ORDER_CREATED":
+        from polytrader.events.topics import get_order_created_topic
+
+        return get_order_created_topic()
+    elif name == "ORDER_SUBMITTED":
+        from polytrader.events.topics import get_order_submitted_topic
+
+        return get_order_submitted_topic()
+    elif name == "ORDER_ACKS":
+        from polytrader.events.topics import get_order_acks_topic
+
+        return get_order_acks_topic()
+    elif name == "ORDER_REJECTS":
+        from polytrader.events.topics import get_order_rejects_topic
+
+        return get_order_rejects_topic()
+    elif name == "FILLS":
+        from polytrader.events.topics import get_fills_topic
+
+        return get_fills_topic()
+    elif name == "ORDER_CANCELS":
+        from polytrader.events.topics import get_order_cancels_topic
+
+        return get_order_cancels_topic()
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

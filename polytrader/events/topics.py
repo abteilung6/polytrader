@@ -10,6 +10,12 @@ _market_change_topic: Topic | None = None
 _system_lifecycle_topic: Topic | None = None
 _risk_checks_topic: Topic | None = None
 _approved_proposals_topic: Topic | None = None
+_order_created_topic: Topic | None = None
+_order_submitted_topic: Topic | None = None
+_order_acks_topic: Topic | None = None
+_order_rejects_topic: Topic | None = None
+_fills_topic: Topic | None = None
+_order_cancels_topic: Topic | None = None
 
 
 def _create_market_data_topic() -> Topic:
@@ -121,6 +127,96 @@ def get_approved_proposals_topic() -> Topic:
     return _approved_proposals_topic
 
 
+def _create_order_created_topic() -> Topic:
+    """Create the ORDER_CREATED topic."""
+    from polytrader.events.types import OrderCreatedEvent
+
+    return Topic[OrderCreatedEvent]("order_created")
+
+
+def get_order_created_topic() -> Topic:
+    """Get the ORDER_CREATED topic (singleton)."""
+    global _order_created_topic
+    if _order_created_topic is None:
+        _order_created_topic = _create_order_created_topic()
+    return _order_created_topic
+
+
+def _create_order_submitted_topic() -> Topic:
+    """Create the ORDER_SUBMITTED topic."""
+    from polytrader.events.types import OrderSubmittedEvent
+
+    return Topic[OrderSubmittedEvent]("order_submitted")
+
+
+def get_order_submitted_topic() -> Topic:
+    """Get the ORDER_SUBMITTED topic (singleton)."""
+    global _order_submitted_topic
+    if _order_submitted_topic is None:
+        _order_submitted_topic = _create_order_submitted_topic()
+    return _order_submitted_topic
+
+
+def _create_order_acks_topic() -> Topic:
+    """Create the ORDER_ACKS topic."""
+    from polytrader.events.types import OrderAckEvent
+
+    return Topic[OrderAckEvent]("order_acks")
+
+
+def get_order_acks_topic() -> Topic:
+    """Get the ORDER_ACKS topic (singleton)."""
+    global _order_acks_topic
+    if _order_acks_topic is None:
+        _order_acks_topic = _create_order_acks_topic()
+    return _order_acks_topic
+
+
+def _create_order_rejects_topic() -> Topic:
+    """Create the ORDER_REJECTS topic."""
+    from polytrader.events.types import OrderRejectedEvent
+
+    return Topic[OrderRejectedEvent]("order_rejects")
+
+
+def get_order_rejects_topic() -> Topic:
+    """Get the ORDER_REJECTS topic (singleton)."""
+    global _order_rejects_topic
+    if _order_rejects_topic is None:
+        _order_rejects_topic = _create_order_rejects_topic()
+    return _order_rejects_topic
+
+
+def _create_fills_topic() -> Topic:
+    """Create the FILLS topic."""
+    from polytrader.events.types import FillEvent
+
+    return Topic[FillEvent]("fills")
+
+
+def get_fills_topic() -> Topic:
+    """Get the FILLS topic (singleton)."""
+    global _fills_topic
+    if _fills_topic is None:
+        _fills_topic = _create_fills_topic()
+    return _fills_topic
+
+
+def _create_order_cancels_topic() -> Topic:
+    """Create the ORDER_CANCELS topic."""
+    from polytrader.events.types import OrderCanceledEvent
+
+    return Topic[OrderCanceledEvent]("order_cancels")
+
+
+def get_order_cancels_topic() -> Topic:
+    """Get the ORDER_CANCELS topic (singleton)."""
+    global _order_cancels_topic
+    if _order_cancels_topic is None:
+        _order_cancels_topic = _create_order_cancels_topic()
+    return _order_cancels_topic
+
+
 def __getattr__(name: str) -> Topic:
     """Lazily initialize topic constants on first access.
 
@@ -150,5 +246,17 @@ def __getattr__(name: str) -> Topic:
         return get_risk_checks_topic()
     elif name == "APPROVED_PROPOSALS":
         return get_approved_proposals_topic()
+    elif name == "ORDER_CREATED":
+        return get_order_created_topic()
+    elif name == "ORDER_SUBMITTED":
+        return get_order_submitted_topic()
+    elif name == "ORDER_ACKS":
+        return get_order_acks_topic()
+    elif name == "ORDER_REJECTS":
+        return get_order_rejects_topic()
+    elif name == "FILLS":
+        return get_fills_topic()
+    elif name == "ORDER_CANCELS":
+        return get_order_cancels_topic()
     else:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
