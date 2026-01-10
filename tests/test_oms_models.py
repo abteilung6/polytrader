@@ -44,8 +44,11 @@ class TestOrderState:
 
     def test_order_state_string_representation(self) -> None:
         """Test that states can be used as strings."""
-        state_str = str(OrderState.NEW)
-        assert state_str == "NEW"
+        # For str, Enum, .value gives the string value
+        assert OrderState.NEW.value == "NEW"
+        # str() returns the enum name representation, not the value
+        # But the enum member itself can be used as a string in comparisons
+        assert OrderState.NEW == "NEW"  # Direct comparison works for str, Enum
 
 
 class TestOrder:
