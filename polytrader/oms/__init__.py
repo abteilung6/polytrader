@@ -11,14 +11,17 @@ from polytrader.oms.fsm import (
     is_terminal_state,
     transition_order_state,
 )
+from polytrader.oms.idempotency import IdempotencyStore, generate_client_order_id
 from polytrader.oms.models import Fill, Order, OrderState
 
 __all__ = [
     "Order",
     "Fill",
     "OrderState",
+    "IdempotencyStore",
     "InvalidTransitionError",
     "can_transition",
+    "generate_client_order_id",
     "get_valid_transitions",
     "is_terminal_state",
     "transition_order_state",
