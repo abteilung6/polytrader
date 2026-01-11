@@ -16,7 +16,6 @@ from polytrader.events import (
 from polytrader.execution import create_execution_router_factory
 from polytrader.logging_config import logger
 from polytrader.market_discovery import MarketDiscoveryService
-from polytrader.models import create_model_factory
 from polytrader.observer import create_observer_factory
 from polytrader.oms import InMemoryOrderStore, OMSCore
 from polytrader.oms.idempotency import IdempotencyStore
@@ -147,14 +146,16 @@ async def auto_buy_task(
 
     adapter_factory = create_adapter_factory(secrets, polling_frequency_hz=frequency)
     observer_factory = create_observer_factory(bus, store)
-    model_factory = create_model_factory(
-        bus,
-        store,
+
+    # Create strategy factory (replaces old model factory)
+    from polytrader.strategies import create_simple_threshold_factory
+
+    strategy_factory = create_simple_threshold_factory(
+        store=store,
         buy_threshold=buy_threshold,
-        sell_threshold=sell_threshold,
-        size=size,
         min_history=min_history,
     )
+
     clob_client_factory = create_clob_client_factory(secrets)
     execution_router_factory = create_execution_router_factory(bus, clob_client_factory)
     position_manager_factory = create_position_manager_factory(
@@ -174,53 +175,12 @@ async def auto_buy_task(
     risk_engine = RiskEngine(limits=risk_limits)
     risk_checker = RiskChecker(bus=bus, engine=risk_engine, store=store)
 
-    # TODO: Replace with strategy_factory in Commit 4 when SimpleThresholdStrategy is implemented
-    # For now, create a temporary adapter that will be replaced
-    from polytrader.events.types import SignalEvent
-    from polytrader.models.protocol import ITradingModel
-    from polytrader.strategies import IStrategy
-    from polytrader.types import MarketDataEvent, Position
-
-    def temporary_strategy_factory(market_slug: str) -> IStrategy:
-        """Temporary factory that wraps ITradingModel as IStrategy.
-
-        This will be replaced in Commit 4 when SimpleThresholdStrategy is implemented.
-        """
-
-        # Create the old model (will be refactored in Commit 4)
-        model = model_factory(market_slug)
-
-        # Wrap it as IStrategy (temporary adapter)
-        class StrategyAdapter:
-            def __init__(self, model: ITradingModel) -> None:
-                self._model = model
-                self._running = False
-
-            def evaluate(
-                self,
-                market_data: MarketDataEvent,
-                positions: dict[tuple[str, str], Position] | None = None,
-            ) -> SignalEvent | None:
-                # TODO: This will be replaced in Commit 4 with proper signal generation
-                # For now, return None (strategy evaluation will be implemented in Commit 4)
-                return None
-
-            async def run(self) -> None:
-                self._running = True
-                await self._model.run()
-
-            def stop(self) -> None:
-                self._running = False
-                self._model.stop()
-
-        return StrategyAdapter(model)
-
     supervisor = MarketSupervisor(
         pattern=market_pattern,
         discovery_service=discovery,
         adapter_factory=adapter_factory,
         observer_factory=observer_factory,
-        strategy_factory=temporary_strategy_factory,
+        strategy_factory=strategy_factory,
         execution_router_factory=execution_router_factory,
         bus=bus,
         store=store,

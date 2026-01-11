@@ -101,57 +101,14 @@ async def predict_task(
     adapter_factory = create_adapter_factory(secrets, polling_frequency_hz=frequency)
     observer_factory = create_observer_factory(bus, store)
 
-    # TODO: Replace with strategy_factory in Commit 4 when SimpleThresholdStrategy is implemented
-    # For now, create a temporary adapter that wraps the old model
-    from polytrader.events.types import SignalEvent
-    from polytrader.models.protocol import ITradingModel, create_model_factory
-    from polytrader.strategies import IStrategy
-    from polytrader.types import MarketDataEvent, Position
+    # Create strategy factory (replaces old model factory)
+    from polytrader.strategies import create_simple_threshold_factory
 
-    model_factory = create_model_factory(
-        bus,
-        store,
+    strategy_factory = create_simple_threshold_factory(
+        store=store,
         buy_threshold=buy_threshold,
-        sell_threshold=sell_threshold,
-        size=size,
         min_history=min_history,
     )
-
-    def temporary_strategy_factory(market_slug: str) -> IStrategy:
-        """Temporary factory that wraps ITradingModel as IStrategy.
-
-        This will be replaced in Commit 4 when SimpleThresholdStrategy is implemented.
-        The adapter allows the old model to work with the new IStrategy protocol.
-        """
-
-        # Create the old model (will be refactored in Commit 4)
-        model = model_factory(market_slug)
-
-        # Wrap it as IStrategy (temporary adapter)
-        class StrategyAdapter:
-            def __init__(self, model: ITradingModel) -> None:
-                self._model = model
-                self._running = False
-
-            def evaluate(
-                self,
-                market_data: MarketDataEvent,
-                positions: dict[tuple[str, str], Position] | None = None,
-            ) -> SignalEvent | None:
-                # TODO: This will be replaced in Commit 4 with proper signal generation
-                # For now, return None (strategy evaluation will be implemented in Commit 4)
-                # The old model still runs in background and publishes PROPOSALS directly
-                return None
-
-            async def run(self) -> None:
-                self._running = True
-                await self._model.run()
-
-            def stop(self) -> None:
-                self._running = False
-                self._model.stop()
-
-        return StrategyAdapter(model)
 
     # Predict mode: don't start execution pipeline (no execution router factory)
     # Proposals are consumed by proposal_handler, no need for execution components
@@ -161,7 +118,7 @@ async def predict_task(
         discovery_service=discovery,
         adapter_factory=adapter_factory,
         observer_factory=observer_factory,
-        strategy_factory=temporary_strategy_factory,
+        strategy_factory=strategy_factory,
         execution_router_factory=None,  # No execution in predict mode
         bus=bus,
         store=store,
