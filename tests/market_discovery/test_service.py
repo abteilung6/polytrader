@@ -8,7 +8,21 @@ import pytest
 
 from polytrader.adapters.polymarket.market_data import GammaClient
 from polytrader.events.types import MarketDiscoveryEvent
-from polytrader.market_discovery import MarketDiscoveryService, MarketState
+from polytrader.market_discovery import (
+    FatalDiscoveryError,
+    MarketDiscoveryService,
+    MarketState,
+    RetryableDiscoveryError,
+)
+from polytrader.obs.metrics import MemoryMetricsCollector, set_metrics_collector
+
+
+@pytest.fixture
+def metrics_collector() -> MemoryMetricsCollector:
+    """Create a fresh metrics collector for each test."""
+    collector = MemoryMetricsCollector()
+    set_metrics_collector(collector)
+    return collector
 
 
 @pytest.mark.asyncio
@@ -217,7 +231,7 @@ async def test_market_discovery_emits_events() -> None:
         # Should find the market
         assert result == expected_slug
 
-        # Verify event was emitted
+        # Verify event was emitted with correlation_id
         events = event_store.read_stream()
         discovery_events = [
             e for e in events if isinstance(e, MarketDiscoveryEvent) and e.pattern == pattern
@@ -225,6 +239,10 @@ async def test_market_discovery_emits_events() -> None:
         assert len(discovery_events) > 0, "Should emit discovery event"
         assert discovery_events[0].success is True, "Event should indicate success"
         assert discovery_events[0].discovered_market == expected_slug
+        assert discovery_events[0].correlation_id is not None, "Event should have correlation_id"
+        assert discovery_events[0].error_class is None, (
+            "Successful event should have no error_class"
+        )
 
 
 @pytest.mark.asyncio
@@ -602,7 +620,7 @@ async def test_market_discovery_event_on_failure() -> None:
         # Should return None
         assert result is None
 
-        # Verify failure event was emitted
+        # Verify failure event was emitted with correlation_id and error_class
         events = event_store.read_stream()
         discovery_events = [
             e for e in events if isinstance(e, MarketDiscoveryEvent) and e.pattern == pattern
@@ -612,6 +630,10 @@ async def test_market_discovery_event_on_failure() -> None:
         assert discovery_events[0].discovered_market is None
         assert discovery_events[0].error is not None
         assert "windows" in discovery_events[0].error.lower()
+        assert discovery_events[0].correlation_id is not None, "Event should have correlation_id"
+        assert discovery_events[0].error_class == "retryable", (
+            "Failure should be classified as retryable"
+        )
 
 
 @pytest.mark.asyncio
@@ -649,10 +671,106 @@ async def test_market_discovery_get_market_state_handles_exceptions() -> None:
 
     discovery = MarketDiscoveryService(gamma_client=gamma_client)
 
-    state = await discovery.get_market_state("any-market")
+    # Should raise RetryableDiscoveryError (default classification)
+    with pytest.raises(RetryableDiscoveryError):
+        await discovery.get_market_state("any-market")
 
-    # Should return NOT_FOUND on exception
-    assert state == MarketState.NOT_FOUND
+
+@pytest.mark.asyncio
+async def test_market_discovery_get_market_state_classifies_retryable_errors() -> None:
+    """Test get_market_state classifies network errors as retryable."""
+    gamma_client = MagicMock(spec=GammaClient)
+
+    # Network error
+    class NetworkError(Exception):
+        pass
+
+    gamma_client.get_market_by_slug = MagicMock(side_effect=NetworkError("Connection timeout"))
+
+    discovery = MarketDiscoveryService(gamma_client=gamma_client)
+
+    with pytest.raises(RetryableDiscoveryError, match="Network error|Connection"):
+        await discovery.get_market_state("any-market")
+
+
+@pytest.mark.asyncio
+async def test_market_discovery_get_market_state_classifies_fatal_errors() -> None:
+    """Test get_market_state classifies auth errors as fatal."""
+    gamma_client = MagicMock(spec=GammaClient)
+    gamma_client.get_market_by_slug = MagicMock(side_effect=Exception("401 Unauthorized"))
+
+    discovery = MarketDiscoveryService(gamma_client=gamma_client)
+
+    with pytest.raises(FatalDiscoveryError, match="Auth error"):
+        await discovery.get_market_state("any-market")
+
+
+@pytest.mark.asyncio
+async def test_market_discovery_handles_retryable_error_continues_search() -> None:
+    """Test that retryable errors don't stop the search."""
+    pattern = "btc-updown-15m"
+    interval = 15 * 60
+
+    # Calculate expected markets
+    now = int(time.time())
+    current_window_start = (now // interval) * interval
+    current_end = current_window_start + interval
+    future_end = current_end + interval
+    future_slug = f"btc-updown-15m-{future_end}"
+
+    gamma_client = MagicMock(spec=GammaClient)
+    market = MagicMock()
+    gamma_client.get_market_by_slug = MagicMock(return_value=market)
+
+    discovery = MarketDiscoveryService(gamma_client=gamma_client)
+
+    with patch.object(discovery, "get_market_state", new_callable=AsyncMock) as mock_state:
+        # Current window raises retryable error, future window succeeds
+        def market_state_side_effect(slug: str) -> MarketState:
+            if "current" in slug or slug.endswith(str(current_end)):
+                raise RetryableDiscoveryError("Network error")
+            elif slug == future_slug:
+                return MarketState.ACTIVE
+            return MarketState.NOT_FOUND
+
+        mock_state.side_effect = market_state_side_effect
+
+        result = await discovery.get_current_market(pattern)
+
+        # Should find future market despite retryable error on current
+        assert result == future_slug
+
+
+@pytest.mark.asyncio
+async def test_market_discovery_handles_fatal_error_stops_search() -> None:
+    """Test that fatal errors stop the search and emit event."""
+    from polytrader.events import EventBus, MemoryEventStore
+
+    pattern = "btc-updown-15m"
+
+    gamma_client = MagicMock(spec=GammaClient)
+    gamma_client.get_market_by_slug = MagicMock(side_effect=Exception("401 Unauthorized"))
+
+    event_store = MemoryEventStore()
+    bus = EventBus(store=event_store)
+    discovery = MarketDiscoveryService(gamma_client=gamma_client, bus=bus)
+
+    result = await discovery.get_current_market(pattern)
+
+    # Should return None due to fatal error
+    assert result is None
+
+    # Verify fatal error event was emitted
+    events = event_store.read_stream()
+    discovery_events = [
+        e for e in events if isinstance(e, MarketDiscoveryEvent) and e.pattern == pattern
+    ]
+    assert len(discovery_events) > 0, "Should emit discovery event"
+    assert discovery_events[0].success is False, "Event should indicate failure"
+    assert discovery_events[0].error_class == "fatal", "Should classify as fatal error"
+    error_msg = discovery_events[0].error
+    assert error_msg is not None
+    assert "Auth error" in error_msg or "401" in error_msg
 
 
 @pytest.mark.asyncio
@@ -699,3 +817,106 @@ async def test_market_discovery_get_next_market_not_found() -> None:
         result = await discovery.get_next_market(pattern)
 
         assert result is None
+
+
+@pytest.mark.asyncio
+async def test_market_discovery_correlation_id_uniqueness() -> None:
+    """Test that each discovery operation gets a unique correlation_id."""
+    from polytrader.events import EventBus, MemoryEventStore
+
+    pattern = "btc-updown-15m"
+    interval = 15 * 60
+
+    # Calculate expected current market
+    now = int(time.time())
+    current_window_start = (now // interval) * interval
+    current_end = current_window_start + interval
+    expected_slug = f"btc-updown-15m-{current_end}"
+
+    gamma_client = MagicMock(spec=GammaClient)
+    market = MagicMock()
+    gamma_client.get_market_by_slug = MagicMock(return_value=market)
+
+    event_store = MemoryEventStore()
+    bus = EventBus(store=event_store)
+    discovery = MarketDiscoveryService(gamma_client=gamma_client, bus=bus)
+
+    with patch.object(discovery, "get_market_state", new_callable=AsyncMock) as mock_state:
+        mock_state.return_value = MarketState.ACTIVE
+
+        # Perform two discovery operations
+        result1 = await discovery.get_current_market(pattern)
+        result2 = await discovery.get_current_market(pattern)
+
+        assert result1 == expected_slug
+        assert result2 == expected_slug
+
+        # Clear cache to force second call to emit event
+        discovery._cache.clear()
+
+        # Perform second discovery operation (should emit new event)
+        result3 = await discovery.get_current_market(pattern)
+        assert result3 == expected_slug
+
+        # Verify each operation has unique correlation_id
+        events = event_store.read_stream()
+        discovery_events = [
+            e for e in events if isinstance(e, MarketDiscoveryEvent) and e.pattern == pattern
+        ]
+        assert len(discovery_events) >= 2, "Should emit at least 2 events"
+        correlation_ids = [e.correlation_id for e in discovery_events]
+        # All correlation IDs should be unique
+        assert len(correlation_ids) == len(set(correlation_ids)), (
+            "Each event should have unique correlation_id"
+        )
+
+
+@pytest.mark.asyncio
+async def test_market_discovery_metrics_integration(
+    metrics_collector: MemoryMetricsCollector,
+) -> None:
+    """Test that MarketDiscoveryService records metrics during discovery."""
+    pattern = "btc-updown-15m"
+    interval = 15 * 60
+
+    # Calculate expected current market
+    now = int(time.time())
+    current_window_start = (now // interval) * interval
+    current_end = current_window_start + interval
+    expected_slug = f"btc-updown-15m-{current_end}"
+
+    gamma_client = MagicMock(spec=GammaClient)
+    market = MagicMock()
+    gamma_client.get_market_by_slug = MagicMock(return_value=market)
+
+    discovery = MarketDiscoveryService(gamma_client=gamma_client)
+
+    with patch.object(discovery, "get_market_state", new_callable=AsyncMock) as mock_state:
+        mock_state.return_value = MarketState.ACTIVE
+
+        result = await discovery.get_current_market(pattern)
+
+        assert result == expected_slug
+
+        # Verify metrics were recorded
+        success_count = metrics_collector.get_counter(
+            "market_discovery_attempts_total", labels={"pattern": pattern, "success": "true"}
+        )
+        assert success_count == 1
+
+        # Check latency histogram (labels are tuples of tuples)
+        latency_key = tuple(sorted([("pattern", pattern), ("success", "true")]))
+        latency_values = metrics_collector._histograms.get("market_discovery_latency_ms", {}).get(
+            latency_key, []
+        )
+        assert len(latency_values) == 1
+
+        # Check windows histogram
+        windows_key = tuple(sorted([("pattern", pattern)]))
+        windows_values = metrics_collector._histograms.get(
+            "market_discovery_windows_searched", {}
+        ).get(windows_key, [])
+        assert len(windows_values) == 1
+
+        cache_size = metrics_collector.get_gauge("market_discovery_cache_size")
+        assert cache_size == 1.0

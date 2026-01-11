@@ -350,6 +350,7 @@ class MarketDiscoveryEvent(Event):
         latency_ms: Discovery latency in milliseconds
         success: Whether discovery was successful
         error: Error message if discovery failed
+        error_class: Error classification ("retryable", "fatal", or None)
     """
 
     source: EventSource = Field(default=EventSource.OPS)
@@ -363,6 +364,9 @@ class MarketDiscoveryEvent(Event):
     latency_ms: float = Field(ge=0, description="Discovery latency in milliseconds")
     success: bool = Field(description="Whether discovery was successful")
     error: str | None = Field(default=None, description="Error message if failed")
+    error_class: str | None = Field(
+        default=None, description="Error classification: 'retryable', 'fatal', or None"
+    )
 
 
 # Rebuild models to resolve forward references
