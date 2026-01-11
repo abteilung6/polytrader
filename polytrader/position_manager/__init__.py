@@ -895,11 +895,22 @@ class PositionManager(IPositionManager):
 
 
 # Export paper implementation (import at end to avoid circular import)
+# Export outcome tracker and performance metrics (Commit 4)
+from polytrader.position_manager.outcome_tracker import (  # noqa: E402
+    ClosedPosition,
+    OutcomeTracker,
+)
 from polytrader.position_manager.paper import PaperPositionManager  # noqa: E402
+from polytrader.position_manager.performance_metrics import (  # noqa: E402
+    PerformanceMetrics,
+)
 
 __all__ = [
+    "ClosedPosition",
     "IPositionManager",
+    "OutcomeTracker",
     "PaperPositionManager",
+    "PerformanceMetrics",
     "PositionManager",
     "create_position_manager_factory",
 ]

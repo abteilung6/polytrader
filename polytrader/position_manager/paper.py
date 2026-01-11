@@ -20,6 +20,8 @@ from polytrader.events.types import FillEvent
 from polytrader.logging_config import logger
 from polytrader.oms.store import IOrderStore
 from polytrader.position_manager import IPositionManager
+from polytrader.position_manager.outcome_tracker import OutcomeTracker
+from polytrader.position_manager.performance_metrics import PerformanceMetrics
 from polytrader.types import Outcome, Position
 
 if TYPE_CHECKING:
@@ -62,6 +64,10 @@ class PaperPositionManager(IPositionManager):
         # Track cumulative fills per position for partial fills
         # (market_slug, outcome) -> (total_size, total_cost)
         self._position_fills: dict[tuple[str, Outcome], tuple[float, float]] = {}
+
+        # Outcome tracking and performance metrics (Commit 4)
+        self._outcome_tracker = OutcomeTracker()
+        self._performance_metrics = PerformanceMetrics(self._outcome_tracker)
 
         self._running = False
 
@@ -268,9 +274,8 @@ class PaperPositionManager(IPositionManager):
             position_duration_minutes = position_duration / 60.0
 
             # Calculate total P&L (approximate - using this fill's price)
-            total_pnl = (fill_event.price - position.entry_price) * (
-                position.size + fill_event.size
-            )  # Original position size
+            original_size = position.size + fill_event.size  # Original position size
+            total_pnl = (fill_event.price - position.entry_price) * original_size
 
             logger.bind(
                 market_slug=market_slug,
@@ -295,6 +300,20 @@ class PaperPositionManager(IPositionManager):
                 pnl_pct=pnl_pct,
                 duration_minutes=position_duration_minutes,
             )
+
+            # Record closed position in outcome tracker (Commit 4)
+            self._outcome_tracker.record_closed_position(
+                market_slug=market_slug,
+                outcome=outcome,
+                entry_price=position.entry_price,
+                exit_price=fill_event.price,
+                size=original_size,
+                entry_time=position.entry_time,
+                exit_time=fill_event.ts_mono,
+            )
+
+            # Update performance metrics
+            self._performance_metrics.update_metrics()
 
             # Remove position
             del self._positions[key]
@@ -350,3 +369,19 @@ class PaperPositionManager(IPositionManager):
         """
         key = (market_slug, outcome)
         return self._positions.get(key)
+
+    def get_outcome_tracker(self) -> OutcomeTracker:
+        """Get the outcome tracker.
+
+        Returns:
+            OutcomeTracker instance for accessing closed positions
+        """
+        return self._outcome_tracker
+
+    def get_performance_metrics(self) -> PerformanceMetrics:
+        """Get the performance metrics calculator.
+
+        Returns:
+            PerformanceMetrics instance for accessing performance statistics
+        """
+        return self._performance_metrics
