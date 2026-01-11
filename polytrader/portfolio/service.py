@@ -1,10 +1,12 @@
 """Portfolio service/orchestrator per flows.mdc §5."""
 
 import asyncio
+import time
 
 from polytrader.events import PROPOSALS, SIGNALS, TARGETS, EventBus
 from polytrader.events.types import SignalEvent, TargetEvent
 from polytrader.logging_config import logger
+from polytrader.obs.metrics import IMetricsCollector, MemoryMetricsCollector
 from polytrader.portfolio.intents import convert_target_to_intent
 from polytrader.portfolio.sizing import calculate_size
 from polytrader.portfolio.targets import convert_signal_to_target
@@ -26,6 +28,7 @@ class PortfolioService:
         store: IMarketDataStore,
         position_manager: IPositionManager | None = None,
         fixed_size_usd: float = 1.0,
+        metrics: IMetricsCollector | None = None,
     ) -> None:
         """Initialize portfolio service.
 
@@ -34,11 +37,13 @@ class PortfolioService:
             store: Market data store (for current market data)
             position_manager: Position manager (for portfolio-aware sizing)
             fixed_size_usd: Fixed size for targets (default: 1.0)
+            metrics: Metrics collector (optional, for observability)
         """
         self.bus = bus
         self.store = store
         self.position_manager = position_manager
         self.fixed_size_usd = fixed_size_usd
+        self.metrics = metrics or MemoryMetricsCollector()
         self._running = False
         self._task: asyncio.Task | None = None
 
@@ -82,6 +87,9 @@ class PortfolioService:
 
         Per flows.mdc §5: Convert scores → target exposure → order intent.
         """
+        start_time = time.perf_counter()
+        self.metrics.increment_counter("portfolio_signals_received_total")
+
         try:
             # Step 1: Convert signal to target
             target = convert_signal_to_target(signal, fixed_size_usd=self.fixed_size_usd)
@@ -91,8 +99,11 @@ class PortfolioService:
                     market_slug=signal.market_slug,
                     edge=signal.edge,
                     confidence=signal.confidence,
+                    correlation_id=signal.correlation_id,
                 )
                 return
+
+            self.metrics.increment_counter("portfolio_targets_generated_total")
 
             # Step 2: [Optional] Publish TargetEvent for observability
             target_event = TargetEvent(
@@ -113,6 +124,7 @@ class PortfolioService:
                     "No market data available for signal",
                     market_slug=signal.market_slug,
                     outcome=signal.outcome,
+                    correlation_id=signal.correlation_id,
                 )
                 return
 
@@ -139,11 +151,18 @@ class PortfolioService:
                     "No order intent generated from target",
                     market_slug=target.market_slug,
                     outcome=target.outcome,
+                    correlation_id=signal.correlation_id,
                 )
                 return
 
             # Step 7: Publish OrderIntentEvent to PROPOSALS (RiskChecker subscribes here)
             await self.bus.publish(PROPOSALS, intent)
+            self.metrics.increment_counter("portfolio_intents_generated_total")
+
+            # Record processing latency
+            latency_ms = (time.perf_counter() - start_time) * 1000
+            self.metrics.record_histogram("portfolio_processing_latency_ms", latency_ms)
+
             logger.info(
                 "Published OrderIntentEvent to PROPOSALS",
                 market_slug=intent.market_slug,
@@ -152,9 +171,11 @@ class PortfolioService:
                 size=intent.size,
                 limit_price=intent.limit_price,
                 correlation_id=intent.correlation_id,
+                latency_ms=latency_ms,
             )
 
         except Exception:
+            self.metrics.increment_counter("portfolio_errors_total")
             logger.exception(
                 "Error processing signal",
                 market_slug=signal.market_slug,

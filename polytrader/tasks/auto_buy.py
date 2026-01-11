@@ -202,15 +202,20 @@ async def auto_buy_task(
     order_queue = bus.subscribe(ORDERS)
     market_change_queue = bus.subscribe(MARKET_CHANGE)
 
-    # Start portfolio service per flows.mdc §5
-    # PortfolioService subscribes to SIGNALS and publishes OrderIntentEvent to PROPOSALS
+    # Start services in correct order (subscribers before publishers)
+    # 1. PortfolioService subscribes to SIGNALS (must start before Supervisor publishes)
     portfolio_task = asyncio.create_task(portfolio_service.start())
-    # Start risk checker as async task per flows.mdc §6
-    # RiskChecker subscribes to PROPOSALS and publishes APPROVED_PROPOSALS
+    await asyncio.sleep(0.01)  # Give PortfolioService time to subscribe
+
+    # 2. RiskChecker subscribes to PROPOSALS (must start before PortfolioService publishes)
     risk_checker_task = asyncio.create_task(risk_checker.run())
-    # Start OMS Core as async task per flows.mdc §7
-    # OMS Core subscribes to APPROVED_PROPOSALS and creates orders
+    await asyncio.sleep(0.01)  # Give RiskChecker time to subscribe
+
+    # 3. OMS Core subscribes to APPROVED_PROPOSALS (must start before RiskChecker publishes)
     oms_core_task = asyncio.create_task(oms_core.run())
+    await asyncio.sleep(0.01)  # Give OMS Core time to subscribe
+
+    # 4. Supervisor publishes SignalEvent to SIGNALS (starts last)
     supervisor_task = asyncio.create_task(supervisor.run())
 
     async def handle_orders() -> None:

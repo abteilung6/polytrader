@@ -39,6 +39,9 @@ from polytrader.risk.policies import (
 from polytrader.store import IMarketDataStore
 from polytrader.types import OrderIntentEvent, Outcome
 
+# Fix Pydantic forward references
+RiskCheckEvent.model_rebuild()
+
 # Type for risk policy functions
 # Policies can have either (context, limits) -> RiskResult or
 # (context, limits, clock) -> RiskResult. We handle the difference at runtime.
