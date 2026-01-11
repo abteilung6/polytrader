@@ -128,6 +128,66 @@ class SystemStoppedEvent(Event):
     reason: str | None = Field(default=None, description="Optional reason for shutdown")
 
 
+class ServiceStartedEvent(Event):
+    """Emitted when a service starts successfully.
+
+    Per observability.mdc §1: All important actions emit events.
+    This event tracks service lifecycle for debugging and monitoring.
+
+    Attributes:
+        service_name: Name of the service (e.g., "PortfolioService", "RiskChecker")
+        supervisor_type: Type of supervisor ("SystemSupervisor" or "MarketSupervisor")
+        startup_time_ms: Time taken to start the service in milliseconds
+    """
+
+    source: EventSource = Field(default=EventSource.OPS)
+    service_name: str = Field(description="Name of the service")
+    supervisor_type: str = Field(description="Type of supervisor")
+    startup_time_ms: float | None = Field(
+        default=None, description="Time taken to start the service (ms)"
+    )
+
+
+class ServiceStoppedEvent(Event):
+    """Emitted when a service stops.
+
+    Per observability.mdc §1: All important actions emit events.
+    This event tracks service lifecycle for debugging and monitoring.
+
+    Attributes:
+        service_name: Name of the service (e.g., "PortfolioService", "RiskChecker")
+        supervisor_type: Type of supervisor ("SystemSupervisor" or "MarketSupervisor")
+        reason: Optional reason for shutdown
+    """
+
+    source: EventSource = Field(default=EventSource.OPS)
+    service_name: str = Field(description="Name of the service")
+    supervisor_type: str = Field(description="Type of supervisor")
+    reason: str | None = Field(default=None, description="Optional reason for shutdown")
+
+
+class ServiceErrorEvent(Event):
+    """Emitted when a service encounters an error.
+
+    Per observability.mdc §1: All important actions emit events.
+    This event tracks service errors for debugging and alerting.
+
+    Attributes:
+        service_name: Name of the service
+        supervisor_type: Type of supervisor
+        error_type: Type of error (e.g., "RuntimeError", "ConnectionError")
+        error_message: Error message
+        error_class: Error classification ("retryable" or "fatal")
+    """
+
+    source: EventSource = Field(default=EventSource.OPS)
+    service_name: str = Field(description="Name of the service")
+    supervisor_type: str = Field(description="Type of supervisor")
+    error_type: str = Field(description="Type of error")
+    error_message: str = Field(description="Error message")
+    error_class: str = Field(description="Error classification (retryable/fatal)")
+
+
 class SignalEvent(Event):
     """Event emitted by strategy/alpha layer with probabilistic scores.
 

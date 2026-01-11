@@ -11,14 +11,24 @@ import time
 from collections.abc import Callable
 
 from polytrader.adapters import IMarketDataAdapter
-from polytrader.events import MARKET_CHANGE, MARKET_DATA, SIGNALS, EventBus
+from polytrader.events import MARKET_CHANGE, MARKET_DATA, SIGNALS, SYSTEM_LIFECYCLE, EventBus
+from polytrader.events.types import ServiceErrorEvent, ServiceStartedEvent, ServiceStoppedEvent
 from polytrader.logging_config import logger
 from polytrader.market_discovery import IMarketDiscoveryService
 from polytrader.observer import IObserver
 from polytrader.position_manager import IPositionManager
 from polytrader.store import IMarketDataStore
 from polytrader.strategies import IStrategy
+from polytrader.supervisor.errors import classify_service_error
+from polytrader.supervisor.metrics import (
+    record_market_transition,
+    record_service_error,
+    record_service_started,
+    record_service_stopped,
+)
 from polytrader.types import MarketChangeEvent, Position
+
+SUPERVISOR_TYPE = "MarketSupervisor"
 
 
 class MarketSupervisor:
@@ -29,6 +39,12 @@ class MarketSupervisor:
 
     Per flows.mdc §4: Strategy layer produces SignalEvent (probabilistic scores).
     Supervisor evaluates strategy on-demand for fast decision-making.
+
+    Per observability.mdc:
+    - Emits ServiceStartedEvent, ServiceStoppedEvent, ServiceErrorEvent
+    - Records metrics (transitions, service failures)
+    - Classifies errors (retryable vs fatal)
+    - Structured logging with context
     """
 
     def __init__(
@@ -86,19 +102,79 @@ class MarketSupervisor:
         self._last_evaluation_time: float = 0.0
 
     async def start(self) -> None:
-        """Start the supervisor and discover initial market."""
+        """Start the supervisor and discover initial market.
+
+        Per observability.mdc:
+        - Emits ServiceStartedEvent
+        - Records metrics
+        - Classifies errors
+        """
         self._running = True
-        logger.bind(pattern=self.pattern).info("Starting MarketSupervisor")
+        logger.bind(supervisor=SUPERVISOR_TYPE, pattern=self.pattern).info(
+            "Starting MarketSupervisor"
+        )
 
-        # Initial market discovery
-        market = await self.discovery.get_current_market(self.pattern)
-        if not market:
-            raise RuntimeError(f"No active market found for pattern: {self.pattern}")
+        try:
+            # Initial market discovery
+            market = await self.discovery.get_current_market(self.pattern)
+            if not market:
+                error_msg = f"No active market found for pattern: {self.pattern}"
+                logger.bind(
+                    supervisor=SUPERVISOR_TYPE,
+                    pattern=self.pattern,
+                    error_class="fatal",
+                ).error(error_msg)
 
-        await self._transition_to_market(market)
+                # Emit error event
+                error_event = ServiceErrorEvent(
+                    service_name="MarketSupervisor",
+                    supervisor_type=SUPERVISOR_TYPE,
+                    error_type="RuntimeError",
+                    error_message=error_msg,
+                    error_class="fatal",
+                )
+                await self.bus.publish(SYSTEM_LIFECYCLE, error_event)
 
-        # Start monitoring task
-        self._monitor_task = asyncio.create_task(self._monitor_market())
+                record_service_error("MarketSupervisor", SUPERVISOR_TYPE, "RuntimeError", "fatal")
+                raise RuntimeError(error_msg)
+
+            await self._transition_to_market(market)
+
+            # Start monitoring task
+            self._monitor_task = asyncio.create_task(self._monitor_market())
+
+            logger.bind(supervisor=SUPERVISOR_TYPE, pattern=self.pattern, market=market).info(
+                "MarketSupervisor started (initial market: {market})",
+                market=market,
+            )
+
+        except Exception as e:
+            error_class = classify_service_error(e)
+            error_type = type(e).__name__
+            error_msg = str(e)
+
+            logger.bind(
+                supervisor=SUPERVISOR_TYPE,
+                pattern=self.pattern,
+                error_type=error_type,
+                error_class=error_class,
+            ).exception(
+                "Failed to start MarketSupervisor: {error}",
+                error=error_msg,
+            )
+
+            # Emit error event
+            error_event = ServiceErrorEvent(
+                service_name="MarketSupervisor",
+                supervisor_type=SUPERVISOR_TYPE,
+                error_type=error_type,
+                error_message=error_msg,
+                error_class=error_class,
+            )
+            await self.bus.publish(SYSTEM_LIFECYCLE, error_event)
+
+            record_service_error("MarketSupervisor", SUPERVISOR_TYPE, error_type, error_class)
+            raise
 
     async def run(self) -> None:
         """Run the supervisor (wait for tasks to complete)."""
@@ -127,54 +203,175 @@ class MarketSupervisor:
 
         Stops all current components, then starts new ones with the new market.
 
+        Per observability.mdc:
+        - Emits ServiceStartedEvent, ServiceStoppedEvent for components
+        - Records metrics (transitions)
+        - Classifies errors
+
         Args:
             new_market: Market slug to transition to
         """
         old_market = self.current_market
 
         if old_market == new_market:
-            logger.bind(market=new_market).debug("Already on market, skipping transition")
+            logger.bind(supervisor=SUPERVISOR_TYPE, market=new_market).debug(
+                "Already on market, skipping transition"
+            )
             return
 
-        logger.bind(old_market=old_market, new_market=new_market).info(
-            "Transitioning from {old_market} to {new_market}"
-        )
-
-        # Stop old components
-        await self._stop_components()
-
-        # Update current market
-        self.current_market = new_market
-
-        # Create new components
-        self.adapter = self.adapter_factory(new_market)
-        self.observer = self.observer_factory(self.adapter)
-        self.strategy = self.strategy_factory(new_market)
-
-        # Start new components
-        self._observer_task = asyncio.create_task(self.observer.run())
-        # Strategy evaluation: subscribe to MARKET_DATA and evaluate on-demand
-        self._strategy_evaluation_task = asyncio.create_task(self._evaluate_strategy_loop())
-        # Strategy background tasks (if strategy needs them)
-        self._strategy_background_task = asyncio.create_task(self._run_strategy_background())
-
-        # Publish market change event
-        event = MarketChangeEvent(
+        transition_start = time.perf_counter()
+        logger.bind(
+            supervisor=SUPERVISOR_TYPE,
             old_market=old_market,
             new_market=new_market,
+        ).info(
+            "Transitioning from {old_market} to {new_market}",
+            old_market=old_market or "None",
+            new_market=new_market,
         )
-        await self.bus.publish(MARKET_CHANGE, event)
 
-        logger.bind(new_market=new_market).info(
-            "Successfully transitioned to market: {new_market}", new_market=new_market
-        )
+        try:
+            # Stop old components
+            await self._stop_components()
+
+            # Update current market
+            self.current_market = new_market
+
+            # Create and start new components with observability
+            component_start = time.perf_counter()
+
+            # Adapter
+            self.adapter = self.adapter_factory(new_market)
+            adapter_start_ms = (time.perf_counter() - component_start) * 1000
+            record_service_started("Adapter", SUPERVISOR_TYPE, adapter_start_ms)
+            started_event = ServiceStartedEvent(
+                service_name="Adapter",
+                supervisor_type=SUPERVISOR_TYPE,
+                startup_time_ms=adapter_start_ms,
+            )
+            await self.bus.publish(SYSTEM_LIFECYCLE, started_event)
+
+            # Observer
+            component_start = time.perf_counter()
+            self.observer = self.observer_factory(self.adapter)
+            self._observer_task = asyncio.create_task(self.observer.run())
+            observer_start_ms = (time.perf_counter() - component_start) * 1000
+            record_service_started("Observer", SUPERVISOR_TYPE, observer_start_ms)
+            started_event = ServiceStartedEvent(
+                service_name="Observer",
+                supervisor_type=SUPERVISOR_TYPE,
+                startup_time_ms=observer_start_ms,
+            )
+            await self.bus.publish(SYSTEM_LIFECYCLE, started_event)
+
+            # Strategy
+            component_start = time.perf_counter()
+            self.strategy = self.strategy_factory(new_market)
+            # Strategy evaluation: subscribe to MARKET_DATA and evaluate on-demand
+            self._strategy_evaluation_task = asyncio.create_task(self._evaluate_strategy_loop())
+            # Strategy background tasks (if strategy needs them)
+            self._strategy_background_task = asyncio.create_task(self._run_strategy_background())
+            strategy_start_ms = (time.perf_counter() - component_start) * 1000
+            record_service_started("Strategy", SUPERVISOR_TYPE, strategy_start_ms)
+            started_event = ServiceStartedEvent(
+                service_name="Strategy",
+                supervisor_type=SUPERVISOR_TYPE,
+                startup_time_ms=strategy_start_ms,
+            )
+            await self.bus.publish(SYSTEM_LIFECYCLE, started_event)
+
+            # Record transition metric
+            record_market_transition(SUPERVISOR_TYPE, old_market, new_market)
+
+            # Publish market change event
+            event = MarketChangeEvent(
+                old_market=old_market,
+                new_market=new_market,
+            )
+            await self.bus.publish(MARKET_CHANGE, event)
+
+            transition_time_ms = (time.perf_counter() - transition_start) * 1000
+            logger.bind(
+                supervisor=SUPERVISOR_TYPE,
+                new_market=new_market,
+                transition_time_ms=transition_time_ms,
+            ).info(
+                "Successfully transitioned to market: {new_market} in {time_ms:.1f}ms",
+                new_market=new_market,
+                time_ms=transition_time_ms,
+            )
+
+        except Exception as e:
+            error_class = classify_service_error(e)
+            error_type = type(e).__name__
+            error_msg = str(e)
+
+            logger.bind(
+                supervisor=SUPERVISOR_TYPE,
+                old_market=old_market,
+                new_market=new_market,
+                error_type=error_type,
+                error_class=error_class,
+            ).exception(
+                "Failed to transition to market {new_market}: {error}",
+                new_market=new_market,
+                error=error_msg,
+            )
+
+            # Emit error event
+            error_event = ServiceErrorEvent(
+                service_name="MarketSupervisor",
+                supervisor_type=SUPERVISOR_TYPE,
+                error_type=error_type,
+                error_message=f"Transition error: {error_msg}",
+                error_class=error_class,
+            )
+            await self.bus.publish(SYSTEM_LIFECYCLE, error_event)
+
+            record_service_error("MarketSupervisor", SUPERVISOR_TYPE, error_type, error_class)
+            raise
 
     async def _stop_components(self) -> None:
-        """Stop all current components."""
-        if self.observer:
-            self.observer.stop()
+        """Stop all current components.
+
+        Per observability.mdc:
+        - Emits ServiceStoppedEvent for each component
+        - Records metrics
+        """
+        # Stop components in reverse order
         if self.strategy:
-            self.strategy.stop()
+            try:
+                self.strategy.stop()
+                record_service_stopped("Strategy", SUPERVISOR_TYPE)
+                stopped_event = ServiceStoppedEvent(
+                    service_name="Strategy",
+                    supervisor_type=SUPERVISOR_TYPE,
+                    reason=None,
+                )
+                await self.bus.publish(SYSTEM_LIFECYCLE, stopped_event)
+            except Exception as e:
+                logger.bind(
+                    supervisor=SUPERVISOR_TYPE,
+                    service="Strategy",
+                    error_type=type(e).__name__,
+                ).exception("Error stopping Strategy: {error}", error=str(e))
+
+        if self.observer:
+            try:
+                self.observer.stop()
+                record_service_stopped("Observer", SUPERVISOR_TYPE)
+                stopped_event = ServiceStoppedEvent(
+                    service_name="Observer",
+                    supervisor_type=SUPERVISOR_TYPE,
+                    reason=None,
+                )
+                await self.bus.publish(SYSTEM_LIFECYCLE, stopped_event)
+            except Exception as e:
+                logger.bind(
+                    supervisor=SUPERVISOR_TYPE,
+                    service="Observer",
+                    error_type=type(e).__name__,
+                ).exception("Error stopping Observer: {error}", error=str(e))
 
         # Cancel tasks
         tasks = [
@@ -228,8 +425,15 @@ class MarketSupervisor:
                     if signal is not None:
                         # Publish signal to portfolio layer
                         await self.bus.publish(SIGNALS, signal)
-                except Exception:
-                    logger.exception("Error evaluating strategy")
+                except Exception as e:
+                    error_class = classify_service_error(e)
+                    error_type = type(e).__name__
+                    logger.bind(
+                        supervisor=SUPERVISOR_TYPE,
+                        market=self.current_market,
+                        error_type=error_type,
+                        error_class=error_class,
+                    ).exception("Error evaluating strategy")
                     # Continue processing despite errors
         except Exception:
             logger.exception("Error in strategy evaluation loop")
@@ -270,8 +474,12 @@ class MarketSupervisor:
 
     async def _monitor_market(self) -> None:
         """Monitor current market and detect expiration/transitions."""
-        logger.bind(interval=self.monitor_interval).info(
-            "Starting market monitor (checking every {interval}s)"
+        logger.bind(
+            supervisor=SUPERVISOR_TYPE,
+            interval=self.monitor_interval,
+        ).info(
+            "Starting market monitor (checking every {interval}s)",
+            interval=self.monitor_interval,
         )
 
         while self._running:
@@ -283,22 +491,37 @@ class MarketSupervisor:
 
                 if current and current != self.current_market:
                     # Market has changed
-                    logger.bind(old_market=self.current_market, new_market=current).info(
-                        "Market change detected: {old_market} → {new_market}"
+                    logger.bind(
+                        supervisor=SUPERVISOR_TYPE,
+                        old_market=self.current_market,
+                        new_market=current,
+                    ).info(
+                        "Market change detected: {old_market} → {new_market}",
+                        old_market=self.current_market or "None",
+                        new_market=current,
                     )
                     await self._transition_to_market(current)
                 elif not current:
                     # No active market (gap between markets)
-                    logger.warning("No active market found, waiting...")
+                    logger.bind(
+                        supervisor=SUPERVISOR_TYPE,
+                        pattern=self.pattern,
+                    ).warning("No active market found, waiting...")
                     # Retry in shorter interval
                     await asyncio.sleep(5.0)
-            except Exception:
-                logger.exception("Error in market monitor")
+            except Exception as e:
+                error_class = classify_service_error(e)
+                error_type = type(e).__name__
+                logger.bind(
+                    supervisor=SUPERVISOR_TYPE,
+                    error_type=error_type,
+                    error_class=error_class,
+                ).exception("Error in market monitor")
                 # Continue monitoring despite errors
 
     async def _cleanup(self) -> None:
         """Clean up all resources."""
-        logger.info("Cleaning up MarketSupervisor")
+        logger.bind(supervisor=SUPERVISOR_TYPE).info("Cleaning up MarketSupervisor")
         self._running = False
 
         # Cancel monitor task
@@ -311,6 +534,8 @@ class MarketSupervisor:
 
         # Stop all components
         await self._stop_components()
+
+        logger.bind(supervisor=SUPERVISOR_TYPE).info("MarketSupervisor cleaned up")
 
     def stop(self) -> None:
         """Stop the supervisor (non-blocking)."""

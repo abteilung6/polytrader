@@ -635,8 +635,10 @@ class TestSystemSupervisor:
             oms_core_factory=oms_factory,
         )
 
-        # Start should raise the error
-        with pytest.raises(RuntimeError, match="Startup failed"):
+        # Start should raise the error (now wrapped in FatalSupervisorError)
+        from polytrader.supervisor.errors import FatalSupervisorError
+
+        with pytest.raises(FatalSupervisorError, match="Startup failed"):
             await supervisor.start()
 
         # Supervisor sets _running = True before calling service.start(),
