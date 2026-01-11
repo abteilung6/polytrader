@@ -7,7 +7,7 @@ import typer
 
 from polytrader.logging_config import logger, setup_logging
 from polytrader.tasks import (
-    auto_buy_task,
+    live_trading_task,
     paper_trading_task,
     watch_task,
 )
@@ -45,8 +45,8 @@ def market_watch(
     asyncio.run(watch_task(pattern, frequency, limit))
 
 
-@model_app.command("run")
-def model_run(
+@model_app.command("live")
+def model_live(
     market: str = typer.Option(
         ..., "--market", "-m", help="Market pattern (e.g., 'btc-updown-15m') or market slug"
     ),
@@ -56,12 +56,16 @@ def model_run(
     size: float = typer.Option(1.0, "--size", "-s", help="Trade size in USD"),
     min_history: int = typer.Option(30, "--min-history", help="Minimum history ticks required"),
     max_trades: int = typer.Option(1, "--max-trades", help="Maximum trades per market"),
+    sync_interval: float = typer.Option(
+        60.0, "--sync-interval", help="Position sync interval in seconds"
+    ),
     log_file: str | None = typer.Option(None, "--log-file", help="Optional file path to save logs"),
 ) -> None:
-    """Run trading model with automatic order execution."""
+    """Run live trading with real order execution and position tracking."""
     _setup_logging(log_file)
 
-    logger.info("Running model for market pattern: {market}", market=market)
+    logger.info("🚀 LIVE TRADING MODE")
+    logger.info("Running live trading for market pattern: {market}", market=market)
     logger.info("Outcomes: UP, DOWN (both)")
     logger.info("Frequency: {frequency} Hz", frequency=frequency)
     logger.info("Buy threshold: {threshold}", threshold=buy_threshold)
@@ -69,9 +73,10 @@ def model_run(
     logger.info("Size: ${size}", size=size)
     logger.info("Min history: {min_history} ticks", min_history=min_history)
     logger.info("Max trades per outcome: {max_trades}", max_trades=max_trades)
+    logger.info("Sync interval: {interval}s", interval=sync_interval)
     logger.info("Press Ctrl+C to stop")
     asyncio.run(
-        auto_buy_task(
+        live_trading_task(
             market,
             frequency,
             buy_threshold,
@@ -79,6 +84,7 @@ def model_run(
             size,
             min_history,
             max_trades,
+            sync_interval=sync_interval,
         )
     )
 
