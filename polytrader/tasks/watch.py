@@ -84,7 +84,7 @@ async def watch_task(
     store = MemoryMarketDataStore()
     event_store = MemoryEventStore()
     bus = EventBus(store=event_store)
-    discovery = MarketDiscoveryService()
+    discovery = MarketDiscoveryService(bus=bus)
 
     # Emit system started event (auto-persisted by EventBus)
     started_event = SystemStartedEvent()
