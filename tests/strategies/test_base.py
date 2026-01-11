@@ -2,9 +2,9 @@
 
 import time
 
-from polytrader.events.types import SignalEvent
+from polytrader.events.types import MarketDataEvent, SignalEvent
 from polytrader.strategies import IStrategy
-from polytrader.types import MarketDataEvent, Position
+from polytrader.types import Position
 
 
 class TestIStrategyProtocol:

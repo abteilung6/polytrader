@@ -17,7 +17,7 @@ import asyncio
 from typing import Any
 
 from polytrader.events import APPROVED_PROPOSALS, ORDERS, PROPOSALS, RISK_CHECKS, EventBus
-from polytrader.events.types import RiskCheckEvent
+from polytrader.events.types import OrderIntentEvent, RiskCheckEvent
 from polytrader.logging_config import logger
 from polytrader.obs.metrics import (
     record_projected_exposure,
@@ -37,10 +37,9 @@ from polytrader.risk.policies import (
     check_token_ownership,
 )
 from polytrader.store import IMarketDataStore
-from polytrader.types import OrderIntentEvent, Outcome
+from polytrader.types import Outcome
 
-# Fix Pydantic forward references
-RiskCheckEvent.model_rebuild()
+# No rebuild needed - no circular dependency anymore
 
 # Type for risk policy functions
 # Policies can have either (context, limits) -> RiskResult or

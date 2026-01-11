@@ -6,8 +6,8 @@ Per flows.mdc §7: OMS must handle duplicate submits idempotently.
 import pytest
 
 from polytrader.common.ids import get_run_id, reset_run_id
+from polytrader.events.types import OrderIntentEvent
 from polytrader.oms.idempotency import IdempotencyStore, generate_client_order_id
-from polytrader.types import OrderIntentEvent
 
 
 def create_test_intent(

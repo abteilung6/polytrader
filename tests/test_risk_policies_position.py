@@ -3,9 +3,9 @@
 Per testing.mdc §1.A: Unit tests for position limit policies (fast, deterministic).
 """
 
+from polytrader.events.types import MarketDataEvent, OrderIntentEvent
 from polytrader.risk.models import RiskContext, RiskLimits, RiskReasonCode
 from polytrader.risk.policies import check_max_trades_per_market, check_position_limits
-from polytrader.types import MarketDataEvent, OrderIntentEvent
 
 
 class TestCheckPositionLimits:

@@ -35,10 +35,8 @@ def convert_signal_to_target(
     from polytrader.types import Outcome
 
     target_outcome: Outcome = "UP" if signal.p_up > signal.p_down else "DOWN"
-
     # Simple fixed sizing for now
     target_exposure = fixed_size_usd
-
     rationale = (
         f"Signal edge {signal.edge:.4f} > 0, confidence {signal.confidence:.4f}, "
         f"applying fixed size {fixed_size_usd:.2f} USD"

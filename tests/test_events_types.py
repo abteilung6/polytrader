@@ -210,9 +210,8 @@ class TestRiskCheckEvent:
 
     def test_risk_check_event_creation(self) -> None:
         """Test that RiskCheckEvent can be created with intent and result."""
-        from polytrader.events.types import RiskCheckEvent
+        from polytrader.events.types import OrderIntentEvent, RiskCheckEvent
         from polytrader.risk.models import RiskReasonCode, RiskResult
-        from polytrader.types import OrderIntentEvent
 
         intent = OrderIntentEvent(
             market_slug="test-market",
@@ -237,9 +236,8 @@ class TestRiskCheckEvent:
 
     def test_risk_check_event_has_base_fields(self) -> None:
         """Test that RiskCheckEvent has all Event base class fields."""
-        from polytrader.events.types import EventSource, RiskCheckEvent
+        from polytrader.events.types import EventSource, OrderIntentEvent, RiskCheckEvent
         from polytrader.risk.models import RiskReasonCode, RiskResult
-        from polytrader.types import OrderIntentEvent
 
         intent = OrderIntentEvent(
             market_slug="test-market",
@@ -269,9 +267,8 @@ class TestRiskCheckEvent:
 
     def test_risk_check_event_allowed_property(self) -> None:
         """Test that allowed property works correctly."""
-        from polytrader.events.types import RiskCheckEvent
+        from polytrader.events.types import OrderIntentEvent, RiskCheckEvent
         from polytrader.risk.models import RiskReasonCode, RiskResult
-        from polytrader.types import OrderIntentEvent
 
         intent = OrderIntentEvent(
             market_slug="test-market",
@@ -301,9 +298,8 @@ class TestRiskCheckEvent:
 
     def test_risk_check_event_reason_codes_property(self) -> None:
         """Test that reason_codes property works correctly."""
-        from polytrader.events.types import RiskCheckEvent
+        from polytrader.events.types import OrderIntentEvent, RiskCheckEvent
         from polytrader.risk.models import RiskReasonCode, RiskResult
-        from polytrader.types import OrderIntentEvent
 
         intent = OrderIntentEvent(
             market_slug="test-market",
@@ -331,9 +327,8 @@ class TestRiskCheckEvent:
 
     def test_risk_check_event_correlation_id(self) -> None:
         """Test that RiskCheckEvent includes correlation_id per observability.mdc §2."""
-        from polytrader.events.types import RiskCheckEvent
+        from polytrader.events.types import OrderIntentEvent, RiskCheckEvent
         from polytrader.risk.models import RiskReasonCode, RiskResult
-        from polytrader.types import OrderIntentEvent
 
         intent = OrderIntentEvent(
             market_slug="test-market",
@@ -364,9 +359,8 @@ class TestRiskCheckEvent:
 
     def test_risk_check_event_serialization(self) -> None:
         """Test that RiskCheckEvent can be serialized (Pydantic model)."""
-        from polytrader.events.types import RiskCheckEvent
+        from polytrader.events.types import OrderIntentEvent, RiskCheckEvent
         from polytrader.risk.models import RiskReasonCode, RiskResult
-        from polytrader.types import OrderIntentEvent
 
         intent = OrderIntentEvent(
             market_slug="test-market",
@@ -405,8 +399,7 @@ class TestOrderCreatedEvent:
 
     def test_order_created_event_creation(self) -> None:
         """Test that OrderCreatedEvent can be created."""
-        from polytrader.events.types import EventSource, OrderCreatedEvent
-        from polytrader.types import OrderIntentEvent
+        from polytrader.events.types import EventSource, OrderCreatedEvent, OrderIntentEvent
 
         intent = OrderIntentEvent(
             market_slug="test-market",
@@ -434,8 +427,7 @@ class TestOrderCreatedEvent:
 
     def test_order_created_event_has_base_fields(self) -> None:
         """Test that OrderCreatedEvent has all Event base class fields."""
-        from polytrader.events.types import EventSource, OrderCreatedEvent
-        from polytrader.types import OrderIntentEvent
+        from polytrader.events.types import EventSource, OrderCreatedEvent, OrderIntentEvent
 
         intent = OrderIntentEvent(
             market_slug="test-market",
@@ -463,8 +455,7 @@ class TestOrderCreatedEvent:
 
     def test_order_created_event_correlation_id(self) -> None:
         """Test that OrderCreatedEvent propagates correlation_id from intent."""
-        from polytrader.events.types import OrderCreatedEvent
-        from polytrader.types import OrderIntentEvent
+        from polytrader.events.types import OrderCreatedEvent, OrderIntentEvent
 
         intent = OrderIntentEvent(
             market_slug="test-market",
@@ -490,8 +481,7 @@ class TestOrderCreatedEvent:
 
     def test_order_created_event_serialization(self) -> None:
         """Test that OrderCreatedEvent can be serialized."""
-        from polytrader.events.types import OrderCreatedEvent
-        from polytrader.types import OrderIntentEvent
+        from polytrader.events.types import OrderCreatedEvent, OrderIntentEvent
 
         intent = OrderIntentEvent(
             market_slug="test-market",

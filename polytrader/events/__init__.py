@@ -2,6 +2,8 @@
 
 from polytrader.events.bus import EventBus, Topic
 from polytrader.events.store import IEventStore, MemoryEventStore
+
+# Import event types first
 from polytrader.events.types import (
     ConfigLoadedEvent,
     Event,
@@ -10,10 +12,14 @@ from polytrader.events.types import (
     ExecutionRequestEvent,
     ExecutionResponseEvent,
     FillEvent,
+    MarketChangeEvent,
+    MarketDataEvent,
     MarketDiscoveryEvent,
     OrderAckEvent,
     OrderCanceledEvent,
     OrderCreatedEvent,
+    OrderExecutedEvent,
+    OrderIntentEvent,
     OrderRejectedEvent,
     OrderSubmittedEvent,
     RiskCheckEvent,
@@ -45,6 +51,8 @@ __all__ = [
     "MARKET_CHANGE",
     "MARKET_DATA",
     "MARKET_DISCOVERY",
+    "MarketChangeEvent",
+    "MarketDataEvent",
     "MarketDiscoveryEvent",
     "MemoryEventStore",
     "OrderAckEvent",
@@ -55,6 +63,8 @@ __all__ = [
     "ORDER_SUBMITTED",
     "OrderCanceledEvent",
     "OrderCreatedEvent",
+    "OrderExecutedEvent",
+    "OrderIntentEvent",
     "OrderRejectedEvent",
     "OrderSubmittedEvent",
     "ORDERS",
@@ -176,3 +186,10 @@ def __getattr__(name: str):
 
         return get_targets_topic()
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+# Rebuild RiskCheckEvent after all imports to resolve forward references
+# This is safe because risk.models imports events.types only in TYPE_CHECKING
+from polytrader.risk.models import RiskResult  # noqa: E402, F401
+
+RiskCheckEvent.model_rebuild()

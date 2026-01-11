@@ -2,8 +2,8 @@
 
 from typing import Protocol, runtime_checkable
 
-from polytrader.events.types import SignalEvent
-from polytrader.types import MarketDataEvent, Position
+from polytrader.events.types import MarketDataEvent, SignalEvent
+from polytrader.types import Position
 
 
 @runtime_checkable

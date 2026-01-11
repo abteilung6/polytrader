@@ -3,7 +3,7 @@
 Per flows.mdc §8: Execution applies pricing rules (bands, passive-first).
 """
 
-from polytrader.types import OrderIntentEvent
+from polytrader.events.types import OrderIntentEvent
 
 
 def apply_limit_pricing(

@@ -9,12 +9,17 @@ import pytest
 
 from polytrader.common.ids import generate_correlation_id
 from polytrader.events import APPROVED_PROPOSALS, PROPOSALS, SIGNALS, TARGETS, EventBus
-from polytrader.events.types import SignalEvent, TargetEvent
+from polytrader.events.types import (
+    MarketDataEvent,
+    OrderIntentEvent,
+    SignalEvent,
+    TargetEvent,
+)
 from polytrader.obs.metrics import MemoryMetricsCollector
 from polytrader.portfolio.service import PortfolioService
 from polytrader.risk import RiskChecker, RiskEngine, get_default_limits
 from polytrader.store import MemoryMarketDataStore
-from polytrader.types import MarketDataEvent, OrderIntentEvent
+from polytrader.types import Outcome  # noqa: F401
 
 
 class TestPortfolioPipeline:

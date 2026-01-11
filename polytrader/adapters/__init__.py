@@ -1,7 +1,7 @@
 from collections.abc import AsyncIterator, Callable
 from typing import TYPE_CHECKING, Protocol
 
-from polytrader.types import MarketDataEvent
+from polytrader.events.types import MarketDataEvent
 
 if TYPE_CHECKING:
     from polytrader.config import PolymarketSecrets

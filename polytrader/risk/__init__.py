@@ -13,7 +13,6 @@ from polytrader.risk.models import (
     RiskLimits,
     RiskReasonCode,
     RiskResult,
-    _rebuild_risk_context_model,
 )
 from polytrader.risk.policies import (
     check_data_freshness,
@@ -28,7 +27,7 @@ from polytrader.risk.policies import (
 
 # Ensure RiskContext model is rebuilt with forward references resolved
 # This is safe to call multiple times
-_rebuild_risk_context_model()
+# No rebuild needed - no circular dependency anymore
 
 __all__ = [
     "RiskChecker",

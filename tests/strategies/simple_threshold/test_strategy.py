@@ -4,10 +4,9 @@ import time
 
 import pytest
 
-from polytrader.events.types import SignalEvent
+from polytrader.events.types import MarketDataEvent, SignalEvent
 from polytrader.store import MemoryMarketDataStore
 from polytrader.strategies.simple_threshold import SimpleThresholdStrategy
-from polytrader.types import MarketDataEvent
 
 
 class TestSimpleThresholdStrategy:

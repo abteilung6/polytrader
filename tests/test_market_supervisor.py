@@ -4,7 +4,13 @@ from polytrader.adapters import IMarketDataAdapter
 from polytrader.adapters.polymarket.market_data import GammaClient
 from polytrader.clob import IClobClient
 from polytrader.events import MARKET_CHANGE, MARKET_DATA, ORDERS, PROPOSALS, EventBus
-from polytrader.events.types import SignalEvent
+from polytrader.events.types import (
+    MarketChangeEvent,
+    MarketDataEvent,
+    OrderExecutedEvent,
+    OrderIntentEvent,
+    SignalEvent,
+)
 from polytrader.execution import ExecutionRouter
 from polytrader.market_discovery import IMarketDiscoveryService
 from polytrader.observer import IObserver
@@ -12,14 +18,7 @@ from polytrader.position_manager import IPositionManager, PositionManager
 from polytrader.store import MemoryMarketDataStore
 from polytrader.strategies import IStrategy
 from polytrader.supervisor import MarketSupervisor
-from polytrader.types import (
-    MarketChangeEvent,
-    MarketDataEvent,
-    OrderExecutedEvent,
-    OrderIntentEvent,
-    Outcome,
-    Position,
-)
+from polytrader.types import Outcome, Position
 
 
 class FakeAdapter(IMarketDataAdapter):

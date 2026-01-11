@@ -45,7 +45,7 @@ from polytrader.oms.models import Order, OrderState
 from polytrader.oms.store import IEventHandlingOrderStore
 
 if TYPE_CHECKING:
-    from polytrader.types import OrderIntentEvent
+    from polytrader.events.types import OrderIntentEvent
 
 
 class OMSCore:

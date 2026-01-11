@@ -18,10 +18,10 @@ if TYPE_CHECKING:
         OrderAckEvent,
         OrderCanceledEvent,
         OrderCreatedEvent,
+        OrderIntentEvent,
         OrderRejectedEvent,
         OrderSubmittedEvent,
     )
-    from polytrader.types import OrderIntentEvent
 
 
 class IOrderStore(Protocol):

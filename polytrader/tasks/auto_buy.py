@@ -1,8 +1,6 @@
 import asyncio
 from collections.abc import Callable
 
-from polytrader.adapters import create_adapter_factory
-from polytrader.clob import create_clob_client_factory
 from polytrader.config import PolymarketSecrets
 from polytrader.events import (
     MARKET_CHANGE,
@@ -13,17 +11,11 @@ from polytrader.events import (
     SystemStartedEvent,
     SystemStoppedEvent,
 )
-from polytrader.execution import create_execution_router_factory
+from polytrader.events.types import MarketChangeEvent, OrderExecutedEvent
 from polytrader.logging_config import logger
 from polytrader.market_discovery import MarketDiscoveryService
-from polytrader.observer import create_observer_factory
-from polytrader.oms import InMemoryOrderStore, OMSCore
-from polytrader.oms.idempotency import IdempotencyStore
-from polytrader.position_manager import create_position_manager_factory
-from polytrader.risk import RiskChecker, RiskEngine, get_default_limits
 from polytrader.store import MemoryMarketDataStore
-from polytrader.supervisor import MarketSupervisor, SystemSupervisor
-from polytrader.types import MarketChangeEvent, OrderExecutedEvent
+from polytrader.tasks.builders import LiveTradingSystemBuilder
 
 
 def default_order_handler(order: OrderExecutedEvent) -> None:
@@ -135,86 +127,43 @@ async def auto_buy_task(
     if market_change_handler is None:
         market_change_handler = default_market_change_handler
 
+    # Initialize core infrastructure
     store = MemoryMarketDataStore()
     event_store = MemoryEventStore()
     bus = EventBus(store=event_store)
     discovery = MarketDiscoveryService(bus=bus)
 
-    # Emit system started event (auto-persisted by EventBus)
+    # Emit system started event
     started_event = SystemStartedEvent()
     await bus.publish(SYSTEM_LIFECYCLE, started_event)
 
-    adapter_factory = create_adapter_factory(secrets, polling_frequency_hz=frequency)
-    observer_factory = create_observer_factory(bus, store)
-
-    # Create strategy factory (replaces old model factory)
-    from polytrader.strategies import create_simple_threshold_factory
-
-    strategy_factory = create_simple_threshold_factory(
-        store=store,
-        buy_threshold=buy_threshold,
-        min_history=min_history,
-    )
-
-    clob_client_factory = create_clob_client_factory(secrets)
-    execution_router_factory = create_execution_router_factory(bus, clob_client_factory)
-    position_manager_factory = create_position_manager_factory(
-        bus, clob_client_factory, sync_interval=60.0
-    )
-
-    # Create service factories for SystemSupervisor
-    from polytrader.portfolio import PortfolioService
-
-    def portfolio_service_factory() -> PortfolioService:
-        position_manager = (
-            position_manager_factory() if position_manager_factory is not None else None
-        )
-        return PortfolioService(
+    # Build live trading system using builder
+    builder = (
+        LiveTradingSystemBuilder(
             bus=bus,
             store=store,
-            position_manager=position_manager,
-            fixed_size_usd=size,
+            discovery=discovery,
+            market_pattern=market_pattern,
+            frequency=frequency,
+            secrets=secrets,
         )
-
-    def risk_checker_factory() -> RiskChecker:
-        risk_limits = get_default_limits()
-        risk_engine = RiskEngine(limits=risk_limits)
-        return RiskChecker(bus=bus, engine=risk_engine, store=store)
-
-    def oms_core_factory() -> OMSCore:
-        oms_store = InMemoryOrderStore(bus)
-        idempotency_store = IdempotencyStore()
-        return OMSCore(bus=bus, store=oms_store, idempotency_store=idempotency_store)
-
-    # Create supervisors
-    system_supervisor = SystemSupervisor(
-        bus=bus,
-        store=store,
-        portfolio_service_factory=portfolio_service_factory,
-        risk_checker_factory=risk_checker_factory,
-        oms_core_factory=oms_core_factory,
-        execution_router_factory=execution_router_factory,
-        position_manager_factory=position_manager_factory,
+        .strategy_config(buy_threshold=buy_threshold, min_history=min_history)
+        .execution_config(size=size, sync_interval=60.0)
     )
+
+    # Build supervisors
+    system_supervisor = builder.build_system_supervisor()
 
     order_queue = bus.subscribe(ORDERS)
     market_change_queue = bus.subscribe(MARKET_CHANGE)
 
-    # Start supervisors (system first, then market)
+    # Start system supervisor first
     await system_supervisor.start()
 
-    # Create market supervisor after system supervisor is started (to get position manager)
-    market_supervisor = MarketSupervisor(
-        pattern=market_pattern,
-        discovery_service=discovery,
-        adapter_factory=adapter_factory,
-        observer_factory=observer_factory,
-        strategy_factory=strategy_factory,
-        bus=bus,
-        store=store,
-        position_manager=system_supervisor.get_position_manager(),  # Query from SystemSupervisor
+    # Build and start market supervisor
+    market_supervisor = builder.build_market_supervisor(
+        position_manager=system_supervisor.get_position_manager()
     )
-
     await market_supervisor.start()
 
     system_supervisor_task = asyncio.create_task(system_supervisor.run())

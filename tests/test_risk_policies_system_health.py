@@ -3,9 +3,9 @@
 Per testing.mdc §1.A: Unit tests for system health policies (fast, deterministic).
 """
 
+from polytrader.events.types import OrderIntentEvent
 from polytrader.risk.models import RiskContext, RiskLimits, RiskReasonCode
 from polytrader.risk.policies import check_rate_limits, check_system_health
-from polytrader.types import OrderIntentEvent
 
 
 class TestCheckSystemHealth:

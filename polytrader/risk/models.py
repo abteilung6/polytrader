@@ -12,7 +12,12 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, Field
 
 if TYPE_CHECKING:
-    from polytrader.types import MarketDataEvent, OrderIntentEvent, Outcome
+    from polytrader.events.types import MarketDataEvent, OrderIntentEvent
+    from polytrader.types import Outcome
+else:
+    # Import at runtime for Pydantic model validation
+    from polytrader.events.types import MarketDataEvent, OrderIntentEvent
+    from polytrader.types import Outcome
 
 
 class RiskReasonCode(str, Enum):
@@ -244,24 +249,6 @@ class RiskContext(BaseModel):
     )
 
 
-# Rebuild model to resolve forward references
-# This must be called after types are available (at import time or lazily)
-def _rebuild_risk_context_model() -> None:
-    """Rebuild RiskContext model to resolve forward references.
-
-    This function should be called after polytrader.types is fully loaded.
-    It's safe to call multiple times.
-    """
-    try:
-        # Import types at runtime (not just TYPE_CHECKING)
-        from polytrader.types import MarketDataEvent, OrderIntentEvent, Outcome  # noqa: F401
-
-        # Rebuild the model now that types are available
-        RiskContext.model_rebuild()
-    except ImportError:
-        # Types not available yet - will be rebuilt when first used
-        pass
-
-
-# Attempt to rebuild immediately (will succeed if types are already loaded)
-_rebuild_risk_context_model()
+# Rebuild models after imports to resolve forward references
+# This is safe because events/types.py doesn't import from risk/models
+RiskContext.model_rebuild()

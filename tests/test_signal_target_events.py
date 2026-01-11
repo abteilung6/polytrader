@@ -4,9 +4,15 @@ import pytest
 from pydantic import ValidationError
 
 from polytrader.common.ids import generate_correlation_id
-from polytrader.events.types import EventSource, SignalEvent, TargetEvent
+from polytrader.events.types import (
+    EventSource,
+    SignalEvent,
+    TargetEvent,
+)
+from polytrader.types import Outcome  # noqa: F401
 
 
+# This must be done after importing both events/types and types modules
 class TestSignalEvent:
     """Tests for SignalEvent per flows.mdc §4 and observability.mdc §1."""
 

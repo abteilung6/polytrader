@@ -10,7 +10,10 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, Field
 
 if TYPE_CHECKING:
-    from polytrader.types import OrderIntentEvent
+    from polytrader.events.types import OrderIntentEvent
+else:
+    # Import at runtime for Pydantic model validation
+    from polytrader.events.types import OrderIntentEvent
 
 
 class SubmitOrderCommand(BaseModel):
@@ -53,19 +56,6 @@ class CancelOrderCommand(BaseModel):
     correlation_id: str = Field(description="Correlation ID for tracing")
 
 
-# Rebuild models to resolve forward references
-# This is needed because SubmitOrderCommand uses OrderIntentEvent
-# which is defined in polytrader.types
-def _rebuild_models() -> None:
-    """Rebuild Pydantic models to resolve forward references."""
-    try:
-        from polytrader.types import OrderIntentEvent  # noqa: F401
-
-        SubmitOrderCommand.model_rebuild()
-    except ImportError:
-        # Types module not available yet, will be rebuilt on first use
-        pass
-
-
-# Rebuild on module import
-_rebuild_models()
+# Rebuild models after imports to resolve forward references
+# This is safe because events/types.py doesn't import from oms/commands
+SubmitOrderCommand.model_rebuild()

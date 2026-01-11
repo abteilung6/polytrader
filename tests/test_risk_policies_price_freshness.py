@@ -5,9 +5,9 @@ Per testing.mdc §1.A: Unit tests for price and data freshness policies (fast, d
 
 from unittest.mock import MagicMock
 
+from polytrader.events.types import MarketDataEvent, OrderIntentEvent
 from polytrader.risk.models import RiskContext, RiskLimits, RiskReasonCode
 from polytrader.risk.policies import check_data_freshness, check_price_sanity
-from polytrader.types import MarketDataEvent, OrderIntentEvent
 
 
 class TestCheckPriceSanity:

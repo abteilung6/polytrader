@@ -5,8 +5,9 @@ import time
 import pytest
 from pydantic import ValidationError
 
+from polytrader.events.types import OrderIntentEvent
 from polytrader.oms.models import Fill, Order, OrderState
-from polytrader.types import OrderIntentEvent, Outcome, Side
+from polytrader.types import Outcome, Side
 
 
 def create_test_intent(

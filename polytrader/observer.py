@@ -3,9 +3,9 @@ from typing import Protocol
 
 from polytrader.adapters import IMarketDataAdapter
 from polytrader.events import MARKET_DATA, EventBus
+from polytrader.events.types import MarketDataEvent
 from polytrader.logging_config import logger
 from polytrader.store import IMarketDataStore
-from polytrader.types import MarketDataEvent
 
 
 class IObserver(Protocol):

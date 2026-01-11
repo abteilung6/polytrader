@@ -12,11 +12,11 @@ from polytrader.events import (
     SystemStartedEvent,
     SystemStoppedEvent,
 )
+from polytrader.events.types import MarketChangeEvent, MarketDataEvent
 from polytrader.logging_config import logger
 from polytrader.market_discovery import MarketDiscoveryService
 from polytrader.observer import create_observer_factory
 from polytrader.store import MemoryMarketDataStore
-from polytrader.types import MarketChangeEvent, MarketDataEvent
 
 
 def default_tick_handler(event: MarketDataEvent, count: int) -> None:

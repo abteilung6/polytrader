@@ -1,9 +1,9 @@
 """Simple threshold strategy implementation."""
 
-from polytrader.events.types import SignalEvent
+from polytrader.events.types import MarketDataEvent, SignalEvent
 from polytrader.store import IMarketDataStore
 from polytrader.strategies.base import IStrategy
-from polytrader.types import MarketDataEvent, Position
+from polytrader.types import Position
 
 
 class SimpleThresholdStrategy(IStrategy):

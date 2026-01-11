@@ -12,12 +12,12 @@ from polytrader.events.types import (
     OrderAckEvent,
     OrderCanceledEvent,
     OrderCreatedEvent,
+    OrderIntentEvent,
     OrderRejectedEvent,
     OrderSubmittedEvent,
 )
 from polytrader.oms.models import OrderState
 from polytrader.oms.store import InMemoryOrderStore
-from polytrader.types import OrderIntentEvent
 
 
 def create_test_intent(
@@ -389,7 +389,6 @@ class TestOrderStoreReplay:
             fee=0.01,
         )
 
-        # Rebuild from events
         events = [created_event, submitted_event, ack_event, fill_event]
         order_store.rebuild_from_events(events)
 
@@ -408,7 +407,6 @@ class TestOrderStoreReplay:
         intent1 = create_test_intent()
         await order_store.create_order(intent1, "client-1")
 
-        # Rebuild with different events
         intent2 = create_test_intent(market_slug="different-market")
         created_event = OrderCreatedEvent(
             order_id="order-2",

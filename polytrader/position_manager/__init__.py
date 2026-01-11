@@ -8,21 +8,23 @@ from polytrader.adapters.polymarket.market_data import GammaClient
 from polytrader.adapters.polymarket.trading import ClobVenueAdapter
 from polytrader.clob import ExternalOrder, IClobClientFactory
 from polytrader.events import MARKET_DATA, ORDERS, PROPOSALS, EventBus
+from polytrader.events.types import MarketDataEvent, OrderExecutedEvent, OrderIntentEvent
 from polytrader.logging_config import logger
-from polytrader.types import (
-    MarketDataEvent,
-    OrderExecutedEvent,
-    OrderIntentEvent,
-    Outcome,
-    Position,
-)
+from polytrader.types import Outcome, Position
 
 
 class IPositionManager(Protocol):
-    """Protocol for position manager components."""
+    """Protocol for position manager components.
+
+    Per architecture.mdc: Position managers track positions from fills.
+    Paper and real implementations both implement this protocol.
+    """
 
     async def run(self) -> None:
-        """Start the position manager."""
+        """Start the position manager.
+
+        Subscribes to events and tracks positions.
+        """
         ...
 
     def stop(self) -> None:
@@ -34,6 +36,18 @@ class IPositionManager(Protocol):
 
         Returns:
             Dictionary mapping (market_slug, outcome) to Position, or None if not available.
+        """
+        ...
+
+    def get_position(self, market_slug: str, outcome: Outcome) -> Position | None:
+        """Get position for a specific market and outcome.
+
+        Args:
+            market_slug: Market identifier
+            outcome: Market outcome ("UP" or "DOWN")
+
+        Returns:
+            Position if exists, None otherwise
         """
         ...
 
@@ -862,4 +876,41 @@ class PositionManager(IPositionManager):
         Returns:
             Dictionary mapping (market_slug, outcome) to Position, or None if not available.
         """
+        if not self._positions:
+            return {}
         return self._positions.copy()
+
+    def get_position(self, market_slug: str, outcome: Outcome) -> Position | None:
+        """Get position for a specific market and outcome.
+
+        Args:
+            market_slug: Market identifier
+            outcome: Market outcome ("UP" or "DOWN")
+
+        Returns:
+            Position if exists, None otherwise
+        """
+        key = (market_slug, outcome)
+        return self._positions.get(key)
+
+
+# Export paper implementation (import at end to avoid circular import)
+# Export outcome tracker and performance metrics (Commit 4)
+from polytrader.position_manager.outcome_tracker import (  # noqa: E402
+    ClosedPosition,
+    OutcomeTracker,
+)
+from polytrader.position_manager.paper import PaperPositionManager  # noqa: E402
+from polytrader.position_manager.performance_metrics import (  # noqa: E402
+    PerformanceMetrics,
+)
+
+__all__ = [
+    "ClosedPosition",
+    "IPositionManager",
+    "OutcomeTracker",
+    "PaperPositionManager",
+    "PerformanceMetrics",
+    "PositionManager",
+    "create_position_manager_factory",
+]

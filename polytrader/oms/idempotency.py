@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 from polytrader.common.ids import get_run_id
 
 if TYPE_CHECKING:
-    from polytrader.types import OrderIntentEvent
+    from polytrader.events.types import OrderIntentEvent
 
 
 def generate_client_order_id(

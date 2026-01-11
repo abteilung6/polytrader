@@ -132,6 +132,10 @@ class FakePositionManager(IPositionManager):
         """Return None for testing."""
         return None
 
+    def get_position(self, market_slug: str, outcome: Outcome) -> Position | None:
+        """Return None for testing."""
+        return None
+
 
 class TestSystemSupervisor:
     """Tests for SystemSupervisor."""

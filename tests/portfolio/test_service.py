@@ -6,11 +6,11 @@ import pytest
 
 from polytrader.common.ids import generate_correlation_id
 from polytrader.events import PROPOSALS, SIGNALS, TARGETS, EventBus
-from polytrader.events.types import SignalEvent, TargetEvent
+from polytrader.events.types import MarketDataEvent, OrderIntentEvent, SignalEvent, TargetEvent
 from polytrader.portfolio.service import PortfolioService
 from polytrader.position_manager import IPositionManager
 from polytrader.store import MemoryMarketDataStore
-from polytrader.types import MarketDataEvent, OrderIntentEvent, Outcome, Position
+from polytrader.types import Outcome, Position
 
 
 class FakePositionManager(IPositionManager):
@@ -29,6 +29,14 @@ class FakePositionManager(IPositionManager):
             outcome: Outcome = outcome_str  # type: ignore[assignment]
             result[(market_slug, outcome)] = position
         return result if result else None
+
+    def get_position(self, market_slug: str, outcome: Outcome) -> Position | None:
+        """Get position for a specific market and outcome."""
+        key = (market_slug, outcome)
+        positions = self.get_positions()
+        if positions is None:
+            return None
+        return positions.get(key)
 
     async def run(self) -> None:
         """Not used in tests."""
