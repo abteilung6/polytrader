@@ -1,4 +1,4 @@
-"""Tests for PaperTradingSystemBuilder.
+"""Tests for PaperTradingSystemBuilder and LiveTradingSystemBuilder.
 
 Per testing.mdc: Comprehensive unit tests for builder pattern.
 Tests cover:
@@ -10,6 +10,7 @@ Tests cover:
 
 import pytest
 
+from polytrader.config import PolymarketSecrets
 from polytrader.events import EventBus, MemoryEventStore
 from polytrader.execution.fill_models import FillModel
 from polytrader.market_discovery import MarketDiscoveryService
@@ -17,7 +18,7 @@ from polytrader.oms import InMemoryOrderStore
 from polytrader.position_manager.paper import PaperPositionManager
 from polytrader.store import MemoryMarketDataStore
 from polytrader.supervisor import MarketSupervisor, SystemSupervisor
-from polytrader.tasks.builders import PaperTradingSystemBuilder
+from polytrader.tasks.builders import LiveTradingSystemBuilder, PaperTradingSystemBuilder
 
 
 class TestPaperTradingSystemBuilder:
@@ -262,6 +263,212 @@ class TestPaperTradingSystemBuilder:
         """Test that builder configuration is preserved across multiple builds."""
         builder.strategy_config(buy_threshold=0.25, min_history=50)
         builder.execution_config(size=10.0)
+
+        supervisor1 = builder.build_system_supervisor()
+        supervisor2 = builder.build_system_supervisor()
+
+        # Both should use the same configuration
+        assert supervisor1.bus is supervisor2.bus
+        assert supervisor1.store is supervisor2.store
+
+
+class TestLiveTradingSystemBuilder:
+    """Tests for LiveTradingSystemBuilder."""
+
+    @pytest.fixture
+    def builder(self) -> LiveTradingSystemBuilder:
+        """Create a builder instance for testing."""
+        bus = EventBus(store=MemoryEventStore())
+        store = MemoryMarketDataStore()
+        discovery = MarketDiscoveryService(bus=bus)
+        secrets = PolymarketSecrets()
+        return LiveTradingSystemBuilder(
+            bus=bus,
+            store=store,
+            discovery=discovery,
+            market_pattern="btc-updown-15m",
+            frequency=1.0,
+            secrets=secrets,
+        )
+
+    def test_builder_initialization(self, builder: LiveTradingSystemBuilder) -> None:
+        """Test builder initializes with correct defaults."""
+        assert builder._buy_threshold == 0.30
+        assert builder._min_history == 30
+        assert builder._size == 1.0
+        assert builder._sync_interval == 60.0
+
+    def test_builder_initialization_invalid_frequency(self) -> None:
+        """Test builder raises ValueError for invalid frequency."""
+        bus = EventBus(store=MemoryEventStore())
+        store = MemoryMarketDataStore()
+        discovery = MarketDiscoveryService(bus=bus)
+        secrets = PolymarketSecrets()
+
+        with pytest.raises(ValueError, match="frequency must be > 0"):
+            LiveTradingSystemBuilder(
+                bus=bus,
+                store=store,
+                discovery=discovery,
+                market_pattern="btc-updown-15m",
+                frequency=0.0,
+                secrets=secrets,
+            )
+
+    def test_builder_initialization_empty_market_pattern(self) -> None:
+        """Test builder raises ValueError for empty market pattern."""
+        bus = EventBus(store=MemoryEventStore())
+        store = MemoryMarketDataStore()
+        discovery = MarketDiscoveryService(bus=bus)
+        secrets = PolymarketSecrets()
+
+        with pytest.raises(ValueError, match="market_pattern cannot be empty"):
+            LiveTradingSystemBuilder(
+                bus=bus,
+                store=store,
+                discovery=discovery,
+                market_pattern="",
+                frequency=1.0,
+                secrets=secrets,
+            )
+
+    def test_strategy_config(self, builder: LiveTradingSystemBuilder) -> None:
+        """Test strategy configuration."""
+        result = builder.strategy_config(buy_threshold=0.25, min_history=50)
+        assert result is builder  # Fluent interface
+        assert builder._buy_threshold == 0.25
+        assert builder._min_history == 50
+
+    def test_strategy_config_invalid_buy_threshold(self, builder: LiveTradingSystemBuilder) -> None:
+        """Test strategy config raises ValueError for invalid buy_threshold."""
+        with pytest.raises(ValueError, match="buy_threshold must be between 0 and 1"):
+            builder.strategy_config(buy_threshold=1.5)
+
+        with pytest.raises(ValueError, match="buy_threshold must be between 0 and 1"):
+            builder.strategy_config(buy_threshold=-0.1)
+
+    def test_strategy_config_invalid_min_history(self, builder: LiveTradingSystemBuilder) -> None:
+        """Test strategy config raises ValueError for invalid min_history."""
+        with pytest.raises(ValueError, match="min_history must be >= 0"):
+            builder.strategy_config(min_history=-1)
+
+    def test_execution_config(self, builder: LiveTradingSystemBuilder) -> None:
+        """Test execution configuration."""
+        result = builder.execution_config(size=10.0, sync_interval=120.0)
+        assert result is builder  # Fluent interface
+        assert builder._size == 10.0
+        assert builder._sync_interval == 120.0
+
+    def test_execution_config_invalid_size(self, builder: LiveTradingSystemBuilder) -> None:
+        """Test execution config raises ValueError for invalid size."""
+        with pytest.raises(ValueError, match="size must be > 0"):
+            builder.execution_config(size=0.0)
+
+        with pytest.raises(ValueError, match="size must be > 0"):
+            builder.execution_config(size=-1.0)
+
+    def test_execution_config_invalid_sync_interval(
+        self, builder: LiveTradingSystemBuilder
+    ) -> None:
+        """Test execution config raises ValueError for invalid sync_interval."""
+        with pytest.raises(ValueError, match="sync_interval must be >= 0"):
+            builder.execution_config(sync_interval=-1.0)
+
+    def test_build_system_supervisor(self, builder: LiveTradingSystemBuilder) -> None:
+        """Test building SystemSupervisor."""
+        supervisor = builder.build_system_supervisor()
+        assert isinstance(supervisor, SystemSupervisor)
+        assert supervisor.bus is builder._bus
+        assert supervisor.store is builder._store
+
+    def test_build_market_supervisor(self, builder: LiveTradingSystemBuilder) -> None:
+        """Test building MarketSupervisor."""
+        supervisor = builder.build_market_supervisor()
+        assert isinstance(supervisor, MarketSupervisor)
+        assert supervisor.pattern == "btc-updown-15m"
+        assert supervisor.bus is builder._bus
+        assert supervisor.store is builder._store
+
+    def test_build_market_supervisor_with_position_manager(
+        self, builder: LiveTradingSystemBuilder
+    ) -> None:
+        """Test building MarketSupervisor with position manager."""
+        # Create a fake position manager for testing
+        from polytrader.position_manager import IPositionManager
+
+        class FakePositionManager(IPositionManager):
+            async def run(self) -> None:
+                pass
+
+            def stop(self) -> None:
+                pass
+
+            def get_positions(self) -> dict | None:
+                return None
+
+            def get_position(self, market_slug: str, outcome: str) -> None:
+                return None
+
+        position_manager = FakePositionManager()
+
+        supervisor = builder.build_market_supervisor(position_manager=position_manager)
+        assert isinstance(supervisor, MarketSupervisor)
+        assert supervisor.position_manager is position_manager
+
+    def test_build_complete_system(self, builder: LiveTradingSystemBuilder) -> None:
+        """Test building complete system (both supervisors)."""
+        system_supervisor, market_supervisor = builder.build_complete_system()
+        assert isinstance(system_supervisor, SystemSupervisor)
+        assert isinstance(market_supervisor, MarketSupervisor)
+
+    def test_fluent_interface(self, builder: LiveTradingSystemBuilder) -> None:
+        """Test fluent interface for configuration."""
+        result = builder.strategy_config(buy_threshold=0.25, min_history=50).execution_config(
+            size=10.0, sync_interval=120.0
+        )
+        assert result is builder
+        assert builder._buy_threshold == 0.25
+        assert builder._min_history == 50
+        assert builder._size == 10.0
+        assert builder._sync_interval == 120.0
+
+    def test_clob_client_factory_creation(self, builder: LiveTradingSystemBuilder) -> None:
+        """Test that CLOB client factory is created and reused."""
+        factory1 = builder._get_clob_client_factory()
+        factory2 = builder._get_clob_client_factory()
+        assert factory1 is factory2
+
+    @pytest.mark.asyncio
+    async def test_build_system_supervisor_creates_clob_factory(
+        self, builder: LiveTradingSystemBuilder
+    ) -> None:
+        """Test that building system supervisor creates CLOB client factory."""
+        builder.build_system_supervisor()
+        assert builder._clob_client_factory is not None
+
+    @pytest.mark.asyncio
+    async def test_build_system_supervisor_uses_position_manager(
+        self, builder: LiveTradingSystemBuilder
+    ) -> None:
+        """Test that system supervisor uses PositionManager (not PaperPositionManager)."""
+        supervisor = builder.build_system_supervisor()
+        await supervisor.start()
+
+        # Get the position manager
+        position_manager = supervisor.position_manager
+
+        assert position_manager is not None
+        # Should be real PositionManager, not PaperPositionManager
+        assert not isinstance(position_manager, PaperPositionManager)
+
+        await supervisor.stop()
+
+    def test_builder_configuration_preserved_across_builds(
+        self, builder: LiveTradingSystemBuilder
+    ) -> None:
+        """Test that builder configuration is preserved across multiple builds."""
+        builder.strategy_config(buy_threshold=0.25, min_history=50)
+        builder.execution_config(size=10.0, sync_interval=120.0)
 
         supervisor1 = builder.build_system_supervisor()
         supervisor2 = builder.build_system_supervisor()
