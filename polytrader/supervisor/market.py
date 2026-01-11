@@ -304,7 +304,8 @@ class MarketSupervisor:
                 new_market=new_market,
                 event_id=event.event_id,
             ).info(
-                "📢 Publishing MarketChangeEvent: {old_market} → {new_market} (event_id={event_id})",
+                "📢 Publishing MarketChangeEvent: {old_market} → {new_market} "
+                "(event_id={event_id})",
                 old_market=old_market or "None",
                 new_market=new_market,
                 event_id=event.event_id,

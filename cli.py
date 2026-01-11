@@ -10,7 +10,6 @@ from polytrader.tasks import (
     auto_buy_task,
     buy_task,
     paper_trading_task,
-    predict_task,
     watch_task,
 )
 
@@ -73,41 +72,6 @@ def order_buy(
         amount=amount,
         order_id=order_id,
         status=status,
-    )
-
-
-@model_app.command("predict")
-def model_predict(
-    market: str = typer.Option(
-        ..., "--market", "-m", help="Market pattern (e.g., 'btc-updown-15m') or market slug"
-    ),
-    frequency: float = typer.Option(1.0, "--frequency", "-f", help="Polling frequency in Hz"),
-    buy_threshold: float = typer.Option(0.30, "--buy-threshold", help="Buy threshold price"),
-    sell_threshold: float = typer.Option(0.50, "--sell-threshold", help="Sell threshold price"),
-    size: float = typer.Option(1.0, "--size", "-s", help="Trade size in USD"),
-    min_history: int = typer.Option(30, "--min-history", help="Minimum history ticks required"),
-    log_file: str | None = typer.Option(None, "--log-file", help="Optional file path to save logs"),
-) -> None:
-    """Run trading model predictions (no order execution)."""
-    _setup_logging(log_file)
-
-    logger.info("Predicting trades for market pattern: {market}", market=market)
-    logger.info("Outcomes: UP, DOWN (both)")
-    logger.info("Frequency: {frequency} Hz", frequency=frequency)
-    logger.info("Buy threshold: {threshold}", threshold=buy_threshold)
-    logger.info("Sell threshold: {threshold}", threshold=sell_threshold)
-    logger.info("Size: ${size}", size=size)
-    logger.info("Min history: {min_history} ticks", min_history=min_history)
-    logger.info("Press Ctrl+C to stop")
-    asyncio.run(
-        predict_task(
-            market,
-            frequency,
-            buy_threshold,
-            sell_threshold,
-            size,
-            min_history,
-        )
     )
 
 
