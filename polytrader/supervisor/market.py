@@ -218,8 +218,14 @@ class MarketSupervisor:
         old_market = self.current_market
 
         if old_market == new_market:
-            logger.bind(supervisor=SUPERVISOR_TYPE, market=new_market).debug(
-                "Already on market, skipping transition"
+            logger.bind(
+                supervisor=SUPERVISOR_TYPE,
+                market=new_market,
+                old_market=old_market,
+            ).debug(
+                "⏭️  Skipping transition: already on market {market} (old={old})",
+                market=new_market,
+                old=old_market,
             )
             return
 
@@ -287,10 +293,21 @@ class MarketSupervisor:
             # Record transition metric
             record_market_transition(SUPERVISOR_TYPE, old_market, new_market)
 
-            # Publish market change event
+            # Publish market change event (only once per actual transition)
             event = MarketChangeEvent(
                 old_market=old_market,
                 new_market=new_market,
+            )
+            logger.bind(
+                supervisor=SUPERVISOR_TYPE,
+                old_market=old_market,
+                new_market=new_market,
+                event_id=event.event_id,
+            ).info(
+                "📢 Publishing MarketChangeEvent: {old_market} → {new_market} (event_id={event_id})",
+                old_market=old_market or "None",
+                new_market=new_market,
+                event_id=event.event_id,
             )
             await self.bus.publish(MARKET_CHANGE, event)
 
@@ -500,11 +517,20 @@ class MarketSupervisor:
                         old_market=self.current_market,
                         new_market=current,
                     ).info(
-                        "Market change detected: {old_market} → {new_market}",
+                        "🔀 Market change detected: {old_market} → {new_market}",
                         old_market=self.current_market or "None",
                         new_market=current,
                     )
                     await self._transition_to_market(current)
+                elif current == self.current_market:
+                    # Same market, no change (log at debug level to reduce noise)
+                    logger.bind(
+                        supervisor=SUPERVISOR_TYPE,
+                        market=current,
+                    ).debug(
+                        "Market unchanged: {market} (no transition needed)",
+                        market=current,
+                    )
                 elif not current:
                     # No active market (gap between markets)
                     logger.bind(

@@ -15,8 +15,8 @@ This implementation is event-driven only, no external API sync.
 import asyncio
 from typing import TYPE_CHECKING
 
-from polytrader.events import FILLS, MARKET_DATA, EventBus
-from polytrader.events.types import FillEvent, MarketDataEvent
+from polytrader.events import FILLS, MARKET_CHANGE, MARKET_DATA, EventBus
+from polytrader.events.types import FillEvent, MarketChangeEvent, MarketDataEvent
 from polytrader.logging_config import logger
 from polytrader.oms.store import IOrderStore
 from polytrader.position_manager import IPositionManager
@@ -81,14 +81,16 @@ class PaperPositionManager(IPositionManager):
     async def run(self) -> None:
         """Start the position manager.
 
-        Subscribes to FILLS and MARKET_DATA topics to track positions and prices.
+        Subscribes to FILLS, MARKET_DATA, and MARKET_CHANGE topics to track positions,
+        prices, and handle market expiration.
         """
         self._running = True
         logger.info("Starting PaperPositionManager")
 
-        # Subscribe to FILLS and MARKET_DATA topics
+        # Subscribe to FILLS, MARKET_DATA, and MARKET_CHANGE topics
         fills_queue = self._bus.subscribe(FILLS)
         market_data_queue = self._bus.subscribe(MARKET_DATA)
+        market_change_queue = self._bus.subscribe(MARKET_CHANGE)
 
         async def process_fills() -> None:
             """Process fill events."""
@@ -114,11 +116,24 @@ class PaperPositionManager(IPositionManager):
             except Exception:
                 logger.exception("Error in market data processor")
 
+        async def process_market_changes() -> None:
+            """Process market change events (market expiration/transition)."""
+            try:
+                while self._running:
+                    change_event = await market_change_queue.get()
+                    if isinstance(change_event, MarketChangeEvent):
+                        await self._handle_market_change(change_event)
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                logger.exception("Error in market change processor")
+
         try:
-            # Run both processors concurrently (like ExecutionRouter)
+            # Run all processors concurrently (like ExecutionRouter)
             await asyncio.gather(
                 process_fills(),
                 process_market_data(),
+                process_market_changes(),
             )
 
         except Exception:
@@ -475,3 +490,167 @@ class PaperPositionManager(IPositionManager):
             unrealized_pnl += position_pnl
 
         return unrealized_pnl
+
+    async def _handle_market_change(self, event: MarketChangeEvent) -> None:
+        """Handle market change event by closing positions in expired market.
+
+        When a market transitions (old_market → new_market), close all positions
+        in the old market using settlement prices.
+
+        Args:
+            event: MarketChangeEvent with old_market and new_market
+        """
+        if not event.old_market:
+            # Initial market, no positions to close
+            return
+
+        # Find all positions for the old market
+        positions_to_close: list[tuple[tuple[str, Outcome], Position]] = []
+        for key, position in self._positions.items():
+            market_slug, _ = key
+            if market_slug == event.old_market:
+                positions_to_close.append((key, position))
+
+        if not positions_to_close:
+            logger.bind(old_market=event.old_market).debug(
+                "No positions to close for expired market: {old_market}",
+                old_market=event.old_market,
+            )
+            return
+
+        logger.bind(
+            old_market=event.old_market,
+            position_count=len(positions_to_close),
+        ).info(
+            "Closing {count} position(s) for expired market: {old_market}",
+            count=len(positions_to_close),
+            old_market=event.old_market,
+        )
+
+        # Close each position
+        import time
+
+        exit_time = time.monotonic()
+
+        for (market_slug, outcome), position in positions_to_close:
+            # Determine settlement price
+            exit_price = self._determine_settlement_price(market_slug, outcome)
+
+            # Record closed position
+            closed_position = self._outcome_tracker.record_closed_position(
+                market_slug=market_slug,
+                outcome=outcome,
+                entry_price=position.entry_price,
+                exit_price=exit_price,
+                size=position.size,
+                entry_time=position.entry_time,
+                exit_time=exit_time,
+            )
+
+            logger.bind(
+                market_slug=market_slug,
+                outcome=outcome,
+                entry_price=position.entry_price,
+                exit_price=exit_price,
+                pnl=closed_position.pnl,
+                result=closed_position.result,
+            ).info(
+                "✅ Position closed: {market_slug}/{outcome} | "
+                "entry={entry_price:.4f} exit={exit_price:.4f} | "
+                "P&L=${pnl:.2f} ({result})",
+                market_slug=market_slug,
+                outcome=outcome,
+                entry_price=position.entry_price,
+                exit_price=exit_price,
+                pnl=closed_position.pnl,
+                result=closed_position.result,
+            )
+
+            # Remove from open positions
+            del self._positions[(market_slug, outcome)]
+            if (market_slug, outcome) in self._position_fills:
+                del self._position_fills[(market_slug, outcome)]
+            if (market_slug, outcome) in self._latest_prices:
+                del self._latest_prices[(market_slug, outcome)]
+
+        # Update performance metrics after closing positions
+        self._performance_metrics.update_metrics()
+
+    def _determine_settlement_price(self, market_slug: str, outcome: Outcome) -> float:
+        """Determine settlement price for an expired market.
+
+        For binary markets (UP/DOWN), settlement prices are:
+        - Winning outcome: 1.0
+        - Losing outcome: 0.0
+
+        Strategy:
+        1. Try to use last known market price (if available)
+        2. For binary markets, use price-based heuristic:
+           - If last UP price > last DOWN price: UP wins (1.0), DOWN loses (0.0)
+           - If last DOWN price > last UP price: DOWN wins (1.0), UP loses (0.0)
+           - If prices are equal or unavailable: use last known price as settlement
+
+        Args:
+            market_slug: Market identifier
+            outcome: Market outcome (UP or DOWN)
+
+        Returns:
+            Settlement price (0.0 to 1.0)
+        """
+        # Get both outcomes' last prices if available
+        up_key: tuple[str, Outcome] = (market_slug, "UP")
+        down_key: tuple[str, Outcome] = (market_slug, "DOWN")
+
+        up_price = self._latest_prices.get(up_key)
+        down_price = self._latest_prices.get(down_key)
+
+        # If we have prices for both outcomes, determine winner
+        if up_price is not None and down_price is not None:
+            if outcome == "UP":
+                # UP wins if its price was higher than DOWN's price
+                # (higher price = market thinks it's more likely to win)
+                if up_price > down_price:
+                    return 1.0  # UP wins
+                else:
+                    return 0.0  # UP loses
+            else:  # DOWN
+                # DOWN wins if its price was higher than UP's price
+                if down_price > up_price:
+                    return 1.0  # DOWN wins
+                else:
+                    return 0.0  # DOWN loses
+
+        # If we only have price for the outcome in question, use threshold heuristic
+        key = (market_slug, outcome)
+        if key in self._latest_prices:
+            last_price = self._latest_prices[key]
+            # If price > 0.5, outcome likely wins (settles at 1.0)
+            # If price < 0.5, outcome likely loses (settles at 0.0)
+            if last_price > 0.5:
+                return 1.0
+            elif last_price < 0.5:
+                return 0.0
+            else:
+                # Price exactly 0.5 - use as settlement (breakeven)
+                return 0.5
+
+        # Fallback: if no market data, use entry price (breakeven)
+        # This is conservative and avoids assuming wins/losses
+        position = self._positions.get(key)
+        if position:
+            logger.bind(market_slug=market_slug, outcome=outcome).warning(
+                "No market data for settlement, using entry price (breakeven) for "
+                "{market_slug}/{outcome}",
+                market_slug=market_slug,
+                outcome=outcome,
+            )
+            return position.entry_price
+
+        # Last resort: assume 0.5 (breakeven)
+        logger.bind(market_slug=market_slug, outcome=outcome).warning(
+            "No position or market data for settlement, using 0.5 (breakeven) for "
+            "{market_slug}/{outcome}",
+            market_slug=market_slug,
+            outcome=outcome,
+        )
+        return 0.5
