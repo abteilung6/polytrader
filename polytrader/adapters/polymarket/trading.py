@@ -18,9 +18,9 @@ from py_clob_client.clob_types import (  # type: ignore[import-untyped]
 from polytrader.adapters.polymarket.market_data import GammaClient
 from polytrader.adapters.polymarket.models import VenueError, VenueResponse
 from polytrader.clob import IClobClient
+from polytrader.events.types import OrderIntentEvent
 from polytrader.execution.adapter import IVenueAdapter
 from polytrader.logging_config import logger
-from polytrader.types import OrderIntentEvent
 
 
 class ClobVenueAdapter(IVenueAdapter):

@@ -1,10 +1,9 @@
 """Tests for target to order intent conversion."""
 
 from polytrader.common.ids import generate_correlation_id
-from polytrader.events.types import EventSource, SignalEvent
+from polytrader.events.types import EventSource, MarketDataEvent, SignalEvent
 from polytrader.portfolio.intents import convert_target_to_intent
 from polytrader.portfolio.models import Target
-from polytrader.types import MarketDataEvent
 
 
 class TestConvertTargetToIntent:

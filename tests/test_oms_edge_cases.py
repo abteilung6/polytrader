@@ -25,13 +25,13 @@ from polytrader.events.types import (
     FillEvent,
     OrderAckEvent,
     OrderCreatedEvent,
+    OrderIntentEvent,
     OrderSubmittedEvent,
 )
 from polytrader.oms.core import OMSCore
 from polytrader.oms.idempotency import IdempotencyStore
 from polytrader.oms.models import OrderState
 from polytrader.oms.store import InMemoryOrderStore
-from polytrader.types import OrderIntentEvent
 
 
 @pytest.fixture

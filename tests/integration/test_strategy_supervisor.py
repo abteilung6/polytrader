@@ -5,15 +5,11 @@ import asyncio
 import pytest
 
 from polytrader.events import MARKET_DATA, SIGNALS, EventBus, MemoryEventStore
-from polytrader.events.types import SignalEvent
+from polytrader.events.types import MarketDataEvent, SignalEvent
 from polytrader.store import MemoryMarketDataStore
 from polytrader.strategies import IStrategy
 from polytrader.supervisor import MarketSupervisor
-from polytrader.types import MarketDataEvent, Outcome, Position
-
-# Rebuild SignalEvent model to resolve forward references
-# This is needed because SignalEvent uses Outcome which is a forward reference
-SignalEvent.model_rebuild()
+from polytrader.types import Outcome, Position
 
 
 class SignalGeneratingStrategy(IStrategy):

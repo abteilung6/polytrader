@@ -2,11 +2,7 @@
 
 from polytrader.events import EventBus, MemoryEventStore
 from polytrader.events.topics import MARKET_DATA, ORDERS, PROPOSALS
-from polytrader.types import (
-    MarketDataEvent,
-    OrderExecutedEvent,
-    OrderIntentEvent,
-)
+from polytrader.events.types import MarketDataEvent, OrderExecutedEvent, OrderIntentEvent
 
 
 class TestEventBusStoreIntegration:

@@ -5,6 +5,7 @@ Per Commit 2: Test fill price calculation for all models.
 
 import random
 
+from polytrader.events.types import MarketDataEvent, OrderIntentEvent
 from polytrader.execution.fill_models import (
     FillModel,
     calculate_fill_price,
@@ -12,7 +13,6 @@ from polytrader.execution.fill_models import (
     should_reject,
 )
 from polytrader.store import MemoryMarketDataStore
-from polytrader.types import MarketDataEvent, OrderIntentEvent
 
 
 class TestFillPriceCalculation:

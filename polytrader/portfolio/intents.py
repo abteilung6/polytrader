@@ -1,8 +1,7 @@
 """Convert targets to order intents per flows.mdc §5."""
 
-from polytrader.events.types import SignalEvent
+from polytrader.events.types import MarketDataEvent, OrderIntentEvent, SignalEvent
 from polytrader.portfolio.models import Target
-from polytrader.types import MarketDataEvent, OrderIntentEvent
 
 
 def convert_target_to_intent(

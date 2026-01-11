@@ -12,8 +12,9 @@ from polytrader.adapters import IMarketDataAdapter
 from polytrader.adapters.polymarket.market_data import GammaClient
 from polytrader.adapters.prices import unmarshall_token_prices
 from polytrader.config import CHAIN_ID, CLOB_API_URL, PolymarketSecrets
+from polytrader.events.types import MarketDataEvent
 from polytrader.logging_config import logger
-from polytrader.types import MarketDataEvent, Outcome
+from polytrader.types import Outcome
 
 
 @dataclass

@@ -7,9 +7,9 @@ Per flows.mdc §8: Execution applies deterministic tactics:
 - Throttling
 """
 
+from polytrader.events.types import OrderIntentEvent
 from polytrader.execution.pricing import apply_limit_pricing
 from polytrader.execution.throttle import ExecutionThrottle
-from polytrader.types import OrderIntentEvent
 
 
 class ExecutionTactics:

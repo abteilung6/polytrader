@@ -23,6 +23,7 @@ from polytrader.events.types import (
     OrderAckEvent,
     OrderCanceledEvent,
     OrderCreatedEvent,
+    OrderIntentEvent,
     OrderRejectedEvent,
 )
 from polytrader.oms.commands import CancelOrderCommand, SubmitOrderCommand
@@ -30,7 +31,6 @@ from polytrader.oms.core import OMSCore
 from polytrader.oms.idempotency import IdempotencyStore
 from polytrader.oms.models import OrderState
 from polytrader.oms.store import InMemoryOrderStore
-from polytrader.types import OrderIntentEvent
 
 
 @pytest.fixture

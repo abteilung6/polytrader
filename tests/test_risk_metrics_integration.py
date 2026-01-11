@@ -6,10 +6,10 @@ Per testing.mdc §1.B: Integration tests for risk metrics.
 import pytest
 
 from polytrader.events import EventBus
+from polytrader.events.types import MarketDataEvent, OrderIntentEvent
 from polytrader.obs.metrics import MemoryMetricsCollector, set_metrics_collector
 from polytrader.risk.engine import RiskChecker, RiskEngine
 from polytrader.risk.models import RiskContext, RiskLimits, RiskReasonCode
-from polytrader.types import MarketDataEvent, OrderIntentEvent
 
 
 class TestRiskCheckerMetrics:

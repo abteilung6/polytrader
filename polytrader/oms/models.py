@@ -13,7 +13,8 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
-from polytrader.types import OrderIntentEvent, Outcome, Side
+from polytrader.events.types import OrderIntentEvent
+from polytrader.types import Outcome, Side
 
 if TYPE_CHECKING:
     pass  # Forward references handled by string annotations

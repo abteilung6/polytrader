@@ -28,28 +28,28 @@ _targets_topic: Topic | None = None
 
 def _create_market_data_topic() -> Topic:
     """Create the MARKET_DATA topic."""
-    from polytrader.types import MarketDataEvent
+    from polytrader.events.types import MarketDataEvent
 
     return Topic[MarketDataEvent]("market_data")
 
 
 def _create_proposals_topic() -> Topic:
     """Create the PROPOSALS topic."""
-    from polytrader.types import OrderIntentEvent
+    from polytrader.events.types import OrderIntentEvent
 
     return Topic[OrderIntentEvent]("proposals")
 
 
 def _create_orders_topic() -> Topic:
     """Create the ORDERS topic."""
-    from polytrader.types import OrderExecutedEvent
+    from polytrader.events.types import OrderExecutedEvent
 
     return Topic[OrderExecutedEvent]("orders")
 
 
 def _create_market_change_topic() -> Topic:
     """Create the MARKET_CHANGE topic."""
-    from polytrader.types import MarketChangeEvent
+    from polytrader.events.types import MarketChangeEvent
 
     return Topic[MarketChangeEvent]("market_change")
 
@@ -143,7 +143,7 @@ def get_risk_checks_topic() -> Topic:
 
 def _create_approved_proposals_topic() -> Topic:
     """Create the APPROVED_PROPOSALS topic."""
-    from polytrader.types import OrderIntentEvent
+    from polytrader.events.types import OrderIntentEvent
 
     return Topic[OrderIntentEvent]("approved_proposals")
 

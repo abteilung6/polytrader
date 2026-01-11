@@ -3,7 +3,7 @@ import asyncio
 import pytest
 
 from polytrader.events import MARKET_DATA, EventBus, Topic
-from polytrader.types import MarketDataEvent
+from polytrader.events.types import MarketDataEvent
 
 
 def test_subscribe_creates_queue() -> None:

@@ -9,7 +9,7 @@ Both ClobVenueAdapter and PaperExecutionAdapter (future) implement this protocol
 from typing import Protocol
 
 from polytrader.adapters.polymarket.models import VenueResponse
-from polytrader.types import OrderIntentEvent
+from polytrader.events.types import OrderIntentEvent
 
 
 class IVenueAdapter(Protocol):

@@ -1,7 +1,8 @@
 from collections import deque
 from typing import Protocol
 
-from polytrader.types import MarketDataEvent, Outcome
+from polytrader.events.types import MarketDataEvent
+from polytrader.types import Outcome
 
 
 class IMarketDataStore(Protocol):

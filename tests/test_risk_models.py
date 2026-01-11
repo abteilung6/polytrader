@@ -188,7 +188,7 @@ class TestRiskContext:
 
     def test_create_context_with_intent(self) -> None:
         """Test creating a risk context with order intent."""
-        from polytrader.types import OrderIntentEvent
+        from polytrader.events.types import OrderIntentEvent
 
         intent = OrderIntentEvent(
             market_slug="test-market",
@@ -217,7 +217,7 @@ class TestRiskContext:
 
     def test_create_context_with_positions(self) -> None:
         """Test creating a risk context with current positions."""
-        from polytrader.types import OrderIntentEvent
+        from polytrader.events.types import OrderIntentEvent
 
         intent = OrderIntentEvent(
             market_slug="test-market",
@@ -245,7 +245,7 @@ class TestRiskContext:
 
     def test_create_context_with_market_data(self) -> None:
         """Test creating a risk context with market data."""
-        from polytrader.types import MarketDataEvent, OrderIntentEvent
+        from polytrader.events.types import MarketDataEvent, OrderIntentEvent
 
         intent = OrderIntentEvent(
             market_slug="test-market",
@@ -271,7 +271,7 @@ class TestRiskContext:
 
     def test_create_context_with_owned_tokens(self) -> None:
         """Test creating a risk context with owned tokens."""
-        from polytrader.types import OrderIntentEvent
+        from polytrader.events.types import OrderIntentEvent
 
         intent = OrderIntentEvent(
             market_slug="test-market",
@@ -291,7 +291,7 @@ class TestRiskContext:
 
     def test_create_context_with_system_health(self) -> None:
         """Test creating a risk context with system health flags."""
-        from polytrader.types import OrderIntentEvent
+        from polytrader.events.types import OrderIntentEvent
 
         intent = OrderIntentEvent(
             market_slug="test-market",
@@ -316,7 +316,7 @@ class TestRiskContext:
 
     def test_create_context_with_rate_limits(self) -> None:
         """Test creating a risk context with rate limit state."""
-        from polytrader.types import OrderIntentEvent
+        from polytrader.events.types import OrderIntentEvent
 
         intent = OrderIntentEvent(
             market_slug="test-market",
@@ -339,7 +339,7 @@ class TestRiskContext:
 
     def test_context_validation_global_position_non_negative(self) -> None:
         """Test that global_position must be non-negative."""
-        from polytrader.types import OrderIntentEvent
+        from polytrader.events.types import OrderIntentEvent
 
         intent = OrderIntentEvent(
             market_slug="test-market",
@@ -364,7 +364,7 @@ class TestRiskContext:
 
     def test_context_validation_rate_limits_non_negative(self) -> None:
         """Test that rate limit counts must be non-negative."""
-        from polytrader.types import OrderIntentEvent
+        from polytrader.events.types import OrderIntentEvent
 
         intent = OrderIntentEvent(
             market_slug="test-market",

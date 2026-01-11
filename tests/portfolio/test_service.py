@@ -6,14 +6,11 @@ import pytest
 
 from polytrader.common.ids import generate_correlation_id
 from polytrader.events import PROPOSALS, SIGNALS, TARGETS, EventBus
-from polytrader.events.types import SignalEvent, TargetEvent, rebuild_event_models
+from polytrader.events.types import MarketDataEvent, OrderIntentEvent, SignalEvent, TargetEvent
 from polytrader.portfolio.service import PortfolioService
 from polytrader.position_manager import IPositionManager
 from polytrader.store import MemoryMarketDataStore
-from polytrader.types import MarketDataEvent, OrderIntentEvent, Outcome, Position  # noqa: F401
-
-# Rebuild event models to resolve forward references
-rebuild_event_models()
+from polytrader.types import Outcome, Position
 
 
 class FakePositionManager(IPositionManager):

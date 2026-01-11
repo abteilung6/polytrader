@@ -8,14 +8,9 @@ from polytrader.adapters.polymarket.market_data import GammaClient
 from polytrader.adapters.polymarket.trading import ClobVenueAdapter
 from polytrader.clob import ExternalOrder, IClobClientFactory
 from polytrader.events import MARKET_DATA, ORDERS, PROPOSALS, EventBus
+from polytrader.events.types import MarketDataEvent, OrderExecutedEvent, OrderIntentEvent
 from polytrader.logging_config import logger
-from polytrader.types import (
-    MarketDataEvent,
-    OrderExecutedEvent,
-    OrderIntentEvent,
-    Outcome,
-    Position,
-)
+from polytrader.types import Outcome, Position
 
 
 class IPositionManager(Protocol):

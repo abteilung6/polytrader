@@ -12,12 +12,12 @@ from polytrader.events import (
     SystemStartedEvent,
     SystemStoppedEvent,
 )
+from polytrader.events.types import MarketChangeEvent, OrderIntentEvent
 from polytrader.logging_config import logger
 from polytrader.market_discovery import MarketDiscoveryService
 from polytrader.observer import create_observer_factory
 from polytrader.store import MemoryMarketDataStore
 from polytrader.supervisor import MarketSupervisor, SystemSupervisor
-from polytrader.types import MarketChangeEvent, OrderIntentEvent
 
 
 def default_proposal_handler(proposal: OrderIntentEvent) -> None:

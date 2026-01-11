@@ -4,7 +4,7 @@ import asyncio
 import time
 
 from polytrader.events import PROPOSALS, SIGNALS, TARGETS, EventBus
-from polytrader.events.types import SignalEvent, TargetEvent
+from polytrader.events.types import MarketDataEvent, SignalEvent, TargetEvent
 from polytrader.logging_config import logger
 from polytrader.obs.metrics import IMetricsCollector, MemoryMetricsCollector
 from polytrader.portfolio.intents import convert_target_to_intent
@@ -12,7 +12,7 @@ from polytrader.portfolio.sizing import calculate_size
 from polytrader.portfolio.targets import convert_signal_to_target
 from polytrader.position_manager import IPositionManager
 from polytrader.store import IMarketDataStore
-from polytrader.types import MarketDataEvent, Outcome, Position
+from polytrader.types import Outcome, Position
 
 
 class PortfolioService:

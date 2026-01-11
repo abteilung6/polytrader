@@ -3,9 +3,9 @@ from collections.abc import AsyncIterator
 
 from polytrader.adapters import IMarketDataAdapter
 from polytrader.events import MARKET_DATA, EventBus
+from polytrader.events.types import MarketDataEvent
 from polytrader.observer import Observer
 from polytrader.store import MemoryMarketDataStore
-from polytrader.types import MarketDataEvent
 
 
 class FakeMarketDataAdapter(IMarketDataAdapter):

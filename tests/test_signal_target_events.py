@@ -8,15 +8,11 @@ from polytrader.events.types import (
     EventSource,
     SignalEvent,
     TargetEvent,
-    rebuild_event_models,
 )
-from polytrader.types import OrderIntentEvent, Outcome  # noqa: F401
+from polytrader.types import Outcome  # noqa: F401
 
-# Rebuild event models to resolve forward references
+
 # This must be done after importing both events/types and types modules
-rebuild_event_models()
-
-
 class TestSignalEvent:
     """Tests for SignalEvent per flows.mdc §4 and observability.mdc §1."""
 

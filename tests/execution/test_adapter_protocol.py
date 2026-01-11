@@ -4,7 +4,7 @@ Per Commit 1: Verify that adapters implement IVenueAdapter protocol correctly.
 """
 
 from polytrader.adapters.polymarket.models import VenueResponse
-from polytrader.types import OrderIntentEvent
+from polytrader.events.types import OrderIntentEvent
 
 
 class TestIVenueAdapterProtocol:

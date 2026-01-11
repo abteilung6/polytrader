@@ -4,10 +4,7 @@ from polytrader.portfolio.models import Target
 from polytrader.types import Position
 
 
-def calculate_size(
-    target: Target,
-    current_position: Position | None = None,
-) -> float:
+def calculate_size(target: Target, current_position: Position | None = None) -> float:
     """Calculate required order size from target.
 
     Portfolio-aware sizing: Accounts for existing positions.

@@ -9,10 +9,10 @@ import asyncio
 from unittest.mock import MagicMock, patch
 
 from polytrader.events import PROPOSALS, EventBus, MemoryEventStore
+from polytrader.events.types import MarketDataEvent, OrderIntentEvent
 from polytrader.risk import RiskChecker, RiskEngine, get_default_limits
 from polytrader.risk.models import RiskContext, RiskLimits
 from polytrader.store import MemoryMarketDataStore
-from polytrader.types import MarketDataEvent, OrderIntentEvent
 
 
 class TestRiskStructuredLogging:

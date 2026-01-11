@@ -13,6 +13,7 @@ from polytrader.events import (
     SystemStartedEvent,
     SystemStoppedEvent,
 )
+from polytrader.events.types import MarketChangeEvent, OrderExecutedEvent
 from polytrader.execution import create_execution_router_factory
 from polytrader.logging_config import logger
 from polytrader.market_discovery import MarketDiscoveryService
@@ -23,7 +24,6 @@ from polytrader.position_manager import create_position_manager_factory
 from polytrader.risk import RiskChecker, RiskEngine, get_default_limits
 from polytrader.store import MemoryMarketDataStore
 from polytrader.supervisor import MarketSupervisor, SystemSupervisor
-from polytrader.types import MarketChangeEvent, OrderExecutedEvent
 
 
 def default_order_handler(order: OrderExecutedEvent) -> None:

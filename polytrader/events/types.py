@@ -12,9 +12,11 @@ from pydantic import BaseModel, Field
 
 from polytrader.common.ids import generate_correlation_id, get_run_id
 
+# Import domain types (no circular dependency - types.py doesn't import from events)
+from polytrader.types import Outcome, Side
+
 if TYPE_CHECKING:
     from polytrader.risk.models import RiskReasonCode, RiskResult
-    from polytrader.types import OrderIntentEvent, Outcome
 
 
 class EventSource(str, Enum):
@@ -218,7 +220,7 @@ class SignalEvent(Event):
     source: EventSource = Field(default=EventSource.STRATEGY)
 
     market_slug: str = Field(description="Polymarket market identifier")
-    outcome: "Outcome" = Field(description="Market outcome: UP or DOWN")  # noqa: UP037
+    outcome: Outcome = Field(description="Market outcome: UP or DOWN")
 
     # Probabilistic scores (per flows.mdc §4)
     p_up: float = Field(ge=0.0, le=1.0, description="Probability that UP outcome wins (0-1)")
@@ -273,7 +275,7 @@ class TargetEvent(Event):
     source: EventSource = Field(default=EventSource.PORTFOLIO)
 
     market_slug: str = Field(description="Polymarket market identifier")
-    outcome: "Outcome" = Field(description="Market outcome: UP or DOWN")  # noqa: UP037
+    outcome: Outcome = Field(description="Market outcome: UP or DOWN")
 
     # Target exposure (per flows.mdc §5)
     target_exposure: float = Field(
@@ -349,7 +351,7 @@ class OrderCreatedEvent(Event):
 
     order_id: str = Field(description="Internal UUID for the order")
     client_order_id: str = Field(description="Idempotency key (deterministic from intent)")
-    intent: "OrderIntentEvent" = Field(description="Original approved order intent")  # noqa: UP037
+    intent: OrderIntentEvent = Field(description="Original approved order intent")
 
 
 class OrderSubmittedEvent(Event):
@@ -544,32 +546,157 @@ class MarketDiscoveryEvent(Event):
     )
 
 
-# Rebuild models to resolve forward references
-# This is needed because OrderCreatedEvent uses OrderIntentEvent
-# and SignalEvent/TargetEvent use Outcome
-# which are defined in polytrader.types
-def rebuild_event_models() -> None:
-    """Rebuild Pydantic models to resolve forward references.
+# Market Data Event (moved from types.py to break circular dependency)
+class MarketDataEvent(Event):
+    """Market data event from the Market Data Plant (MDP).
 
-    This function should be called after polytrader.types is fully loaded.
-    It's safe to call multiple times.
+    Represents a snapshot of the order book for a specific market outcome.
+    This is the canonical representation of market data in the system.
+
+    Attributes:
+        market_slug: Polymarket market identifier (e.g., "btc-updown-15m-1767900600")
+        outcome: Market outcome ("UP" or "DOWN")
+        best_bid: Best bid price (highest price buyers are willing to pay)
+        best_ask: Best ask price (lowest price sellers are willing to accept)
+
+    Note:
+        - Timestamps come from Event base class (ts_wall, ts_mono)
+        - Source is automatically set to EventSource.MDP
+        - All Event base class fields are inherited (event_id, correlation_id, run_id, etc.)
     """
-    try:
-        # Import here to avoid circular import at module level
-        from polytrader.risk.models import RiskResult  # noqa: F401
-        from polytrader.types import OrderIntentEvent, Outcome  # noqa: F401
 
-        # Rebuild models that use forward references
-        SignalEvent.model_rebuild()
-        TargetEvent.model_rebuild()
-        RiskCheckEvent.model_rebuild()
-        OrderCreatedEvent.model_rebuild()
-    except (ImportError, AttributeError):
-        # Types module not available yet or models not fully defined
-        # Will be rebuilt when first used or when types module is imported
-        pass
+    source: EventSource = Field(default=EventSource.MDP)
+
+    market_slug: str = Field(description="Polymarket market identifier")
+    outcome: Outcome = Field(description="Market outcome: UP or DOWN")
+    best_bid: float = Field(gt=0, le=1, description="Best bid price (0-1 range)")
+    best_ask: float = Field(gt=0, le=1, description="Best ask price (0-1 range)")
+
+    @property
+    def mid(self) -> float:
+        """Mid-market price (average of bid and ask).
+
+        This is the fair value estimate between bid and ask.
+        """
+        return (self.best_bid + self.best_ask) / 2.0
+
+    @property
+    def spread(self) -> float:
+        """Bid-ask spread (ask - bid).
+
+        Represents the cost of immediate execution (liquidity cost).
+        """
+        return self.best_ask - self.best_bid
+
+    @property
+    def spread_bps(self) -> float:
+        """Bid-ask spread in basis points (10000 * spread).
+
+        Useful for comparing liquidity across different price levels.
+        """
+        return self.spread * 10000
 
 
-# Attempt to rebuild immediately (will succeed if types are already loaded)
-# This handles the case where types.py is imported before events/types.py
-rebuild_event_models()
+# Order Intent Event (moved from types.py to break circular dependency)
+class OrderIntentEvent(Event):
+    """Order intent event generated by portfolio construction.
+
+    Represents an intent to place an order, generated by the portfolio
+    construction layer (e.g., SimpleThresholdStrategy). This is the canonical
+    representation of trading intents in the system.
+
+    Attributes:
+        market_slug: Polymarket market identifier
+        outcome: Market outcome ("UP" or "DOWN")
+        side: Trade side ("BUY" or "SELL")
+        target_price: Target price for the trade (e.g., expected exit price)
+        limit_price: Limit price for order execution (best_ask for BUY, best_bid for SELL)
+        size: Trade size in USD
+        reason: Human-readable reason for the intent
+        ttl_s: Time-to-live in seconds before intent expires (default: 2.0)
+
+    Note:
+        - Timestamps come from Event base class (ts_wall, ts_mono)
+        - Source is automatically set to EventSource.PORTFOLIO
+        - All Event base class fields are inherited (event_id, correlation_id, run_id, etc.)
+    """
+
+    source: EventSource = Field(default=EventSource.PORTFOLIO)
+
+    market_slug: str = Field(description="Polymarket market identifier")
+    outcome: Outcome = Field(description="Market outcome: UP or DOWN")
+    side: Side = Field(description="Trade side: BUY or SELL")
+    target_price: float = Field(gt=0, le=1, description="Target price for the trade (0-1 range)")
+    limit_price: float = Field(
+        gt=0, le=1, description="Limit price for order execution (0-1 range)"
+    )
+    size: float = Field(gt=0, description="Trade size in USD")
+    reason: str = Field(description="Human-readable reason for the intent")
+    ttl_s: float = Field(
+        default=2.0, gt=0, description="Time-to-live in seconds before intent expires"
+    )
+
+
+# Order Executed Event (moved from types.py to break circular dependency)
+class OrderExecutedEvent(Event):
+    """Order executed event from execution layer.
+
+    Represents an order that has been executed by the ExecutionRouter.
+    This is the canonical representation of executed orders in the system.
+    Note: This event type may be deprecated in favor of OMS events (OrderAckEvent, FillEvent).
+
+    Attributes:
+        market_slug: Polymarket market identifier
+        outcome: Market outcome ("UP" or "DOWN")
+        side: Trade side ("BUY" or "SELL")
+        size: Trade size in USD
+        target_price: Target price for position (from intent, None for SELL orders)
+        proposal_reason: Original reason from the order intent
+        response: Order response from the CLOB API (dict with order_id, status, etc.)
+
+    Note:
+        - Timestamps come from Event base class (ts_wall, ts_mono)
+        - Source is automatically set to EventSource.EXEC
+        - All Event base class fields are inherited (event_id, correlation_id, run_id, etc.)
+    """
+
+    source: EventSource = Field(default=EventSource.EXEC)
+
+    market_slug: str = Field(description="Polymarket market identifier")
+    outcome: Outcome = Field(description="Market outcome: UP or DOWN")
+    side: Side = Field(description="Trade side: BUY or SELL")
+    size: float = Field(gt=0, description="Trade size in USD")
+    target_price: float | None = Field(
+        default=None,
+        ge=0,
+        le=1,
+        description="Target price for position (from intent, None for SELL orders)",
+    )
+    proposal_reason: str = Field(description="Original reason from the order intent")
+    response: dict = Field(description="Order response from the CLOB API")
+
+
+# Market Change Event (moved from types.py to break circular dependency)
+class MarketChangeEvent(Event):
+    """Event published when market transitions.
+
+    Represents a transition from one market to another, typically when
+    a market expires and a new one becomes active. This is an operational
+    event that triggers component lifecycle changes.
+
+    Attributes:
+        old_market: Previous market slug (None if initial market)
+        new_market: New market slug (required)
+
+    Note:
+        - Timestamps come from Event base class (ts_wall, ts_mono)
+        - Source is automatically set to EventSource.OPS
+        - All Event base class fields are inherited (event_id, correlation_id, run_id, etc.)
+    """
+
+    source: EventSource = Field(default=EventSource.OPS)
+
+    old_market: str | None = Field(
+        default=None, description="Previous market slug (None if initial)"
+    )
+    new_market: str = Field(description="New market slug")

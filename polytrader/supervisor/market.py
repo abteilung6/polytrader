@@ -12,7 +12,12 @@ from collections.abc import Callable
 
 from polytrader.adapters import IMarketDataAdapter
 from polytrader.events import MARKET_CHANGE, MARKET_DATA, SIGNALS, SYSTEM_LIFECYCLE, EventBus
-from polytrader.events.types import ServiceErrorEvent, ServiceStartedEvent, ServiceStoppedEvent
+from polytrader.events.types import (
+    MarketChangeEvent,
+    ServiceErrorEvent,
+    ServiceStartedEvent,
+    ServiceStoppedEvent,
+)
 from polytrader.logging_config import logger
 from polytrader.market_discovery import IMarketDiscoveryService
 from polytrader.observer import IObserver
@@ -26,7 +31,7 @@ from polytrader.supervisor.metrics import (
     record_service_started,
     record_service_stopped,
 )
-from polytrader.types import MarketChangeEvent, Position
+from polytrader.types import Position
 
 SUPERVISOR_TYPE = "MarketSupervisor"
 
@@ -36,7 +41,6 @@ class MarketSupervisor:
 
     Coordinates Adapter, Observer, Strategy per market.
     Handles market transitions and strategy evaluation.
-
     Per flows.mdc §4: Strategy layer produces SignalEvent (probabilistic scores).
     Supervisor evaluates strategy on-demand for fast decision-making.
 

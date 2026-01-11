@@ -26,10 +26,10 @@ from polytrader.execution.throttle import ExecutionThrottle
 if TYPE_CHECKING:
     pass
 from polytrader.adapters.polymarket.models import VenueResponse
+from polytrader.events.types import OrderIntentEvent
 from polytrader.oms import InMemoryOrderStore, OMSCore
 from polytrader.oms.commands import SubmitOrderCommand
 from polytrader.oms.idempotency import IdempotencyStore
-from polytrader.types import OrderIntentEvent
 
 
 class FakeVenueAdapter:

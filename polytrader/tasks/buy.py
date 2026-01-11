@@ -4,7 +4,7 @@ from polytrader.adapters.polymarket.market_data import GammaClient
 from polytrader.adapters.polymarket.trading import ClobVenueAdapter
 from polytrader.clob import create_clob_client_factory
 from polytrader.config import PolymarketSecrets
-from polytrader.types import OrderIntentEvent
+from polytrader.events.types import OrderIntentEvent
 
 
 async def buy_task(

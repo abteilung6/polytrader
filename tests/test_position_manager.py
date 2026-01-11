@@ -9,8 +9,9 @@ import pytest
 from polytrader.adapters.polymarket.market_data import GammaClient
 from polytrader.clob import IClobClient, IClobClientFactory
 from polytrader.events import PROPOSALS, EventBus
+from polytrader.events.types import MarketDataEvent, OrderExecutedEvent, OrderIntentEvent
 from polytrader.position_manager import PositionManager
-from polytrader.types import MarketDataEvent, OrderExecutedEvent, OrderIntentEvent, Outcome
+from polytrader.types import Outcome
 
 
 class FakeClobClient(IClobClient):

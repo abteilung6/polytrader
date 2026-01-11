@@ -5,9 +5,9 @@ Per testing.mdc §1.A: Unit tests for risk policies (fast, deterministic).
 
 from unittest.mock import MagicMock
 
+from polytrader.events.types import OrderIntentEvent
 from polytrader.risk.models import RiskContext, RiskLimits, RiskReasonCode
 from polytrader.risk.policies import check_proposal_validity, check_token_ownership
-from polytrader.types import OrderIntentEvent
 
 
 class TestCheckProposalValidity:

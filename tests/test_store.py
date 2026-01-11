@@ -1,5 +1,5 @@
+from polytrader.events.types import MarketDataEvent
 from polytrader.store import MemoryMarketDataStore
-from polytrader.types import MarketDataEvent
 
 
 def test_memory_market_data_store_add() -> None:

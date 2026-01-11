@@ -2,6 +2,7 @@
 
 import pytest
 
+from polytrader.events.types import OrderIntentEvent
 from polytrader.oms.fsm import (
     InvalidTransitionError,
     can_transition,
@@ -10,7 +11,6 @@ from polytrader.oms.fsm import (
     transition_order_state,
 )
 from polytrader.oms.models import Order, OrderState
-from polytrader.types import OrderIntentEvent
 
 
 def create_test_order(state: OrderState = OrderState.NEW) -> Order:

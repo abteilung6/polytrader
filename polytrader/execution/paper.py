@@ -14,7 +14,7 @@ import uuid
 from polytrader.adapters.polymarket.models import VenueError, VenueResponse
 from polytrader.events import FILLS
 from polytrader.events.bus import EventBus
-from polytrader.events.types import FillEvent
+from polytrader.events.types import FillEvent, OrderIntentEvent
 from polytrader.execution.adapter import IVenueAdapter
 from polytrader.execution.fill_models import (
     FillModel,
@@ -24,7 +24,6 @@ from polytrader.execution.fill_models import (
 )
 from polytrader.logging_config import logger
 from polytrader.store import IMarketDataStore
-from polytrader.types import OrderIntentEvent
 
 
 class PaperExecutionAdapter(IVenueAdapter):

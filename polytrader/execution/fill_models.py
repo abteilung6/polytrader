@@ -6,8 +6,9 @@ Per Commit 2: Pure functions for calculating fill prices based on different mode
 import random
 from enum import Enum
 
+from polytrader.events.types import OrderIntentEvent
 from polytrader.store import IMarketDataStore
-from polytrader.types import OrderIntentEvent, Outcome
+from polytrader.types import Outcome
 
 
 class FillModel(str, Enum):

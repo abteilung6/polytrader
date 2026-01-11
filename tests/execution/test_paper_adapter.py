@@ -12,11 +12,10 @@ import pytest
 from polytrader.adapters.polymarket.models import VenueError
 from polytrader.events import FILLS
 from polytrader.events.bus import EventBus
-from polytrader.events.types import FillEvent
+from polytrader.events.types import FillEvent, MarketDataEvent, OrderIntentEvent
 from polytrader.execution.fill_models import FillModel
 from polytrader.execution.paper import PaperExecutionAdapter
 from polytrader.store import MemoryMarketDataStore
-from polytrader.types import MarketDataEvent, OrderIntentEvent
 
 
 class TestPaperExecutionAdapter:

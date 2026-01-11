@@ -6,9 +6,9 @@ Per testing.mdc §2: Test hard veto works and emits reason codes.
 
 from unittest.mock import MagicMock
 
+from polytrader.events.types import MarketDataEvent, OrderIntentEvent
 from polytrader.risk.engine import RiskEngine
 from polytrader.risk.models import RiskContext, RiskLimits, RiskReasonCode, RiskResult
-from polytrader.types import MarketDataEvent, OrderIntentEvent
 
 
 class TestRiskEngineBasic:
