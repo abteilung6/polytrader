@@ -685,6 +685,7 @@ async def test_supervisor_with_position_manager_end_to_end() -> None:
     # Verify position lifecycle: The position was created (evidenced by SELL order)
     # and then removed after SELL. Since the flow is fast, we verify the end state.
     final_positions = supervisor.position_manager.get_positions()
+    assert final_positions is not None
     assert ("test-market-1", "UP") not in final_positions, (
         "Position should be removed after SELL order. "
         f"Current positions: {list(final_positions.keys())}"
