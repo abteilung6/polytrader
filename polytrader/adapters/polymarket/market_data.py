@@ -20,12 +20,24 @@ class Market(BaseModel):
         slug: Market slug
         outcomes: JSON string of outcomes
         clobTokenIds: JSON string of token IDs
+        endDate: Market end date (ISO 8601 UTC timestamp)
+        active: Whether market is active
+        closed: Whether market is closed/resolved
+        acceptingOrders: Whether market accepts orders (has orderbook)
     """
 
     id: str
     slug: str
     outcomes: str = Field(..., description="JSON string of outcomes")
     clobTokenIds: str = Field(..., description="JSON string of token IDs")
+    endDate: str | None = Field(
+        default=None, description="Market end date (ISO 8601 UTC timestamp)"
+    )
+    active: bool = Field(default=True, description="Whether market is active")
+    closed: bool = Field(default=False, description="Whether market is closed/resolved")
+    acceptingOrders: bool = Field(
+        default=True, description="Whether market accepts orders (has orderbook)"
+    )
 
     def get_outcomes(self) -> list[str]:
         """Parse outcomes from JSON string.
@@ -78,6 +90,41 @@ class Market(BaseModel):
         except ValueError as err:
             available = ", ".join(outcomes)
             raise ValueError(f"Outcome '{outcome}' not found. Available: {available}") from err
+
+    def is_expired(self) -> bool:
+        """Check if market has expired based on endDate.
+
+        Returns:
+            True if market endDate has passed, False otherwise
+        """
+        if self.endDate is None:
+            return False  # Can't determine if expired without endDate
+
+        from datetime import UTC, datetime
+
+        try:
+            end_time = datetime.fromisoformat(self.endDate.replace("Z", "+00:00"))
+            now = datetime.now(UTC)
+            return end_time < now
+        except (ValueError, AttributeError):
+            # If parsing fails, assume not expired (conservative)
+            return False
+
+    def is_resolved(self) -> bool:
+        """Check if market is resolved/closed.
+
+        Returns:
+            True if market is closed/resolved, False otherwise
+        """
+        return self.closed
+
+    def is_tradeable(self) -> bool:
+        """Check if market is tradeable (active, accepting orders, not closed).
+
+        Returns:
+            True if market can be traded, False otherwise
+        """
+        return self.active and self.acceptingOrders and not self.closed
 
     @staticmethod
     def _normalize_outcome_for_api(outcome: str) -> str:

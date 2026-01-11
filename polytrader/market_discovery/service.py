@@ -394,6 +394,13 @@ class MarketDiscoveryService:
 
         Per observability.mdc §3: Classifies errors as retryable or fatal.
 
+        Validation checks (in order):
+        1. Market exists (NOT_FOUND if not)
+        2. Market is resolved/closed (RESOLVED)
+        3. Market has expired (EXPIRED)
+        4. Market accepts orders (NO_ORDERBOOK if not)
+        5. Market is active and tradeable (ACTIVE)
+
         Args:
             slug: Market slug to check
 
@@ -410,17 +417,24 @@ class MarketDiscoveryService:
             if market is None:
                 return MarketState.NOT_FOUND
 
-            # For now, if market exists in Gamma API, consider it active
-            # TODO: Add more validation when Gamma API provides more metadata:
-            # - Check if market end_time has passed (EXPIRED)
-            #   Requires: market.end_time or market.endDate field
-            # - Check if market is resolved (RESOLVED)
-            #   Requires: market.resolved or market.resolutionStatus field
-            # - Check if orderbook exists via CLOB API (NO_ORDERBOOK)
-            #   Requires: Additional CLOB API call or market metadata
-            # Note: Current Gamma API Market model doesn't include these fields
-            # Enhancement blocked on API response structure
+            # 1. Check if market is resolved/closed
+            if market.is_resolved():
+                return MarketState.RESOLVED
 
+            # 2. Check if market has expired
+            if market.is_expired():
+                return MarketState.EXPIRED
+
+            # 3. Check if market accepts orders (has orderbook)
+            if not market.acceptingOrders:
+                return MarketState.NO_ORDERBOOK
+
+            # 4. Market is active and tradeable
+            if market.is_tradeable():
+                return MarketState.ACTIVE
+
+            # Fallback: market exists but not in expected state
+            # This shouldn't happen if API is consistent, but handle gracefully
             return MarketState.ACTIVE
         except Exception as e:
             # Classify errors per observability.mdc §3

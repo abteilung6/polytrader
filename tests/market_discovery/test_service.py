@@ -651,9 +651,24 @@ async def test_market_discovery_get_market_state_not_found() -> None:
 
 @pytest.mark.asyncio
 async def test_market_discovery_get_market_state_active() -> None:
-    """Test get_market_state returns ACTIVE for existing markets."""
+    """Test get_market_state returns ACTIVE for existing, tradeable markets."""
+    from datetime import UTC, datetime, timedelta
+
+    from polytrader.adapters.polymarket.market_data import Market
+
     gamma_client = MagicMock(spec=GammaClient)
-    market = MagicMock()
+    # Create a real Market object that is active and tradeable
+    future_date = (datetime.now(UTC) + timedelta(hours=1)).isoformat().replace("+00:00", "Z")
+    market = Market(
+        id="1",
+        slug="btc-updown-15m-12345",
+        outcomes='["Up", "Down"]',
+        clobTokenIds='["1", "2"]',
+        endDate=future_date,
+        active=True,
+        closed=False,
+        acceptingOrders=True,
+    )
     gamma_client.get_market_by_slug = MagicMock(return_value=market)
 
     discovery = MarketDiscoveryService(gamma_client=gamma_client)
