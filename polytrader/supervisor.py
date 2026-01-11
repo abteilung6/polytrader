@@ -1,25 +1,29 @@
 """Market supervisor for managing component lifecycle and market transitions."""
 
 import asyncio
+import time
 from collections.abc import Callable
 
 from polytrader.adapters import IMarketDataAdapter
-from polytrader.events import MARKET_CHANGE, EventBus
+from polytrader.events import MARKET_CHANGE, MARKET_DATA, SIGNALS, EventBus
 from polytrader.execution import ExecutionRouter
 from polytrader.logging_config import logger
 from polytrader.market_discovery import IMarketDiscoveryService
-from polytrader.models.protocol import ITradingModel
 from polytrader.observer import IObserver
 from polytrader.position_manager import IPositionManager
 from polytrader.store import IMarketDataStore
-from polytrader.types import MarketChangeEvent
+from polytrader.strategies import IStrategy
+from polytrader.types import MarketChangeEvent, Position
 
 
 class MarketSupervisor:
     """Supervisor that manages component lifecycle and market transitions.
 
-    Coordinates all trading components (Adapter, Observer, Model, ExecutionRouter)
+    Coordinates all trading components (Adapter, Observer, Strategy, ExecutionRouter)
     and handles transitions when markets expire and new ones become active.
+
+    Per flows.mdc §4: Strategy layer produces SignalEvent (probabilistic scores).
+    Supervisor evaluates strategy on-demand for fast decision-making.
     """
 
     def __init__(
@@ -28,12 +32,13 @@ class MarketSupervisor:
         discovery_service: IMarketDiscoveryService,
         adapter_factory: Callable[[str], IMarketDataAdapter],
         observer_factory: Callable[[IMarketDataAdapter], IObserver],
-        model_factory: Callable[[str], ITradingModel],
+        strategy_factory: Callable[[str], IStrategy],
         bus: EventBus,
         store: IMarketDataStore,
         execution_router_factory: Callable[[], ExecutionRouter] | None = None,
         position_manager_factory: Callable[[], IPositionManager] | None = None,
         monitor_interval: float = 1.0,
+        evaluation_throttle_ms: float = 0.0,
     ) -> None:
         """Initialize the market supervisor.
 
@@ -42,40 +47,49 @@ class MarketSupervisor:
             discovery_service: Service for finding active markets
             adapter_factory: Factory function to create adapters
             observer_factory: Factory function to create observers
-            model_factory: Factory function to create models
+            strategy_factory: Factory function to create strategies
             execution_router_factory: Factory to create execution routers
                 (None = no execution, for predict mode)
             bus: Event bus for communication
             store: Market data store for historical data
             position_manager_factory: Factory function to create position managers (optional)
             monitor_interval: How often to check for market changes (seconds, default: 1.0)
+            evaluation_throttle_ms: Minimum time between strategy evaluations (ms, default: 0.0)
         """
         self.pattern = pattern
         self.discovery = discovery_service
         self.adapter_factory = adapter_factory
         self.observer_factory = observer_factory
-        self.model_factory = model_factory
+        self.strategy_factory = strategy_factory
         self.execution_router_factory = execution_router_factory
         self.position_manager_factory = position_manager_factory
         self.bus = bus
         self.store = store
         self.monitor_interval = monitor_interval
+        self.evaluation_throttle_ms = evaluation_throttle_ms
 
         # Current state
         self.current_market: str | None = None
         self.adapter: IMarketDataAdapter | None = None
         self.observer: IObserver | None = None
-        self.model: ITradingModel | None = None
+        self.strategy: IStrategy | None = None
         self.execution_router: ExecutionRouter | None = None
         self.position_manager: IPositionManager | None = None
 
         # Tasks
         self._running = False
         self._observer_task: asyncio.Task | None = None
-        self._model_task: asyncio.Task | None = None
+        self._strategy_evaluation_task: asyncio.Task | None = None
+        self._strategy_background_task: asyncio.Task | None = None
         self._execution_router_task: asyncio.Task | None = None
         self._position_manager_task: asyncio.Task | None = None
         self._monitor_task: asyncio.Task | None = None
+
+        # Position tracking for strategy context
+        self._positions: dict[tuple[str, str], Position] = {}
+
+        # Evaluation throttling
+        self._last_evaluation_time: float = 0.0
 
     async def run(self) -> None:
         """Start the supervisor and manage component lifecycle."""
@@ -98,7 +112,8 @@ class MarketSupervisor:
                 t
                 for t in [
                     self._observer_task,
-                    self._model_task,
+                    self._strategy_evaluation_task,
+                    self._strategy_background_task,
                     self._execution_router_task,
                     self._position_manager_task,
                     self._monitor_task,
@@ -137,7 +152,7 @@ class MarketSupervisor:
         # Create new components
         self.adapter = self.adapter_factory(new_market)
         self.observer = self.observer_factory(self.adapter)
-        self.model = self.model_factory(new_market)
+        self.strategy = self.strategy_factory(new_market)
         if self.execution_router_factory is not None:
             self.execution_router = self.execution_router_factory()
         else:
@@ -149,7 +164,10 @@ class MarketSupervisor:
 
         # Start new components
         self._observer_task = asyncio.create_task(self.observer.run())
-        self._model_task = asyncio.create_task(self.model.run())
+        # Strategy evaluation: subscribe to MARKET_DATA and evaluate on-demand
+        self._strategy_evaluation_task = asyncio.create_task(self._evaluate_strategy_loop())
+        # Strategy background tasks (if strategy needs them)
+        self._strategy_background_task = asyncio.create_task(self._run_strategy_background())
         if self.execution_router is not None:
             self._execution_router_task = asyncio.create_task(self.execution_router.run())
 
@@ -171,8 +189,8 @@ class MarketSupervisor:
         """Stop all current components."""
         if self.observer:
             self.observer.stop()
-        if self.model:
-            self.model.stop()
+        if self.strategy:
+            self.strategy.stop()
         if self.execution_router:
             self.execution_router.stop()
         if self.position_manager:
@@ -181,7 +199,8 @@ class MarketSupervisor:
         # Cancel tasks
         tasks = [
             self._observer_task,
-            self._model_task,
+            self._strategy_evaluation_task,
+            self._strategy_background_task,
             self._execution_router_task,
             self._position_manager_task,
         ]
@@ -196,9 +215,73 @@ class MarketSupervisor:
 
         # Clear references
         self._observer_task = None
-        self._model_task = None
+        self._strategy_evaluation_task = None
+        self._strategy_background_task = None
         self._execution_router_task = None
         self._position_manager_task = None
+
+    async def _evaluate_strategy_loop(self) -> None:
+        """Evaluate strategy on market data events (fast path).
+
+        Per flows.mdc §4: Strategy layer produces SignalEvent on-demand.
+        This loop subscribes to MARKET_DATA and calls evaluate() directly.
+        """
+        if self.strategy is None:
+            return
+
+        market_data_queue = self.bus.subscribe(MARKET_DATA)
+
+        try:
+            while self._running:
+                event = await market_data_queue.get()
+
+                # Filter by current market
+                if event.market_slug != self.current_market:
+                    continue
+
+                # Throttle evaluation if configured
+                if self.evaluation_throttle_ms > 0.0:
+                    now = time.perf_counter() * 1000  # ms
+                    if now - self._last_evaluation_time < self.evaluation_throttle_ms:
+                        continue
+                    self._last_evaluation_time = now
+
+                # Fast, synchronous evaluation (no async overhead)
+                try:
+                    signal = self.strategy.evaluate(event, positions=self._get_positions())
+                    if signal is not None:
+                        # Publish signal to portfolio layer
+                        await self.bus.publish(SIGNALS, signal)
+                except Exception:
+                    logger.exception("Error evaluating strategy")
+                    # Continue processing despite errors
+        except Exception:
+            logger.exception("Error in strategy evaluation loop")
+            raise
+
+    async def _run_strategy_background(self) -> None:
+        """Run strategy background tasks (if strategy needs them).
+
+        Most strategies don't need this (stateless).
+        """
+        if self.strategy is None:
+            return
+
+        try:
+            await self.strategy.run()
+        except Exception:
+            logger.exception("Error in strategy background task")
+            # Continue despite errors
+
+    def _get_positions(self) -> dict[tuple[str, str], Position]:
+        """Get current positions for strategy context.
+
+        Returns:
+            Dict mapping (market_slug, outcome) -> Position
+        """
+        # TODO: Integrate with position manager when available
+        # For now, return empty dict (strategy doesn't need positions for decision-making)
+        return self._positions.copy()
 
     async def _monitor_market(self) -> None:
         """Monitor current market and detect expiration/transitions."""

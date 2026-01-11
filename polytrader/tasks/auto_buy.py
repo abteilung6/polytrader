@@ -16,7 +16,6 @@ from polytrader.events import (
 from polytrader.execution import create_execution_router_factory
 from polytrader.logging_config import logger
 from polytrader.market_discovery import MarketDiscoveryService
-from polytrader.models import create_model_factory
 from polytrader.observer import create_observer_factory
 from polytrader.oms import InMemoryOrderStore, OMSCore
 from polytrader.oms.idempotency import IdempotencyStore
@@ -147,14 +146,16 @@ async def auto_buy_task(
 
     adapter_factory = create_adapter_factory(secrets, polling_frequency_hz=frequency)
     observer_factory = create_observer_factory(bus, store)
-    model_factory = create_model_factory(
-        bus,
-        store,
+
+    # Create strategy factory (replaces old model factory)
+    from polytrader.strategies import create_simple_threshold_factory
+
+    strategy_factory = create_simple_threshold_factory(
+        store=store,
         buy_threshold=buy_threshold,
-        sell_threshold=sell_threshold,
-        size=size,
         min_history=min_history,
     )
+
     clob_client_factory = create_clob_client_factory(secrets)
     execution_router_factory = create_execution_router_factory(bus, clob_client_factory)
     position_manager_factory = create_position_manager_factory(
@@ -166,6 +167,18 @@ async def auto_buy_task(
     oms_store = InMemoryOrderStore(bus)
     idempotency_store = IdempotencyStore()
     oms_core = OMSCore(bus=bus, store=oms_store, idempotency_store=idempotency_store)
+
+    # Create portfolio service per flows.mdc §5
+    # PortfolioService subscribes to SIGNALS and converts to OrderIntentEvent
+    from polytrader.portfolio import PortfolioService
+
+    position_manager = position_manager_factory() if position_manager_factory is not None else None
+    portfolio_service = PortfolioService(
+        bus=bus,
+        store=store,
+        position_manager=position_manager,
+        fixed_size_usd=size,
+    )
 
     # Create risk engine and checker per flows.mdc §6
     # Risk runs before OMS submission, so RiskChecker subscribes to PROPOSALS
@@ -179,7 +192,7 @@ async def auto_buy_task(
         discovery_service=discovery,
         adapter_factory=adapter_factory,
         observer_factory=observer_factory,
-        model_factory=model_factory,
+        strategy_factory=strategy_factory,
         execution_router_factory=execution_router_factory,
         bus=bus,
         store=store,
@@ -189,6 +202,9 @@ async def auto_buy_task(
     order_queue = bus.subscribe(ORDERS)
     market_change_queue = bus.subscribe(MARKET_CHANGE)
 
+    # Start portfolio service per flows.mdc §5
+    # PortfolioService subscribes to SIGNALS and publishes OrderIntentEvent to PROPOSALS
+    portfolio_task = asyncio.create_task(portfolio_service.start())
     # Start risk checker as async task per flows.mdc §6
     # RiskChecker subscribes to PROPOSALS and publishes APPROVED_PROPOSALS
     risk_checker_task = asyncio.create_task(risk_checker.run())
@@ -214,10 +230,16 @@ async def auto_buy_task(
 
     try:
         await asyncio.gather(
-            supervisor_task, risk_checker_task, oms_core_task, orders_task, market_changes_task
+            supervisor_task,
+            portfolio_task,
+            risk_checker_task,
+            oms_core_task,
+            orders_task,
+            market_changes_task,
         )
     except KeyboardInterrupt:
         supervisor.stop()
+        await portfolio_service.stop()
         risk_checker.stop()
         oms_core.stop()
         # Emit system stopped event (auto-persisted by EventBus)
@@ -230,11 +252,13 @@ async def auto_buy_task(
         raise
     finally:
         supervisor_task.cancel()
+        portfolio_task.cancel()
         risk_checker_task.cancel()
         oms_core_task.cancel()
         market_changes_task.cancel()
         try:
             await supervisor_task
+            await portfolio_task
             await risk_checker_task
             await oms_core_task
             await orders_task

@@ -22,6 +22,8 @@ _execution_requests_topic: Topic | None = None
 _execution_responses_topic: Topic | None = None
 _execution_errors_topic: Topic | None = None
 _market_discovery_topic: Topic | None = None
+_signals_topic: Topic | None = None
+_targets_topic: Topic | None = None
 
 
 def _create_market_data_topic() -> Topic:
@@ -68,6 +70,20 @@ def _create_market_discovery_topic() -> Topic:
     from polytrader.events.types import MarketDiscoveryEvent
 
     return Topic[MarketDiscoveryEvent]("market_discovery")
+
+
+def _create_signals_topic() -> Topic:
+    """Create the SIGNALS topic."""
+    from polytrader.events.types import SignalEvent
+
+    return Topic[SignalEvent]("signals")
+
+
+def _create_targets_topic() -> Topic:
+    """Create the TARGETS topic."""
+    from polytrader.events.types import TargetEvent
+
+    return Topic[TargetEvent]("targets")
 
 
 def get_market_data_topic() -> Topic:
@@ -313,6 +329,22 @@ def get_market_discovery_topic() -> Topic:
     return _market_discovery_topic
 
 
+def get_signals_topic() -> Topic:
+    """Get the SIGNALS topic (singleton)."""
+    global _signals_topic
+    if _signals_topic is None:
+        _signals_topic = _create_signals_topic()
+    return _signals_topic
+
+
+def get_targets_topic() -> Topic:
+    """Get the TARGETS topic (singleton)."""
+    global _targets_topic
+    if _targets_topic is None:
+        _targets_topic = _create_targets_topic()
+    return _targets_topic
+
+
 def __getattr__(name: str) -> Topic:
     """Lazily initialize topic constants on first access.
 
@@ -366,5 +398,9 @@ def __getattr__(name: str) -> Topic:
         return get_execution_errors_topic()
     elif name == "MARKET_DISCOVERY":
         return get_market_discovery_topic()
+    elif name == "SIGNALS":
+        return get_signals_topic()
+    elif name == "TARGETS":
+        return get_targets_topic()
     else:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -29,6 +29,14 @@ class IPositionManager(Protocol):
         """Stop the position manager."""
         ...
 
+    def get_positions(self) -> dict[tuple[str, Outcome], Position] | None:
+        """Get all current positions.
+
+        Returns:
+            Dictionary mapping (market_slug, outcome) to Position, or None if not available.
+        """
+        ...
+
 
 def create_position_manager_factory(
     bus: EventBus,
@@ -848,10 +856,10 @@ class PositionManager(IPositionManager):
         """Stop the position manager."""
         self._running = False
 
-    def get_positions(self) -> dict[tuple[str, Outcome], Position]:
-        """Get all current positions (for testing/debugging).
+    def get_positions(self) -> dict[tuple[str, Outcome], Position] | None:
+        """Get all current positions.
 
         Returns:
-            Dictionary mapping (market_slug, outcome) to Position
+            Dictionary mapping (market_slug, outcome) to Position, or None if not available.
         """
         return self._positions.copy()

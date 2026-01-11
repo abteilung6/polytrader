@@ -4,12 +4,13 @@ from polytrader.adapters import IMarketDataAdapter
 from polytrader.adapters.polymarket.market_data import GammaClient
 from polytrader.clob import IClobClient
 from polytrader.events import MARKET_CHANGE, MARKET_DATA, ORDERS, PROPOSALS, EventBus
+from polytrader.events.types import SignalEvent
 from polytrader.execution import ExecutionRouter
 from polytrader.market_discovery import IMarketDiscoveryService
-from polytrader.models.protocol import ITradingModel
 from polytrader.observer import IObserver
 from polytrader.position_manager import IPositionManager, PositionManager
 from polytrader.store import MemoryMarketDataStore
+from polytrader.strategies import IStrategy
 from polytrader.supervisor import MarketSupervisor
 from polytrader.types import (
     MarketChangeEvent,
@@ -17,6 +18,7 @@ from polytrader.types import (
     OrderExecutedEvent,
     OrderIntentEvent,
     Outcome,
+    Position,
 )
 
 
@@ -48,20 +50,29 @@ class FakeObserver(IObserver):
         self._running = False
 
 
-class FakeModel(ITradingModel):
+class FakeStrategy(IStrategy):
     def __init__(self, market_slug: str) -> None:
         self.market_slug = market_slug
         self._running = False
+        self.evaluations: list[MarketDataEvent] = []
+
+    def evaluate(
+        self,
+        market_data: MarketDataEvent,
+        positions: dict[tuple[str, str], Position] | None = None,
+    ) -> SignalEvent | None:
+        """Evaluate market data (fast, synchronous)."""
+        self.evaluations.append(market_data)
+        return None  # No signal generated
 
     async def run(self) -> None:
+        """Optional background tasks (not needed for stateless strategies)."""
         self._running = True
         while self._running:
             await asyncio.sleep(0.1)
 
-    async def on_tick(self, tick) -> None:
-        pass
-
     def stop(self) -> None:
+        """Stop background tasks."""
         self._running = False
 
 
@@ -105,8 +116,8 @@ async def test_supervisor_initializes_with_market() -> None:
     def observer_factory(adapter: IMarketDataAdapter) -> FakeObserver:
         return FakeObserver(bus, adapter, store)
 
-    def model_factory(slug: str) -> FakeModel:
-        return FakeModel(slug)
+    def strategy_factory(slug: str) -> IStrategy:
+        return FakeStrategy(slug)
 
     def execution_router_factory() -> FakeExecutionRouter:
         return FakeExecutionRouter()
@@ -116,7 +127,7 @@ async def test_supervisor_initializes_with_market() -> None:
         discovery_service=discovery,
         adapter_factory=adapter_factory,
         observer_factory=observer_factory,
-        model_factory=model_factory,
+        strategy_factory=strategy_factory,
         execution_router_factory=execution_router_factory,
         bus=bus,
         store=store,
@@ -131,7 +142,7 @@ async def test_supervisor_initializes_with_market() -> None:
     assert supervisor.current_market == "test-market-1"
     assert supervisor.adapter is not None
     assert supervisor.observer is not None
-    assert supervisor.model is not None
+    assert supervisor.strategy is not None
     assert supervisor.execution_router is not None
 
     supervisor.stop()
@@ -154,8 +165,8 @@ async def test_supervisor_transitions_on_market_change() -> None:
     def observer_factory(adapter: IMarketDataAdapter) -> FakeObserver:
         return FakeObserver(bus, adapter, store)
 
-    def model_factory(slug: str) -> FakeModel:
-        return FakeModel(slug)
+    def strategy_factory(slug: str) -> IStrategy:
+        return FakeStrategy(slug)
 
     def execution_router_factory() -> FakeExecutionRouter:
         return FakeExecutionRouter()
@@ -165,7 +176,7 @@ async def test_supervisor_transitions_on_market_change() -> None:
         discovery_service=discovery,
         adapter_factory=adapter_factory,
         observer_factory=observer_factory,
-        model_factory=model_factory,
+        strategy_factory=strategy_factory,
         execution_router_factory=execution_router_factory,
         bus=bus,
         store=store,
@@ -207,8 +218,8 @@ async def test_supervisor_publishes_market_change_events() -> None:
     def observer_factory(adapter: IMarketDataAdapter) -> FakeObserver:
         return FakeObserver(bus, adapter, store)
 
-    def model_factory(slug: str) -> FakeModel:
-        return FakeModel(slug)
+    def strategy_factory(slug: str) -> IStrategy:
+        return FakeStrategy(slug)
 
     def execution_router_factory() -> FakeExecutionRouter:
         return FakeExecutionRouter()
@@ -218,7 +229,7 @@ async def test_supervisor_publishes_market_change_events() -> None:
         discovery_service=discovery,
         adapter_factory=adapter_factory,
         observer_factory=observer_factory,
-        model_factory=model_factory,
+        strategy_factory=strategy_factory,
         execution_router_factory=execution_router_factory,
         bus=bus,
         store=store,
@@ -281,8 +292,8 @@ async def test_supervisor_stops_components_on_transition() -> None:
     def observer_factory(adapter: IMarketDataAdapter) -> FakeObserver:
         return FakeObserver(bus, adapter, store)
 
-    def model_factory(slug: str) -> FakeModel:
-        return FakeModel(slug)
+    def strategy_factory(slug: str) -> IStrategy:
+        return FakeStrategy(slug)
 
     def execution_router_factory() -> FakeExecutionRouter:
         return FakeExecutionRouter()
@@ -292,7 +303,7 @@ async def test_supervisor_stops_components_on_transition() -> None:
         discovery_service=discovery,
         adapter_factory=adapter_factory,
         observer_factory=observer_factory,
-        model_factory=model_factory,
+        strategy_factory=strategy_factory,
         execution_router_factory=execution_router_factory,
         bus=bus,
         store=store,
@@ -303,25 +314,25 @@ async def test_supervisor_stops_components_on_transition() -> None:
     await asyncio.sleep(0.05)
 
     old_observer = supervisor.observer
-    old_model = supervisor.model
+    old_strategy = supervisor.strategy
     old_execution_router = supervisor.execution_router
 
     assert isinstance(old_observer, FakeObserver)
-    assert isinstance(old_model, FakeModel)
+    assert isinstance(old_strategy, FakeStrategy)
     assert isinstance(old_execution_router, FakeExecutionRouter)
     assert old_observer._running
-    assert old_model._running
+    assert old_strategy._running
     assert old_execution_router._running
 
     discovery.current_market = "test-market-2"
     await asyncio.sleep(0.15)
 
     assert not old_observer._running
-    assert not old_model._running
+    assert not old_strategy._running
     assert not old_execution_router._running
 
     assert supervisor.observer is not None
-    assert supervisor.model is not None
+    assert supervisor.strategy is not None
     assert supervisor.execution_router is not None
 
     supervisor.stop()
@@ -344,15 +355,15 @@ async def test_supervisor_without_execution_router_does_not_execute_orders() -> 
     def observer_factory(adapter: IMarketDataAdapter) -> FakeObserver:
         return FakeObserver(bus, adapter, store)
 
-    def model_factory(slug: str) -> FakeModel:
-        return FakeModel(slug)
+    def strategy_factory(slug: str) -> IStrategy:
+        return FakeStrategy(slug)
 
     supervisor = MarketSupervisor(
         pattern="test-pattern",
         discovery_service=discovery,
         adapter_factory=adapter_factory,
         observer_factory=observer_factory,
-        model_factory=model_factory,
+        strategy_factory=strategy_factory,
         execution_router_factory=None,  # No execution in predict mode
         bus=bus,
         store=store,
@@ -499,17 +510,27 @@ async def test_supervisor_with_position_manager_end_to_end() -> None:
         def stop(self) -> None:
             self._running = False
 
-    # Fake model that publishes a BUY proposal
-    class ProposalPublishingModel(ITradingModel):
+    # Fake strategy that publishes a BUY proposal via background task
+    # (This simulates the old model behavior until Commit 4 refactors it)
+    class ProposalPublishingStrategy(IStrategy):
         def __init__(self, market_slug: str, bus: EventBus) -> None:
             self.market_slug = market_slug
             self.bus = bus
             self._running = False
             self._proposal_sent = False
 
+        def evaluate(
+            self,
+            market_data: MarketDataEvent,
+            positions: dict[tuple[str, str], Position] | None = None,
+        ) -> SignalEvent | None:
+            # For testing: return None (proposal published via background task)
+            return None
+
         async def run(self) -> None:
             self._running = True
             # Subscribe to ticks and publish a proposal on first tick
+            # (This simulates old model behavior until Commit 4)
             market_data_queue = self.bus.subscribe(MARKET_DATA)
             while self._running:
                 try:
@@ -530,9 +551,6 @@ async def test_supervisor_with_position_manager_end_to_end() -> None:
                         self._proposal_sent = True
                 except TimeoutError:
                     continue
-
-        async def on_tick(self, tick) -> None:
-            pass
 
         def stop(self) -> None:
             self._running = False
@@ -583,8 +601,8 @@ async def test_supervisor_with_position_manager_end_to_end() -> None:
     def observer_factory(adapter: IMarketDataAdapter) -> IObserver:
         return PassThroughObserver(bus, adapter, store)
 
-    def model_factory(slug: str) -> ITradingModel:
-        return ProposalPublishingModel(slug, bus)
+    def strategy_factory(slug: str) -> IStrategy:
+        return ProposalPublishingStrategy(slug, bus)
 
     def execution_router_factory() -> ExecutionRouter:
         return ExecutingExecutionRouter(bus)
@@ -604,7 +622,7 @@ async def test_supervisor_with_position_manager_end_to_end() -> None:
         discovery_service=discovery,
         adapter_factory=adapter_factory,
         observer_factory=observer_factory,
-        model_factory=model_factory,
+        strategy_factory=strategy_factory,
         execution_router_factory=execution_router_factory,
         bus=bus,
         store=store,
@@ -667,6 +685,7 @@ async def test_supervisor_with_position_manager_end_to_end() -> None:
     # Verify position lifecycle: The position was created (evidenced by SELL order)
     # and then removed after SELL. Since the flow is fast, we verify the end state.
     final_positions = supervisor.position_manager.get_positions()
+    assert final_positions is not None
     assert ("test-market-1", "UP") not in final_positions, (
         "Position should be removed after SELL order. "
         f"Current positions: {list(final_positions.keys())}"

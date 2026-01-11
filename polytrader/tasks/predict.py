@@ -14,7 +14,6 @@ from polytrader.events import (
 )
 from polytrader.logging_config import logger
 from polytrader.market_discovery import MarketDiscoveryService
-from polytrader.models import create_model_factory
 from polytrader.observer import create_observer_factory
 from polytrader.store import MemoryMarketDataStore
 from polytrader.supervisor import MarketSupervisor
@@ -101,14 +100,16 @@ async def predict_task(
 
     adapter_factory = create_adapter_factory(secrets, polling_frequency_hz=frequency)
     observer_factory = create_observer_factory(bus, store)
-    model_factory = create_model_factory(
-        bus,
-        store,
+
+    # Create strategy factory (replaces old model factory)
+    from polytrader.strategies import create_simple_threshold_factory
+
+    strategy_factory = create_simple_threshold_factory(
+        store=store,
         buy_threshold=buy_threshold,
-        sell_threshold=sell_threshold,
-        size=size,
         min_history=min_history,
     )
+
     # Predict mode: don't start execution pipeline (no execution router factory)
     # Proposals are consumed by proposal_handler, no need for execution components
 
@@ -117,7 +118,7 @@ async def predict_task(
         discovery_service=discovery,
         adapter_factory=adapter_factory,
         observer_factory=observer_factory,
-        model_factory=model_factory,
+        strategy_factory=strategy_factory,
         execution_router_factory=None,  # No execution in predict mode
         bus=bus,
         store=store,

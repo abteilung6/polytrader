@@ -73,6 +73,7 @@ async def test_position_manager_creates_position_from_buy_order() -> None:
 
     # Check position was created
     positions = manager.get_positions()
+    assert positions is not None
     assert len(positions) == 1
 
     key: tuple[str, Outcome] = ("test-market", "UP")
@@ -112,7 +113,9 @@ async def test_position_manager_removes_position_from_sell_order() -> None:
     )
     await manager._handle_order(buy_order)
 
-    assert len(manager.get_positions()) == 1
+    positions = manager.get_positions()
+    assert positions is not None
+    assert len(positions) == 1
 
     # Create a SELL order
     sell_order = OrderExecutedEvent(
@@ -130,6 +133,7 @@ async def test_position_manager_removes_position_from_sell_order() -> None:
 
     # Check position was removed
     positions = manager.get_positions()
+    assert positions is not None
     assert len(positions) == 0
 
 
@@ -269,6 +273,7 @@ async def test_position_manager_handles_multiple_positions() -> None:
 
     # Check both positions exist
     positions = manager.get_positions()
+    assert positions is not None
     assert len(positions) == 2
     assert ("test-market", "UP") in positions
     assert ("test-market", "DOWN") in positions
@@ -431,6 +436,7 @@ async def test_position_manager_reconciles_with_external_orders() -> None:
 
     # Verify position still exists (confirmed by external order)
     positions = manager.get_positions()
+    assert positions is not None
     assert ("test-market", "UP") in positions
 
 
@@ -470,6 +476,7 @@ async def test_position_manager_removes_stale_positions() -> None:
 
     # Verify position exists
     positions = manager.get_positions()
+    assert positions is not None
     assert ("test-market", "UP") in positions
 
     # Create external CANCELLED order
@@ -488,6 +495,7 @@ async def test_position_manager_removes_stale_positions() -> None:
 
     # Verify position was removed
     positions = manager.get_positions()
+    assert positions is not None
     assert ("test-market", "UP") not in positions
 
 
@@ -515,6 +523,7 @@ async def test_position_manager_creates_position_from_external_order() -> None:
 
     # Verify no position exists
     positions = manager.get_positions()
+    assert positions is not None
     assert ("test-market", "UP") not in positions
 
     # Create external FILLED BUY order
@@ -533,6 +542,7 @@ async def test_position_manager_creates_position_from_external_order() -> None:
 
     # Verify position was created
     positions = manager.get_positions()
+    assert positions is not None
     assert ("test-market", "UP") in positions
     position = positions[("test-market", "UP")]
     assert position.size == 2.0
