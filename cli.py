@@ -172,10 +172,63 @@ def model_paper(
     metrics_interval: float = typer.Option(
         60.0, "--metrics-interval", help="Performance metrics display interval in seconds"
     ),
+    starting_equity: float = typer.Option(
+        1000.0, "--starting-equity", help="Starting equity in USD"
+    ),
+    fill_model: str = typer.Option(
+        "mid_price", "--fill-model", help="Fill model: immediate, mid_price, slippage"
+    ),
     log_file: str | None = typer.Option(None, "--log-file", help="Optional file path to save logs"),
 ) -> None:
     """Run paper trading with simulated execution and performance metrics."""
     _setup_logging(log_file)
+
+    # Parameter validation
+    if not 0.0 <= fill_probability <= 1.0:
+        raise ValueError(f"fill_probability must be between 0 and 1, got {fill_probability}")
+    if not 0.0 <= rejection_probability <= 1.0:
+        raise ValueError(
+            f"rejection_probability must be between 0 and 1, got {rejection_probability}"
+        )
+    if fill_probability + rejection_probability > 1.0:
+        raise ValueError(
+            f"fill_probability + rejection_probability must be <= 1.0, "
+            f"got {fill_probability + rejection_probability}"
+        )
+    if frequency <= 0.0:
+        raise ValueError(f"frequency must be > 0, got {frequency}")
+    if buy_threshold < 0.0 or buy_threshold > 1.0:
+        raise ValueError(f"buy_threshold must be between 0 and 1, got {buy_threshold}")
+    if sell_threshold < 0.0 or sell_threshold > 1.0:
+        raise ValueError(f"sell_threshold must be between 0 and 1, got {sell_threshold}")
+    if buy_threshold >= sell_threshold:
+        raise ValueError(
+            f"buy_threshold ({buy_threshold}) must be < sell_threshold ({sell_threshold})"
+        )
+    if size <= 0.0:
+        raise ValueError(f"size must be > 0, got {size}")
+    if min_history < 0:
+        raise ValueError(f"min_history must be >= 0, got {min_history}")
+    if max_trades < 1:
+        raise ValueError(f"max_trades must be >= 1, got {max_trades}")
+    if latency_ms < 0.0:
+        raise ValueError(f"latency_ms must be >= 0, got {latency_ms}")
+    if metrics_interval <= 0.0:
+        raise ValueError(f"metrics_interval must be > 0, got {metrics_interval}")
+    if starting_equity <= 0.0:
+        raise ValueError(f"starting_equity must be > 0, got {starting_equity}")
+
+    # Validate and convert fill_model
+    from polytrader.execution.fill_models import FillModel
+
+    fill_model_lower = fill_model.lower()
+    try:
+        fill_model_enum = FillModel(fill_model_lower)
+    except ValueError as err:
+        valid_models = ", ".join([m.value for m in FillModel])
+        raise ValueError(
+            f"Invalid fill_model '{fill_model}'. Must be one of: {valid_models}"
+        ) from err
 
     logger.info("📝 PAPER TRADING MODE")
     logger.info("Running paper trading for market pattern: {market}", market=market)
@@ -190,6 +243,8 @@ def model_paper(
     logger.info("Rejection probability: {prob:.1%}", prob=rejection_probability)
     logger.info("Simulated latency: {latency}ms", latency=latency_ms)
     logger.info("Metrics interval: {interval}s", interval=metrics_interval)
+    logger.info("Starting equity: ${equity:.2f}", equity=starting_equity)
+    logger.info("Fill model: {model}", model=fill_model_enum.value)
     logger.info("Press Ctrl+C to stop")
     asyncio.run(
         paper_trading_task(
@@ -200,10 +255,12 @@ def model_paper(
             size,
             min_history,
             max_trades,
+            fill_model=fill_model_enum,
             fill_probability=fill_probability,
             rejection_probability=rejection_probability,
             latency_ms=latency_ms,
             metrics_interval=metrics_interval,
+            starting_equity=starting_equity,
         )
     )
 
