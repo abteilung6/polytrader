@@ -17,8 +17,10 @@ from polytrader.events.types import (
     OrderRejectedEvent,
     OrderSubmittedEvent,
     RiskCheckEvent,
+    SignalEvent,
     SystemStartedEvent,
     SystemStoppedEvent,
+    TargetEvent,
 )
 
 __all__ = [
@@ -56,10 +58,14 @@ __all__ = [
     "PROPOSALS",
     "RISK_CHECKS",
     "RiskCheckEvent",
+    "SIGNALS",
+    "SignalEvent",
     "SUBMIT_ORDER_COMMANDS",
     "SYSTEM_LIFECYCLE",
     "SystemStartedEvent",
     "SystemStoppedEvent",
+    "TARGETS",
+    "TargetEvent",
     "Topic",
 ]
 
@@ -155,4 +161,12 @@ def __getattr__(name: str):
         from polytrader.events.topics import get_market_discovery_topic
 
         return get_market_discovery_topic()
+    elif name == "SIGNALS":
+        from polytrader.events.topics import get_signals_topic
+
+        return get_signals_topic()
+    elif name == "TARGETS":
+        from polytrader.events.topics import get_targets_topic
+
+        return get_targets_topic()
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -14,7 +14,7 @@ from polytrader.common.ids import generate_correlation_id, get_run_id
 
 if TYPE_CHECKING:
     from polytrader.risk.models import RiskReasonCode, RiskResult
-    from polytrader.types import OrderIntentEvent
+    from polytrader.types import OrderIntentEvent, Outcome
 
 
 class EventSource(str, Enum):
@@ -126,6 +126,121 @@ class SystemStoppedEvent(Event):
 
     source: EventSource = Field(default=EventSource.OPS)
     reason: str | None = Field(default=None, description="Optional reason for shutdown")
+
+
+class SignalEvent(Event):
+    """Event emitted by strategy/alpha layer with probabilistic scores.
+
+    Per flows.mdc §4: Alpha/Signal Layer produces probabilistic scores
+    (p_up, p_down, edge, confidence).
+    This event represents a signal from a trading strategy, NOT an order intent.
+
+    Key properties:
+    - Output is NOT an order and contains NO venue details (per flows.mdc §4)
+    - Contains probabilistic scores only
+    - Model/version identification for auditability
+    - Input snapshot reference for replay/debugging
+
+    Attributes:
+        market_slug: Polymarket market identifier
+        outcome: Market outcome ("UP" or "DOWN")
+        p_up: Probability that UP outcome wins (0-1)
+        p_down: Probability that DOWN outcome wins (0-1)
+        edge: Edge/confidence score (can be negative, no bounds)
+        confidence: Confidence level (0-1)
+        model_id: Strategy/model identifier (e.g., "simple_threshold")
+        model_version: Model version (e.g., "1.0.0")
+        snapshot_hash: Hash of input snapshot/features (optional, for replay)
+        snapshot_version: Version of input snapshot (optional)
+        rationale: Human-readable explanation of the signal
+    """
+
+    source: EventSource = Field(default=EventSource.STRATEGY)
+
+    market_slug: str = Field(description="Polymarket market identifier")
+    outcome: Outcome = Field(description="Market outcome: UP or DOWN")
+
+    # Probabilistic scores (per flows.mdc §4)
+    p_up: float = Field(ge=0.0, le=1.0, description="Probability that UP outcome wins (0-1)")
+    p_down: float = Field(
+        ge=0.0,
+        le=1.0,
+        description="Probability that DOWN outcome wins (0-1)",
+    )
+    edge: float = Field(description="Edge/confidence score (can be negative, no bounds)")
+    confidence: float = Field(ge=0.0, le=1.0, description="Confidence level (0-1)")
+
+    # Model identification (per observability.mdc §1: strategy_id)
+    model_id: str = Field(description="Strategy/model identifier (e.g., 'simple_threshold')")
+    model_version: str = Field(description="Model version (e.g., '1.0.0')")
+
+    # Input snapshot reference (optional, per flows.mdc §4)
+    snapshot_hash: str | None = Field(
+        default=None,
+        description="Hash of input snapshot/features (for replay/debugging)",
+    )
+    snapshot_version: str | None = Field(
+        default=None, description="Version of input snapshot (optional)"
+    )
+
+    # Rationale (for observability)
+    rationale: str = Field(
+        description="Human-readable explanation of the signal (e.g., 'Price below threshold')"
+    )
+
+
+class TargetEvent(Event):
+    """Event emitted by portfolio construction layer with target exposure.
+
+    Per flows.mdc §5: Portfolio Construction converts signals to target positions/exposures.
+    This event represents a target exposure before sizing calculation.
+
+    Key properties:
+    - Target exposure (shares or notional in USD)
+    - Target rationale (why this target)
+    - Constraint binding (which constraints clipped the target)
+    - Sizing metadata (computation details)
+
+    Attributes:
+        market_slug: Polymarket market identifier
+        outcome: Market outcome ("UP" or "DOWN")
+        target_exposure: Desired exposure (shares or notional in USD, >= 0)
+        target_rationale: Human-readable explanation of the target
+        constraint_binding: List of constraints that clipped the target
+        sizing_metadata: Additional sizing computation details (flexible dict)
+    """
+
+    source: EventSource = Field(default=EventSource.PORTFOLIO)
+
+    market_slug: str = Field(description="Polymarket market identifier")
+    outcome: Outcome = Field(description="Market outcome: UP or DOWN")
+
+    # Target exposure (per flows.mdc §5)
+    target_exposure: float = Field(
+        ge=0.0, description="Desired exposure (shares or notional in USD)"
+    )
+
+    # Rationale (per flows.mdc §5)
+    target_rationale: str = Field(
+        description="Human-readable explanation of the target (e.g., 'Signal edge > 0.1')"
+    )
+
+    # Constraint binding (per flows.mdc §5)
+    constraint_binding: list[str] = Field(
+        default_factory=list,
+        description=(
+            "List of constraints that clipped the target (e.g., ['max_position', 'capital_limit'])"
+        ),
+    )
+
+    # Computed sizing terms (per flows.mdc §5)
+    sizing_metadata: dict[str, float | str] = Field(
+        default_factory=dict,
+        description=(
+            "Additional sizing computation details "
+            "(e.g., {'current_position': 0.0, 'sizing_method': 'fixed'})"
+        ),
+    )
 
 
 class RiskCheckEvent(Event):
@@ -371,13 +486,16 @@ class MarketDiscoveryEvent(Event):
 
 # Rebuild models to resolve forward references
 # This is needed because OrderCreatedEvent uses OrderIntentEvent
-# which is defined in polytrader.types
+# and SignalEvent/TargetEvent use Outcome
+# which are defined in polytrader.types
 def _rebuild_models() -> None:
     """Rebuild Pydantic models to resolve forward references."""
     try:
-        from polytrader.types import OrderIntentEvent  # noqa: F401
+        from polytrader.types import OrderIntentEvent, Outcome  # noqa: F401
 
         OrderCreatedEvent.model_rebuild()
+        SignalEvent.model_rebuild()
+        TargetEvent.model_rebuild()
     except ImportError:
         # Types module not available yet, will be rebuilt on first use
         pass

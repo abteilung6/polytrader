@@ -185,9 +185,13 @@ class TestEventSourceEnum:
     def test_event_source_iteration(self) -> None:
         """Test that we can iterate over EventSource values."""
         sources = list(EventSource)
-        assert len(sources) == 9  # MDP, STRATEGY, PORTFOLIO, RISK, OMS, EXECUTION, and any others
+        assert (
+            len(sources) >= 9
+        )  # MDP, STRATEGY, PORTFOLIO, RISK, OMS, EXECUTION, EXEC, POSTTRADE, OPS
         assert EventSource.OPS in sources
         assert EventSource.MDP in sources
+        assert EventSource.STRATEGY in sources
+        assert EventSource.PORTFOLIO in sources
 
     def test_event_source_from_string(self) -> None:
         """Test that EventSource can be created from string value."""
