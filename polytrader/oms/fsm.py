@@ -148,6 +148,15 @@ def transition_order_state(
 
     # Check if transition is valid
     if not can_transition(order.state, new_state):
+        # Record invalid transition metric
+        try:
+            from polytrader.oms.metrics import record_invalid_transition
+
+            record_invalid_transition(order, order.state, new_state)
+        except Exception:
+            # Don't let metrics recording break the error handling
+            pass
+
         raise InvalidTransitionError(
             from_state=order.state,
             to_state=new_state,

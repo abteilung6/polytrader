@@ -5,6 +5,7 @@ Per flows.mdc §10: OMS handles venue updates from user stream.
 """
 
 import asyncio
+import time
 import uuid
 from typing import TYPE_CHECKING
 
@@ -26,8 +27,20 @@ from polytrader.events.types import (
     OrderRejectedEvent,
     OrderSubmittedEvent,
 )
+from polytrader.logging_config import logger
 from polytrader.oms.fsm import transition_order_state
 from polytrader.oms.idempotency import IdempotencyStore, generate_client_order_id
+from polytrader.oms.metrics import (
+    record_fill,
+    record_idempotency_hit,
+    record_order_acked,
+    record_order_cancelled,
+    record_order_created,
+    record_order_lifetime,
+    record_order_rejected,
+    record_order_submitted,
+    update_orders_live_gauge,
+)
 from polytrader.oms.models import Order, OrderState
 from polytrader.oms.store import IEventHandlingOrderStore
 
@@ -73,6 +86,9 @@ class OMSCore:
         self._store = store
         self._idempotency = idempotency_store
         self._running = False
+        # Track order timestamps for latency calculation
+        # order_id -> {"created": ts, "submitted": ts, "acked": ts, "first_fill": ts}
+        self._order_timestamps: dict[str, dict[str, float]] = {}
 
     async def run(self) -> None:
         """Start OMS Core async loop.
@@ -83,6 +99,26 @@ class OMSCore:
         self._running = True
         proposal_queue = self._bus.subscribe(APPROVED_PROPOSALS)
 
+        # Periodic queue depth and orders_live gauge update
+        async def update_gauges():
+            while self._running:
+                try:
+                    queue_size = proposal_queue.qsize()
+                    from polytrader.obs.metrics import get_metrics_collector
+
+                    metrics = get_metrics_collector()
+                    metrics.set_gauge("queue_depth", queue_size)
+                    update_orders_live_gauge(self._store)
+                    await asyncio.sleep(1.0)  # Update every second
+                except asyncio.CancelledError:
+                    break
+                except Exception:
+                    # Don't let gauge updates crash the main loop
+                    logger.exception("Error updating OMS gauges")
+                    await asyncio.sleep(1.0)
+
+        gauge_task = asyncio.create_task(update_gauges())
+
         try:
             while self._running:
                 intent = await proposal_queue.get()
@@ -90,6 +126,11 @@ class OMSCore:
         except asyncio.CancelledError:
             pass
         finally:
+            gauge_task.cancel()
+            try:
+                await gauge_task
+            except asyncio.CancelledError:
+                pass
             self._running = False
 
     def stop(self) -> None:
@@ -118,6 +159,7 @@ class OMSCore:
         Raises:
             ValueError: If order creation fails
         """
+        start_time = time.monotonic()
         # Step 1: Generate client_order_id
         client_order_id = generate_client_order_id(intent)
 
@@ -127,6 +169,15 @@ class OMSCore:
             # Duplicate - return existing order
             existing_order = self._store.get_order(existing_order_id)
             if existing_order:
+                record_idempotency_hit(client_order_id)
+                logger.bind(
+                    correlation_id=intent.correlation_id,
+                    order_id=existing_order.order_id,
+                    client_order_id=client_order_id,
+                    market_slug=intent.market_slug,
+                    outcome=intent.outcome,
+                    side=intent.side,
+                ).debug("Duplicate order detected, returning existing order")
                 return existing_order
             # Order ID exists but order not found - clear idempotency mapping
             # (shouldn't happen, but handle gracefully)
@@ -134,6 +185,13 @@ class OMSCore:
 
         # Step 3: Create Order in NEW state (via store)
         order = await self._store.create_order(intent, client_order_id)
+
+        # Record creation timestamp
+        created_time = time.monotonic()
+        self._order_timestamps[order.order_id] = {"created": created_time}
+
+        # Record order created metric
+        record_order_created(order)
 
         # Step 4: Record idempotency mapping
         self._idempotency.record_order(client_order_id, order.order_id)
@@ -157,6 +215,12 @@ class OMSCore:
         order = transition_order_state(order, OrderState.SUBMITTED)
         self._store.update_order(order)
 
+        # Record submission timestamp and calculate latency
+        submitted_time = time.monotonic()
+        self._order_timestamps[order.order_id]["submitted"] = submitted_time
+        submit_latency_ms = (submitted_time - created_time) * 1000
+        record_order_submitted(order, submit_latency_ms)
+
         submitted_event = OrderSubmittedEvent(
             order_id=order.order_id,
             client_order_id=client_order_id,
@@ -165,6 +229,29 @@ class OMSCore:
         await self._bus.publish(ORDER_SUBMITTED, submitted_event)
         # Store handler will update state if needed (idempotent)
         self._store.handle_order_submitted(submitted_event)
+
+        # Structured logging
+        total_latency_ms = (time.monotonic() - start_time) * 1000
+        logger.bind(
+            correlation_id=intent.correlation_id,
+            order_id=order.order_id,
+            client_order_id=client_order_id,
+            market_slug=order.market_slug,
+            outcome=order.outcome,
+            side=order.side,
+            size=order.size,
+            limit_price=order.limit_price,
+            latency_ms=total_latency_ms,
+        ).info(
+            "Order created: {order_id} for {market_slug}/{outcome} "
+            "side={side} size={size} price={limit_price}",
+            order_id=order.order_id,
+            market_slug=order.market_slug,
+            outcome=order.outcome,
+            side=order.side,
+            size=order.size,
+            limit_price=order.limit_price,
+        )
 
         return order
 
@@ -190,9 +277,27 @@ class OMSCore:
         Raises:
             ValueError: If order not found
         """
+        start_time = time.monotonic()
         order = self._store.get_order_by_client_id(client_order_id)
         if not order:
+            logger.bind(
+                client_order_id=client_order_id,
+                error_class="ValueError",
+            ).error(
+                "Order not found for client_order_id: {client_order_id}",
+                client_order_id=client_order_id,
+            )
             raise ValueError(f"Order not found for client_order_id: {client_order_id}")
+
+        # Record ack timestamp and calculate latency
+        acked_time = time.monotonic()
+        if order.order_id in self._order_timestamps:
+            self._order_timestamps[order.order_id]["acked"] = acked_time
+            if "submitted" in self._order_timestamps[order.order_id]:
+                ack_latency_ms = (
+                    acked_time - self._order_timestamps[order.order_id]["submitted"]
+                ) * 1000
+                record_order_acked(order, ack_latency_ms)
 
         # Transition to ACKED
         order = transition_order_state(order, OrderState.ACKED)
@@ -209,6 +314,23 @@ class OMSCore:
         await self._bus.publish(ORDER_ACKS, ack_event)
         # Store handler will update state if needed (idempotent)
         self._store.handle_order_ack(ack_event)
+
+        # Structured logging
+        latency_ms = (time.monotonic() - start_time) * 1000
+        logger.bind(
+            correlation_id=order.correlation_id,
+            order_id=order.order_id,
+            client_order_id=client_order_id,
+            venue_order_id=venue_order_id,
+            market_slug=order.market_slug,
+            outcome=order.outcome,
+            side=order.side,
+            latency_ms=latency_ms,
+        ).info(
+            "Order acknowledged: {order_id} venue_order_id={venue_order_id}",
+            order_id=order.order_id,
+            venue_order_id=venue_order_id,
+        )
 
     async def handle_venue_reject(
         self,
@@ -231,9 +353,32 @@ class OMSCore:
         Raises:
             ValueError: If order not found
         """
+        start_time = time.monotonic()
         order = self._store.get_order_by_client_id(client_order_id)
         if not order:
+            logger.bind(
+                client_order_id=client_order_id,
+                error_class="ValueError",
+            ).error(
+                "Order not found for client_order_id: {client_order_id}",
+                client_order_id=client_order_id,
+            )
             raise ValueError(f"Order not found for client_order_id: {client_order_id}")
+
+        # Record rejection metric
+        record_order_rejected(order, reason)
+
+        # Clean up timestamps if order reaches terminal state
+        if order.order_id in self._order_timestamps:
+            if "created" in self._order_timestamps[order.order_id]:
+                lifetime_ms = (
+                    time.monotonic() - self._order_timestamps[order.order_id]["created"]
+                ) * 1000
+                # Order will be REJECTED after this, so record lifetime
+                # We'll update the order state after the event is processed
+                # For now, record with current state
+                record_order_lifetime(order, lifetime_ms)
+            del self._order_timestamps[order.order_id]
 
         # Emit OrderRejectedEvent (store handles intermediate states)
         # Store will handle NEW → PENDING_SUBMIT → SUBMITTED → REJECTED if needed
@@ -245,6 +390,25 @@ class OMSCore:
         await self._bus.publish(ORDER_REJECTS, reject_event)
         # Store handler will handle state transitions
         self._store.handle_order_rejected(reject_event)
+
+        # Structured logging
+        latency_ms = (time.monotonic() - start_time) * 1000
+        logger.bind(
+            correlation_id=order.correlation_id,
+            order_id=order.order_id,
+            client_order_id=client_order_id,
+            venue_order_id=order.venue_order_id,
+            market_slug=order.market_slug,
+            outcome=order.outcome,
+            side=order.side,
+            reason=reason,
+            latency_ms=latency_ms,
+            error_class="rejection",
+        ).warning(
+            "Order rejected: {order_id} reason={reason}",
+            order_id=order.order_id,
+            reason=reason,
+        )
 
     async def handle_fill(
         self,
@@ -276,16 +440,45 @@ class OMSCore:
         Raises:
             ValueError: If order not found or fill is invalid
         """
+        start_time = time.monotonic()
         order = self._store.get_order_by_client_id(client_order_id)
         if not order:
+            logger.bind(
+                client_order_id=client_order_id,
+                error_class="ValueError",
+            ).error(
+                "Order not found for client_order_id: {client_order_id}",
+                client_order_id=client_order_id,
+            )
             raise ValueError(f"Order not found for client_order_id: {client_order_id}")
 
         # Validate fill doesn't exceed order size
         if order.filled_size + size > order.size:
-            raise ValueError(
+            error_msg = (
                 f"Fill size {size} would exceed order size {order.size} "
                 f"(current filled: {order.filled_size})"
             )
+            logger.bind(
+                correlation_id=order.correlation_id,
+                order_id=order.order_id,
+                client_order_id=client_order_id,
+                fill_size=size,
+                order_size=order.size,
+                current_filled=order.filled_size,
+                error_class="ValueError",
+            ).error(error_msg)
+            raise ValueError(error_msg)
+
+        # Record first fill timestamp and calculate latency
+        fill_latency_ms = None
+        if order.order_id in self._order_timestamps:
+            if "first_fill" not in self._order_timestamps[order.order_id]:
+                self._order_timestamps[order.order_id]["first_fill"] = time.monotonic()
+                if "acked" in self._order_timestamps[order.order_id]:
+                    fill_latency_ms = (
+                        self._order_timestamps[order.order_id]["first_fill"]
+                        - self._order_timestamps[order.order_id]["acked"]
+                    ) * 1000
 
         # Generate fill_id
         fill_id = str(uuid.uuid4())
@@ -303,6 +496,44 @@ class OMSCore:
         await self._bus.publish(FILLS, fill_event)
         # Store handler will handle state transitions and calculations
         self._store.handle_fill(fill_event)
+
+        # Get updated order to check if it's terminal
+        updated_order = self._store.get_order(order.order_id)
+        if updated_order:
+            # Record fill metric
+            record_fill(updated_order, fill_latency_ms)
+
+            # If order is terminal, record lifetime and clean up timestamps
+            if updated_order.is_terminal and updated_order.order_id in self._order_timestamps:
+                if "created" in self._order_timestamps[updated_order.order_id]:
+                    lifetime_ms = (
+                        time.monotonic() - self._order_timestamps[updated_order.order_id]["created"]
+                    ) * 1000
+                    record_order_lifetime(updated_order, lifetime_ms)
+                del self._order_timestamps[updated_order.order_id]
+
+        # Structured logging
+        latency_ms = (time.monotonic() - start_time) * 1000
+        logger.bind(
+            correlation_id=order.correlation_id,
+            order_id=order.order_id,
+            client_order_id=client_order_id,
+            venue_order_id=order.venue_order_id,
+            venue_fill_id=venue_fill_id,
+            market_slug=order.market_slug,
+            outcome=order.outcome,
+            side=order.side,
+            fill_size=size,
+            fill_price=price,
+            fee=fee,
+            latency_ms=latency_ms,
+        ).info(
+            "Order filled: {order_id} size={fill_size} price={fill_price} fee={fee}",
+            order_id=order.order_id,
+            fill_size=size,
+            fill_price=price,
+            fee=fee,
+        )
 
     async def handle_cancel(
         self,
@@ -327,13 +558,44 @@ class OMSCore:
         Raises:
             ValueError: If order not found or already terminal
         """
+        start_time = time.monotonic()
         order = self._store.get_order_by_client_id(client_order_id)
         if not order:
+            logger.bind(
+                client_order_id=client_order_id,
+                error_class="ValueError",
+            ).error(
+                "Order not found for client_order_id: {client_order_id}",
+                client_order_id=client_order_id,
+            )
             raise ValueError(f"Order not found for client_order_id: {client_order_id}")
 
         # Check if order can be cancelled
         if order.is_terminal:
-            raise ValueError(f"Order {order.order_id} is already in terminal state: {order.state}")
+            error_msg = f"Order {order.order_id} is already in terminal state: {order.state}"
+            logger.bind(
+                correlation_id=order.correlation_id,
+                order_id=order.order_id,
+                client_order_id=client_order_id,
+                state=order.state.value,
+                error_class="ValueError",
+            ).warning(error_msg)
+            raise ValueError(error_msg)
+
+        # Record cancellation metric
+        record_order_cancelled(order, reason)
+
+        # Clean up timestamps if order reaches terminal state
+        if order.order_id in self._order_timestamps:
+            if "created" in self._order_timestamps[order.order_id]:
+                lifetime_ms = (
+                    time.monotonic() - self._order_timestamps[order.order_id]["created"]
+                ) * 1000
+                # Order will be CANCELLED after this, so record lifetime
+                # We'll update the order state after the event is processed
+                # For now, record with current state
+                record_order_lifetime(order, lifetime_ms)
+            del self._order_timestamps[order.order_id]
 
         # Send CancelOrderCommand to Execution
         from polytrader.oms.commands import CancelOrderCommand
@@ -356,3 +618,21 @@ class OMSCore:
         await self._bus.publish(ORDER_CANCELS, cancel_event)
         # Store handler will handle state transition
         self._store.handle_order_canceled(cancel_event)
+
+        # Structured logging
+        latency_ms = (time.monotonic() - start_time) * 1000
+        logger.bind(
+            correlation_id=order.correlation_id,
+            order_id=order.order_id,
+            client_order_id=client_order_id,
+            venue_order_id=order.venue_order_id,
+            market_slug=order.market_slug,
+            outcome=order.outcome,
+            side=order.side,
+            reason=reason,
+            latency_ms=latency_ms,
+        ).info(
+            "Order cancelled: {order_id} reason={reason}",
+            order_id=order.order_id,
+            reason=reason or "unknown",
+        )

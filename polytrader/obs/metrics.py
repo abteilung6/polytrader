@@ -31,6 +31,21 @@ class IMetricsCollector(Protocol):
         """
         ...
 
+    def record_histogram(
+        self,
+        name: str,
+        value: float,
+        labels: dict[str, str] | None = None,
+    ) -> None:
+        """Record a histogram value.
+
+        Args:
+            name: Metric name (e.g., "submit_latency_ms")
+            value: Value to record
+            labels: Optional labels/tags
+        """
+        ...
+
     def get_counter(self, name: str, labels: dict[str, str] | None = None) -> int:
         """Get current counter value.
 
@@ -52,6 +67,24 @@ class IMetricsCollector(Protocol):
 
         Returns:
             Current gauge value
+        """
+        ...
+
+    def get_histogram_percentiles(
+        self,
+        name: str,
+        percentiles: list[float] | None = None,
+        labels: dict[str, str] | None = None,
+    ) -> dict[float, float]:
+        """Get histogram percentiles.
+
+        Args:
+            name: Metric name
+            percentiles: List of percentiles (0.0 to 1.0), defaults to [0.5, 0.95, 0.99]
+            labels: Optional labels to filter
+
+        Returns:
+            Dictionary mapping percentile to value
         """
         ...
 
@@ -77,6 +110,12 @@ class MemoryMetricsCollector:
         self._gauges: dict[str, dict[tuple[tuple[str, str], ...], float]] = defaultdict(
             lambda: defaultdict(float)
         )
+        # Histograms: name -> labels_key -> list of values
+        # Keep only last 1000 values per metric to prevent memory growth
+        self._histograms: dict[str, dict[tuple[tuple[str, str], ...], list[float]]] = defaultdict(
+            lambda: defaultdict(list)
+        )
+        self._histogram_max_size = 1000
 
     def increment_counter(self, name: str, labels: dict[str, str] | None = None) -> None:
         """Increment a counter metric.
@@ -125,6 +164,56 @@ class MemoryMetricsCollector:
         key = self._labels_to_key(labels)
         return self._gauges[name][key]
 
+    def record_histogram(
+        self,
+        name: str,
+        value: float,
+        labels: dict[str, str] | None = None,
+    ) -> None:
+        """Record histogram value.
+
+        Args:
+            name: Metric name
+            value: Value to record
+            labels: Optional labels/tags
+        """
+        key = self._labels_to_key(labels)
+        self._histograms[name][key].append(value)
+
+        # Keep only last N values to prevent memory growth
+        if len(self._histograms[name][key]) > self._histogram_max_size:
+            self._histograms[name][key] = self._histograms[name][key][-self._histogram_max_size :]
+
+    def get_histogram_percentiles(
+        self,
+        name: str,
+        percentiles: list[float] | None = None,
+        labels: dict[str, str] | None = None,
+    ) -> dict[float, float]:
+        """Get histogram percentiles.
+
+        Args:
+            name: Metric name
+            percentiles: List of percentiles (0.0 to 1.0), defaults to [0.5, 0.95, 0.99]
+            labels: Optional labels to filter
+
+        Returns:
+            Dictionary mapping percentile to value
+        """
+        if percentiles is None:
+            percentiles = [0.5, 0.95, 0.99]
+
+        key = self._labels_to_key(labels)
+        values = sorted(self._histograms[name][key])
+        if not values:
+            return dict.fromkeys(percentiles, 0.0)
+
+        result = {}
+        for p in percentiles:
+            index = int(len(values) * p)
+            result[p] = values[min(index, len(values) - 1)]
+        return result
+
     def _labels_to_key(self, labels: dict[str, str] | None) -> tuple[tuple[str, str], ...]:
         """Convert labels dict to immutable key for storage.
 
@@ -162,7 +251,28 @@ class MemoryMetricsCollector:
                 gauge_labels_dict: dict[str, str] = dict(key) if key else {}
                 gauges[name].append({"labels": gauge_labels_dict, "value": value})
 
-        return {"counters": counters, "gauges": gauges}
+        histograms: dict[str, list[dict[str, Any]]] = {}
+        for name, hist_key_dict in self._histograms.items():
+            histograms[name] = []
+            for key, values in hist_key_dict.items():
+                # Convert tuple key back to dict
+                hist_labels_dict: dict[str, str] = dict(key) if key else {}
+                # Calculate percentiles
+                sorted_values = sorted(values)
+                percentiles = {}
+                if sorted_values:
+                    for p in [0.5, 0.95, 0.99]:
+                        index = int(len(sorted_values) * p)
+                        percentiles[p] = sorted_values[min(index, len(sorted_values) - 1)]
+                histograms[name].append(
+                    {
+                        "labels": hist_labels_dict,
+                        "count": len(values),
+                        "percentiles": percentiles,
+                    }
+                )
+
+        return {"counters": counters, "gauges": gauges, "histograms": histograms}
 
 
 # Global metrics collector instance (singleton)

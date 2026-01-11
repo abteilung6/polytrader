@@ -14,6 +14,18 @@ from polytrader.oms.fsm import (
     transition_order_state,
 )
 from polytrader.oms.idempotency import IdempotencyStore, generate_client_order_id
+from polytrader.oms.metrics import (
+    record_fill,
+    record_idempotency_hit,
+    record_invalid_transition,
+    record_order_acked,
+    record_order_cancelled,
+    record_order_created,
+    record_order_lifetime,
+    record_order_rejected,
+    record_order_submitted,
+    update_orders_live_gauge,
+)
 from polytrader.oms.models import Fill, Order, OrderState
 from polytrader.oms.store import (
     IEventHandlingOrderStore,
@@ -37,5 +49,15 @@ __all__ = [
     "generate_client_order_id",
     "get_valid_transitions",
     "is_terminal_state",
+    "record_fill",
+    "record_idempotency_hit",
+    "record_invalid_transition",
+    "record_order_acked",
+    "record_order_cancelled",
+    "record_order_created",
+    "record_order_lifetime",
+    "record_order_rejected",
+    "record_order_submitted",
     "transition_order_state",
+    "update_orders_live_gauge",
 ]
