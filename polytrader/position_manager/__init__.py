@@ -14,10 +14,17 @@ from polytrader.types import Outcome, Position
 
 
 class IPositionManager(Protocol):
-    """Protocol for position manager components."""
+    """Protocol for position manager components.
+
+    Per architecture.mdc: Position managers track positions from fills.
+    Paper and real implementations both implement this protocol.
+    """
 
     async def run(self) -> None:
-        """Start the position manager."""
+        """Start the position manager.
+
+        Subscribes to events and tracks positions.
+        """
         ...
 
     def stop(self) -> None:
@@ -29,6 +36,18 @@ class IPositionManager(Protocol):
 
         Returns:
             Dictionary mapping (market_slug, outcome) to Position, or None if not available.
+        """
+        ...
+
+    def get_position(self, market_slug: str, outcome: Outcome) -> Position | None:
+        """Get position for a specific market and outcome.
+
+        Args:
+            market_slug: Market identifier
+            outcome: Market outcome ("UP" or "DOWN")
+
+        Returns:
+            Position if exists, None otherwise
         """
         ...
 
@@ -857,4 +876,30 @@ class PositionManager(IPositionManager):
         Returns:
             Dictionary mapping (market_slug, outcome) to Position, or None if not available.
         """
+        if not self._positions:
+            return {}
         return self._positions.copy()
+
+    def get_position(self, market_slug: str, outcome: Outcome) -> Position | None:
+        """Get position for a specific market and outcome.
+
+        Args:
+            market_slug: Market identifier
+            outcome: Market outcome ("UP" or "DOWN")
+
+        Returns:
+            Position if exists, None otherwise
+        """
+        key = (market_slug, outcome)
+        return self._positions.get(key)
+
+
+# Export paper implementation (import at end to avoid circular import)
+from polytrader.position_manager.paper import PaperPositionManager  # noqa: E402
+
+__all__ = [
+    "IPositionManager",
+    "PaperPositionManager",
+    "PositionManager",
+    "create_position_manager_factory",
+]

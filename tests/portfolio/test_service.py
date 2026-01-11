@@ -30,6 +30,14 @@ class FakePositionManager(IPositionManager):
             result[(market_slug, outcome)] = position
         return result if result else None
 
+    def get_position(self, market_slug: str, outcome: Outcome) -> Position | None:
+        """Get position for a specific market and outcome."""
+        key = (market_slug, outcome)
+        positions = self.get_positions()
+        if positions is None:
+            return None
+        return positions.get(key)
+
     async def run(self) -> None:
         """Not used in tests."""
         pass
