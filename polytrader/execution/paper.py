@@ -12,9 +12,8 @@ import random
 import uuid
 
 from polytrader.adapters.polymarket.models import VenueError, VenueResponse
-from polytrader.events import FILLS
 from polytrader.events.bus import EventBus
-from polytrader.events.types import FillEvent, OrderIntentEvent
+from polytrader.events.types import OrderIntentEvent
 from polytrader.execution.adapter import IVenueAdapter
 from polytrader.execution.fill_models import (
     FillModel,
@@ -174,24 +173,10 @@ class PaperExecutionAdapter(IVenueAdapter):
             },
         )
 
-        # 6. Publish FillEvent to bus (simulates immediate fill)
-        # Note: We don't have order_id here, but OMS can match FillEvents to orders
-        # by client_order_id or correlation_id. The ExecutionRouter will receive
-        # the OrderAckEvent and can then publish FillEvent with the correct order_id.
-        # For paper trading, we simulate immediate fills, so we publish directly.
-        # The OMS will handle matching this FillEvent to the correct order.
-        # TODO: Consider having ExecutionRouter publish FillEvent after ack,
-        #       since it has access to order_id from the command.
-        fill_event = FillEvent(
-            order_id=client_order_id,  # OMS will match by client_order_id or correlation_id
-            fill_id=str(uuid.uuid4()),
-            size=intent.size,
-            price=fill_price,
-            fee=0.0,  # Paper trading: no fees
-            venue_fill_id=venue_order_id,
-            correlation_id=intent.correlation_id,
-        )
-        await self._bus.publish(FILLS, fill_event)
+        # 6. Don't publish FillEvent here - ExecutionRouter will do it with correct order_id
+        # ExecutionRouter has access to command.order_id and will publish FillEvent
+        # after receiving the venue response. This ensures FillEvent.order_id matches
+        # the OMS order_id, not just the client_order_id.
 
         logger.bind(
             client_order_id=client_order_id,

@@ -184,6 +184,31 @@ class ExecutionRouter:
             )
             await self._bus.publish(EXECUTION_RESPONSES, response_event)
 
+            # Publish FillEvent if order was filled
+            # For paper trading, fills are immediate. For real trading, this comes from user stream.
+            if venue_response.status == "FILLED":
+                import uuid
+
+                from polytrader.events import FILLS
+                from polytrader.events.types import FillEvent
+
+                # Extract fill information from venue response
+                fill_price = venue_response.raw_response.get(
+                    "fill_price", modified_intent.limit_price
+                )
+                fill_size = modified_intent.size  # Full size for immediate fills
+
+                fill_event = FillEvent(
+                    order_id=command.order_id,  # Use OMS order_id, not client_order_id
+                    fill_id=str(uuid.uuid4()),
+                    size=fill_size,
+                    price=fill_price,
+                    fee=0.0,  # Paper trading: no fees (real trading would extract from response)
+                    venue_fill_id=venue_response.venue_order_id,
+                    correlation_id=command.correlation_id,
+                )
+                await self._bus.publish(FILLS, fill_event)
+
             # Normalize venue response for OMS
             # OMS expects venue ack/reject, so we emit OrderAckEvent
             # TODO: This should come from user stream, but for now we emit it here

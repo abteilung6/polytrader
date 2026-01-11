@@ -12,7 +12,7 @@ import pytest
 from polytrader.adapters.polymarket.models import VenueError
 from polytrader.events import FILLS
 from polytrader.events.bus import EventBus
-from polytrader.events.types import FillEvent, MarketDataEvent, OrderIntentEvent
+from polytrader.events.types import MarketDataEvent, OrderIntentEvent
 from polytrader.execution.fill_models import FillModel
 from polytrader.execution.paper import PaperExecutionAdapter
 from polytrader.store import MemoryMarketDataStore
@@ -93,8 +93,12 @@ class TestPaperExecutionAdapter:
         assert response.raw_response["fill_price"] == 0.55  # Mid price
 
     @pytest.mark.asyncio
-    async def test_submit_order_publishes_fill_event(self) -> None:
-        """Test that submit_order publishes FillEvent."""
+    async def test_submit_order_returns_fill_in_response(self) -> None:
+        """Test that submit_order returns fill information in VenueResponse.
+
+        Note: FillEvent publishing is now handled by ExecutionRouter, not the adapter.
+        The adapter only returns fill information in the VenueResponse.
+        """
         bus = EventBus()
         store = MemoryMarketDataStore()
         adapter = PaperExecutionAdapter(
@@ -117,19 +121,24 @@ class TestPaperExecutionAdapter:
             ttl_s=60.0,
         )
 
-        # Subscribe to FILLS topic
+        # Subscribe to FILLS topic to verify adapter does NOT publish
         fills_queue = bus.subscribe(FILLS)
 
-        await adapter.submit_order("client-123", intent)
+        response = await adapter.submit_order("client-123", intent)
 
-        # Wait for FillEvent
-        fill_event = await asyncio.wait_for(fills_queue.get(), timeout=1.0)
+        # Verify response contains fill information
+        assert response.status == "FILLED"
+        assert "fill_price" in response.raw_response
+        assert response.raw_response["fill_price"] == 0.55
 
-        assert isinstance(fill_event, FillEvent)
-        assert fill_event.size == 1.0
-        assert fill_event.price == 0.55
-        assert fill_event.fee == 0.0
-        assert fill_event.correlation_id == intent.correlation_id
+        # Verify adapter does NOT publish FillEvent (ExecutionRouter will do it)
+        # Wait a short time to ensure no event is published
+        try:
+            await asyncio.wait_for(fills_queue.get(), timeout=0.1)
+            pytest.fail("Adapter should not publish FillEvent - ExecutionRouter handles it")
+        except TimeoutError:
+            # Expected - no FillEvent published by adapter
+            pass
 
     @pytest.mark.asyncio
     async def test_submit_order_rejection(self) -> None:

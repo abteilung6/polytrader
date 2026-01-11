@@ -569,8 +569,12 @@ class MarketDataEvent(Event):
 
     market_slug: str = Field(description="Polymarket market identifier")
     outcome: Outcome = Field(description="Market outcome: UP or DOWN")
-    best_bid: float = Field(gt=0, le=1, description="Best bid price (0-1 range)")
-    best_ask: float = Field(gt=0, le=1, description="Best ask price (0-1 range)")
+    best_bid: float = Field(
+        ge=0, le=1, description="Best bid price (0-1 range, can be 0 if no bid)"
+    )
+    best_ask: float = Field(
+        ge=0, le=1, description="Best ask price (0-1 range, can be 0 if no ask)"
+    )
 
     @property
     def mid(self) -> float:

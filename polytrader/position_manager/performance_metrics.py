@@ -154,17 +154,21 @@ class PerformanceMetrics:
         """
         return self._calculate_drawdown(current_equity)
 
-    def get_summary(self, starting_equity: float = 0.0) -> dict[str, float | int | None]:
+    def get_summary(
+        self, starting_equity: float = 0.0, unrealized_pnl: float = 0.0
+    ) -> dict[str, float | int | None]:
         """Get performance summary statistics.
 
         Args:
             starting_equity: Starting equity for drawdown calculation
+            unrealized_pnl: Unrealized P&L from open positions
 
         Returns:
             Dictionary with performance summary metrics
         """
         total_trades = self._tracker.get_total_trades()
-        current_equity = starting_equity + self.get_total_realized_pnl()
+        realized_pnl = self.get_total_realized_pnl()
+        current_equity = starting_equity + realized_pnl + unrealized_pnl
 
         best_trade = self.get_best_trade()
         worst_trade = self.get_worst_trade()
@@ -172,7 +176,8 @@ class PerformanceMetrics:
         return {
             "total_trades": total_trades,
             "win_rate_pct": self.get_win_rate(),
-            "total_realized_pnl": self.get_total_realized_pnl(),
+            "total_realized_pnl": realized_pnl,
+            "unrealized_pnl": unrealized_pnl,
             "average_pnl": self.get_average_pnl(),
             "average_win": self.get_average_win(),
             "average_loss": self.get_average_loss(),

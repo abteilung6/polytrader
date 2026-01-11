@@ -117,6 +117,24 @@ class MarketPattern:
         # This finds the market that's currently active (not future)
         window_start = (now // self.interval_seconds) * self.interval_seconds
         window_end = window_start + self.interval_seconds
+
+        # Debug logging
+        from polytrader.logging_config import logger
+
+        logger.bind(
+            now=now,
+            interval=self.interval_seconds,
+            window_start=window_start,
+            window_end=window_end,
+        ).debug(
+            "🔍 get_current_window_end: now={now}, interval={interval}, "
+            "window_start={start}, window_end={end}",
+            now=now,
+            interval=self.interval_seconds,
+            start=window_start,
+            end=window_end,
+        )
+
         return window_end
 
     def get_next_window_end(self) -> int:

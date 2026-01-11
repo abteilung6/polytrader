@@ -57,6 +57,45 @@ class TestConvertTargetToIntent:
         assert intent.source == EventSource.PORTFOLIO
         assert intent.ttl_s == 60.0
 
+    def test_convert_target_to_intent_zero_liquidity(self) -> None:
+        """Test that zero liquidity (best_ask=0.0) returns None."""
+        target = Target(
+            market_slug="test-market",
+            outcome="UP",
+            target_exposure=1.0,
+            rationale="Test target",
+            constraint_binding=[],
+            sizing_metadata={},
+        )
+
+        market_data = MarketDataEvent(
+            market_slug="test-market",
+            outcome="UP",
+            best_bid=0.0010,
+            best_ask=0.0,  # No liquidity
+        )
+
+        signal = SignalEvent(
+            market_slug="test-market",
+            outcome="UP",
+            p_up=0.85,
+            p_down=0.15,
+            edge=0.55,
+            confidence=0.80,
+            model_id="test",
+            model_version="1.0.0",
+            rationale="Test signal",
+        )
+
+        intent = convert_target_to_intent(
+            target=target,
+            market_data=market_data,
+            signal=signal,
+            size=1.0,
+        )
+
+        assert intent is None, "Should return None when best_ask=0.0 (no liquidity)"
+
     def test_convert_target_to_intent_zero_size(self) -> None:
         """Test that zero size returns None."""
         target = Target(

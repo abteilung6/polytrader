@@ -15,8 +15,8 @@ This implementation is event-driven only, no external API sync.
 import asyncio
 from typing import TYPE_CHECKING
 
-from polytrader.events import FILLS, EventBus
-from polytrader.events.types import FillEvent
+from polytrader.events import FILLS, MARKET_DATA, EventBus
+from polytrader.events.types import FillEvent, MarketDataEvent
 from polytrader.logging_config import logger
 from polytrader.oms.store import IOrderStore
 from polytrader.position_manager import IPositionManager
@@ -48,15 +48,18 @@ class PaperPositionManager(IPositionManager):
         self,
         bus: EventBus,
         store: IOrderStore,
+        starting_equity: float = 1000.0,
     ) -> None:
         """Initialize paper position manager.
 
         Args:
             bus: Event bus for subscribing to FILLS
             store: Order store for looking up order details
+            starting_equity: Initial equity for performance metrics calculation
         """
         self._bus = bus
         self._store = store
+        self._starting_equity = starting_equity
 
         # Internal position tracking: (market_slug, outcome) -> Position
         self._positions: dict[tuple[str, Outcome], Position] = {}
@@ -64,6 +67,10 @@ class PaperPositionManager(IPositionManager):
         # Track cumulative fills per position for partial fills
         # (market_slug, outcome) -> (total_size, total_cost)
         self._position_fills: dict[tuple[str, Outcome], tuple[float, float]] = {}
+
+        # Track latest market prices for unrealized P&L calculation
+        # (market_slug, outcome) -> current_mid_price
+        self._latest_prices: dict[tuple[str, Outcome], float] = {}
 
         # Outcome tracking and performance metrics (Commit 4)
         self._outcome_tracker = OutcomeTracker()
@@ -74,33 +81,45 @@ class PaperPositionManager(IPositionManager):
     async def run(self) -> None:
         """Start the position manager.
 
-        Subscribes to FILLS topic and tracks positions from FillEvents.
+        Subscribes to FILLS and MARKET_DATA topics to track positions and prices.
         """
         self._running = True
         logger.info("Starting PaperPositionManager")
 
-        # Subscribe to FILLS topic
+        # Subscribe to FILLS and MARKET_DATA topics
         fills_queue = self._bus.subscribe(FILLS)
+        market_data_queue = self._bus.subscribe(MARKET_DATA)
 
-        try:
-            # Process fill events
-            while self._running:
-                try:
-                    fill_event = await asyncio.wait_for(fills_queue.get(), timeout=1.0)
+        async def process_fills() -> None:
+            """Process fill events."""
+            try:
+                while self._running:
+                    fill_event = await fills_queue.get()
                     if isinstance(fill_event, FillEvent):
                         await self._handle_fill(fill_event)
-                except TimeoutError:
-                    # Timeout is expected - continue loop to check _running
-                    continue
-                except Exception as e:
-                    logger.bind(
-                        error_type=type(e).__name__,
-                        error=str(e),
-                    ).exception(
-                        "Error processing fill event: {error_type}: {error}",
-                        error_type=type(e).__name__,
-                        error=str(e),
-                    )
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                logger.exception("Error in fill processor")
+
+        async def process_market_data() -> None:
+            """Process market data events."""
+            try:
+                while self._running:
+                    market_event = await market_data_queue.get()
+                    if isinstance(market_event, MarketDataEvent):
+                        self._handle_market_data(market_event)
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                logger.exception("Error in market data processor")
+
+        try:
+            # Run both processors concurrently (like ExecutionRouter)
+            await asyncio.gather(
+                process_fills(),
+                process_market_data(),
+            )
 
         except Exception:
             logger.exception("PaperPositionManager error")
@@ -108,6 +127,26 @@ class PaperPositionManager(IPositionManager):
         finally:
             self._running = False
             logger.info("PaperPositionManager stopped")
+
+    def _handle_market_data(self, market_event: MarketDataEvent) -> None:
+        """Handle a market data event and update latest prices.
+
+        Args:
+            market_event: Market data event with current bid/ask prices
+        """
+        key = (market_event.market_slug, market_event.outcome)
+        # Store the mid price for unrealized P&L calculation
+        self._latest_prices[key] = market_event.mid
+        logger.bind(
+            market_slug=market_event.market_slug,
+            outcome=market_event.outcome,
+            mid_price=market_event.mid,
+        ).debug(
+            "Updated market price: {market_slug}/{outcome} = {mid_price:.4f}",
+            market_slug=market_event.market_slug,
+            outcome=market_event.outcome,
+            mid_price=market_event.mid,
+        )
 
     async def _handle_fill(self, fill_event: FillEvent) -> None:
         """Handle a fill event and update positions.
@@ -117,6 +156,15 @@ class PaperPositionManager(IPositionManager):
         Args:
             fill_event: Fill event from paper execution adapter
         """
+        logger.bind(
+            order_id=fill_event.order_id,
+            fill_id=fill_event.fill_id,
+        ).debug(
+            "Processing fill event: order_id={order_id}, fill_id={fill_id}",
+            order_id=fill_event.order_id,
+            fill_id=fill_event.fill_id,
+        )
+
         # Look up order to get market_slug, outcome, and side
         order = self._store.get_order(fill_event.order_id)
         if order is None:
@@ -385,3 +433,45 @@ class PaperPositionManager(IPositionManager):
             PerformanceMetrics instance for accessing performance statistics
         """
         return self._performance_metrics
+
+    def get_starting_equity(self) -> float:
+        """Get the starting equity.
+
+        Returns:
+            Starting equity value
+        """
+        return self._starting_equity
+
+    def calculate_unrealized_pnl(
+        self, current_prices: dict[tuple[str, Outcome], float] | None = None
+    ) -> float:
+        """Calculate unrealized P&L from open positions.
+
+        Uses the latest market prices from MarketDataEvent subscriptions.
+        Falls back to provided current_prices if available, otherwise uses entry_price
+        (which means no unrealized P&L if no market data is available).
+
+        Args:
+            current_prices: Optional dict mapping (market_slug, outcome) -> current price.
+                           If provided, overrides tracked market prices.
+
+        Returns:
+            Total unrealized P&L across all open positions
+        """
+        unrealized_pnl = 0.0
+        for key, position in self._positions.items():
+            # Priority: 1) provided current_prices, 2) tracked latest prices,
+            # 3) entry_price (no P&L)
+            if current_prices and key in current_prices:
+                current_price = current_prices[key]
+            elif key in self._latest_prices:
+                current_price = self._latest_prices[key]
+            else:
+                # No market data available - use entry price (no unrealized P&L)
+                current_price = position.entry_price
+
+            # Unrealized P&L = (current_price - entry_price) * size
+            position_pnl = (current_price - position.entry_price) * position.size
+            unrealized_pnl += position_pnl
+
+        return unrealized_pnl

@@ -109,6 +109,16 @@ class PolymarketMarketDataAdapter(IMarketDataAdapter):
                     best_bid = token_prices.get_best_bid()
                     best_ask = token_prices.get_best_ask()
 
+                    # Skip if both bid and ask are 0 (no liquidity)
+                    if best_bid == 0.0 and best_ask == 0.0:
+                        logger.bind(market_slug=self.market_slug, outcome=outcome).warning(
+                            "Skipping market data: no liquidity (bid=0, ask=0) "
+                            "for {market_slug}/{outcome}",
+                            market_slug=self.market_slug,
+                            outcome=outcome,
+                        )
+                        continue
+
                     yield MarketDataEvent(
                         market_slug=self.market_slug,
                         outcome=outcome,

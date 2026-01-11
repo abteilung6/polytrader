@@ -36,11 +36,18 @@ def convert_target_to_intent(
     side = "BUY"
 
     # Limit price = best_ask for BUY orders
+    # Skip if no liquidity (best_ask = 0.0 violates OrderIntentEvent validation)
     limit_price = market_data.best_ask
+    if limit_price <= 0.0:
+        return None  # No liquidity, cannot create order intent
 
     # Target price = mid price (simple default)
     # Can be enhanced later with signal-based target pricing
     target_price = market_data.mid
+    # Ensure target_price is valid (gt=0, le=1)
+    if target_price <= 0.0 or target_price > 1.0:
+        # Fallback to limit_price if mid is invalid
+        target_price = limit_price
 
     reason = f"{target.rationale}. Order size: {size:.2f} USD, limit_price: {limit_price:.4f}"
 

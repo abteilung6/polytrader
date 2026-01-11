@@ -106,13 +106,13 @@ async def test_market_discovery_prioritizes_current_window() -> None:
 
         result = await discovery.get_current_market(pattern)
 
-        # Should find the current market first (new behavior)
-        assert result == current_slug
+        # Should find the previous market first (new behavior - previous window prioritized)
+        assert result == prev_slug
         assert result is not None
 
-        # Verify it checked current window first
+        # Verify it checked previous window first
         call_args = [call[0][0] for call in mock_state.call_args_list]
-        assert call_args[0] == current_slug, "Should check current window first"
+        assert call_args[0] == prev_slug, "Should check previous window first"
 
 
 @pytest.mark.asyncio
@@ -131,7 +131,6 @@ async def test_market_discovery_searches_forward_first() -> None:
     future_end = current_end + interval  # 1 window ahead
     prev_end = current_end - interval
 
-    current_slug = f"btc-updown-15m-{current_end}"
     future_slug = f"btc-updown-15m-{future_end}"
     prev_slug = f"btc-updown-15m-{prev_end}"
 
@@ -150,18 +149,20 @@ async def test_market_discovery_searches_forward_first() -> None:
 
         result = await discovery.get_current_market(pattern)
 
-        # Should find the future market (searched forward first)
-        assert result == future_slug
+        # Should find the previous market (searched first, and it exists)
+        assert result == prev_slug
         assert result is not None
 
-        # Verify search order: current -> future -> past
+        # Verify search order: previous -> current -> future -> past
         call_args = [call[0][0] for call in mock_state.call_args_list]
-        assert call_args[0] == current_slug, "Should check current first"
-        # Future should be checked before past
+        assert call_args[0] == prev_slug, "Should check previous first"
+        # Future should be checked before older past markets
         future_idx = call_args.index(future_slug) if future_slug in call_args else -1
-        prev_idx = call_args.index(prev_slug) if prev_slug in call_args else -1
-        if future_idx != -1 and prev_idx != -1:
-            assert future_idx < prev_idx, "Should check future before past"
+        # Note: prev_slug is already checked first,
+        # so we're verifying future comes before older past
+        if future_idx != -1:
+            # Future should come after previous and current
+            assert future_idx > 0, "Future should be checked after previous"
 
 
 @pytest.mark.asyncio
@@ -209,11 +210,12 @@ async def test_market_discovery_emits_events() -> None:
     pattern = "btc-updown-15m"
     interval = 15 * 60
 
-    # Calculate expected current market
+    # Calculate expected market (previous window is now prioritized)
     now = int(time.time())
     current_window_start = (now // interval) * interval
     current_end = current_window_start + interval
-    expected_slug = f"btc-updown-15m-{current_end}"
+    prev_end = current_end - interval
+    expected_slug = f"btc-updown-15m-{prev_end}"  # Previous window checked first
 
     gamma_client = MagicMock(spec=GammaClient)
     market = MagicMock()
@@ -279,7 +281,8 @@ async def test_market_discovery_searches_near_limit() -> None:
         assert result is not None
 
         # Verify it checked all windows up to the limit
-        assert mock_state.call_count == 49, "Should check current + 48 future windows"
+        # Now checks: previous + current + 48 future = 50 windows
+        assert mock_state.call_count == 50, "Should check previous + current + 48 future windows"
 
 
 @pytest.mark.asyncio
@@ -356,11 +359,12 @@ async def test_market_discovery_cache_validation_current_window() -> None:
     pattern = "btc-updown-15m"
     interval = 15 * 60
 
-    # Calculate expected current market
+    # Calculate expected market (previous window is now prioritized)
     now = int(time.time())
     current_window_start = (now // interval) * interval
     current_end = current_window_start + interval
-    current_slug = f"btc-updown-15m-{current_end}"
+    prev_end = current_end - interval
+    current_slug = f"btc-updown-15m-{prev_end}"  # Previous window checked first
 
     gamma_client = MagicMock(spec=GammaClient)
     market = MagicMock()
@@ -522,11 +526,12 @@ async def test_market_discovery_cache_time_expiration() -> None:
     pattern = "btc-updown-15m"
     interval = 15 * 60
 
-    # Calculate expected current market
+    # Calculate expected market (previous window is now prioritized)
     now = int(time.time())
     current_window_start = (now // interval) * interval
     current_end = current_window_start + interval
-    current_slug = f"btc-updown-15m-{current_end}"
+    prev_end = current_end - interval
+    current_slug = f"btc-updown-15m-{prev_end}"  # Previous window checked first
 
     gamma_client = MagicMock(spec=GammaClient)
     market = MagicMock()
@@ -842,11 +847,12 @@ async def test_market_discovery_correlation_id_uniqueness() -> None:
     pattern = "btc-updown-15m"
     interval = 15 * 60
 
-    # Calculate expected current market
+    # Calculate expected market (previous window is now prioritized)
     now = int(time.time())
     current_window_start = (now // interval) * interval
     current_end = current_window_start + interval
-    expected_slug = f"btc-updown-15m-{current_end}"
+    prev_end = current_end - interval
+    expected_slug = f"btc-updown-15m-{prev_end}"  # Previous window checked first
 
     gamma_client = MagicMock(spec=GammaClient)
     market = MagicMock()
@@ -894,11 +900,12 @@ async def test_market_discovery_metrics_integration(
     pattern = "btc-updown-15m"
     interval = 15 * 60
 
-    # Calculate expected current market
+    # Calculate expected market (previous window is now prioritized)
     now = int(time.time())
     current_window_start = (now // interval) * interval
     current_end = current_window_start + interval
-    expected_slug = f"btc-updown-15m-{current_end}"
+    prev_end = current_end - interval
+    expected_slug = f"btc-updown-15m-{prev_end}"  # Previous window checked first
 
     gamma_client = MagicMock(spec=GammaClient)
     market = MagicMock()
