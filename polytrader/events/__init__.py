@@ -6,6 +6,15 @@ from polytrader.events.types import (
     ConfigLoadedEvent,
     Event,
     EventSource,
+    ExecutionErrorEvent,
+    ExecutionRequestEvent,
+    ExecutionResponseEvent,
+    FillEvent,
+    OrderAckEvent,
+    OrderCanceledEvent,
+    OrderCreatedEvent,
+    OrderRejectedEvent,
+    OrderSubmittedEvent,
     RiskCheckEvent,
     SystemStartedEvent,
     SystemStoppedEvent,
@@ -13,18 +22,38 @@ from polytrader.events.types import (
 
 __all__ = [
     "APPROVED_PROPOSALS",
+    "CANCEL_ORDER_COMMANDS",
     "ConfigLoadedEvent",
     "Event",
     "EventBus",
     "EventSource",
+    "EXECUTION_ERRORS",
+    "EXECUTION_REQUESTS",
+    "EXECUTION_RESPONSES",
+    "ExecutionErrorEvent",
+    "ExecutionRequestEvent",
+    "ExecutionResponseEvent",
+    "FillEvent",
+    "FILLS",
     "IEventStore",
     "MARKET_CHANGE",
     "MARKET_DATA",
     "MemoryEventStore",
+    "OrderAckEvent",
+    "ORDER_ACKS",
+    "ORDER_CANCELS",
+    "ORDER_CREATED",
+    "ORDER_REJECTS",
+    "ORDER_SUBMITTED",
+    "OrderCanceledEvent",
+    "OrderCreatedEvent",
+    "OrderRejectedEvent",
+    "OrderSubmittedEvent",
     "ORDERS",
     "PROPOSALS",
     "RISK_CHECKS",
     "RiskCheckEvent",
+    "SUBMIT_ORDER_COMMANDS",
     "SYSTEM_LIFECYCLE",
     "SystemStartedEvent",
     "SystemStoppedEvent",
@@ -75,4 +104,48 @@ def __getattr__(name: str):
         from polytrader.events.topics import get_approved_proposals_topic
 
         return get_approved_proposals_topic()
+    elif name == "ORDER_CREATED":
+        from polytrader.events.topics import get_order_created_topic
+
+        return get_order_created_topic()
+    elif name == "ORDER_SUBMITTED":
+        from polytrader.events.topics import get_order_submitted_topic
+
+        return get_order_submitted_topic()
+    elif name == "ORDER_ACKS":
+        from polytrader.events.topics import get_order_acks_topic
+
+        return get_order_acks_topic()
+    elif name == "ORDER_REJECTS":
+        from polytrader.events.topics import get_order_rejects_topic
+
+        return get_order_rejects_topic()
+    elif name == "FILLS":
+        from polytrader.events.topics import get_fills_topic
+
+        return get_fills_topic()
+    elif name == "ORDER_CANCELS":
+        from polytrader.events.topics import get_order_cancels_topic
+
+        return get_order_cancels_topic()
+    elif name == "SUBMIT_ORDER_COMMANDS":
+        from polytrader.events.topics import get_submit_order_commands_topic
+
+        return get_submit_order_commands_topic()
+    elif name == "CANCEL_ORDER_COMMANDS":
+        from polytrader.events.topics import get_cancel_order_commands_topic
+
+        return get_cancel_order_commands_topic()
+    elif name == "EXECUTION_REQUESTS":
+        from polytrader.events.topics import get_execution_requests_topic
+
+        return get_execution_requests_topic()
+    elif name == "EXECUTION_RESPONSES":
+        from polytrader.events.topics import get_execution_responses_topic
+
+        return get_execution_responses_topic()
+    elif name == "EXECUTION_ERRORS":
+        from polytrader.events.topics import get_execution_errors_topic
+
+        return get_execution_errors_topic()
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

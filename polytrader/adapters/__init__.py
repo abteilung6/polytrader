@@ -42,10 +42,29 @@ def create_adapter_factory(
     Returns:
         Factory function that takes market_slug and returns adapter
     """
-    from polytrader.adapters.polymarket import (
-        PolymarketAdapterConfig,
-        PolymarketMarketDataAdapter,
-    )
+    # Import from polymarket.py module file (not the package)
+    # We need to import the module file directly to avoid circular import
+    # The package polymarket/__init__.py imports from market_data, which would
+    # cause a circular import if we import the package
+    from importlib.util import module_from_spec, spec_from_file_location
+    from pathlib import Path
+    from typing import cast
+
+    # Import the module file directly (polymarket.py, not the package)
+    module_path = Path(__file__).parent / "polymarket.py"
+    spec = spec_from_file_location("polytrader.adapters.polymarket_module", module_path)
+    if spec and spec.loader:
+        _polymarket_module = module_from_spec(spec)
+        spec.loader.exec_module(_polymarket_module)
+        PolymarketAdapterConfig = _polymarket_module.PolymarketAdapterConfig
+        PolymarketMarketDataAdapter = _polymarket_module.PolymarketMarketDataAdapter
+    else:
+        # Fallback: try regular import (may cause circular import)
+        from importlib import import_module
+
+        _polymarket_module = import_module("polytrader.adapters.polymarket")
+        PolymarketAdapterConfig = _polymarket_module.PolymarketAdapterConfig  # noqa: B009
+        PolymarketMarketDataAdapter = _polymarket_module.PolymarketMarketDataAdapter  # noqa: B009
 
     def factory(market_slug: str) -> IMarketDataAdapter:
         config = PolymarketAdapterConfig(
@@ -53,6 +72,7 @@ def create_adapter_factory(
             polling_frequency_hz=polling_frequency_hz,
             secrets=secrets,
         )
-        return PolymarketMarketDataAdapter(config)
+        adapter = PolymarketMarketDataAdapter(config)
+        return cast(IMarketDataAdapter, adapter)
 
     return factory

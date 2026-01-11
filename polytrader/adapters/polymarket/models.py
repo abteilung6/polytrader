@@ -1,9 +1,11 @@
-from typing import Any, Literal, Protocol, cast
+"""Polymarket venue-specific models.
 
-from py_clob_client.client import ClobClient  # type: ignore[import-untyped]
+Per architecture.mdc §H: Adapters normalize venue responses to canonical format.
+"""
+
+from typing import Any, Literal, cast
+
 from pydantic import BaseModel, Field, field_validator
-
-from polytrader.config import CHAIN_ID, CLOB_API_URL, PolymarketSecrets
 
 OrderStatus = Literal["FILLED", "CANCELLED", "OPEN", "PENDING", "UNKNOWN"]
 OrderSide = Literal["BUY", "SELL"]
@@ -105,62 +107,46 @@ class ExternalOrder(BaseModel):
         return str(v).upper()
 
 
-class IClobClient(Protocol):
-    """Protocol for CLOB client operations used by the trading system."""
+class VenueResponse(BaseModel):
+    """Normalized venue response from Polymarket CLOB API.
 
-    def get_balance_allowance(self, params: Any) -> dict[str, Any]:
-        """Get balance and allowance information."""
-        ...
+    Per architecture.mdc §H: Adapters normalize venue responses.
+    This model provides a canonical format for venue responses.
 
-    def create_market_order(self, order_args: Any) -> dict[str, Any]:
-        """Create a signed market order."""
-        ...
+    Attributes:
+        venue_order_id: Order ID assigned by venue
+        status: Order status
+        raw_response: Raw response from venue (for debugging)
+    """
 
-    def post_order(self, signed_order: Any, order_type: Any) -> dict[str, Any]:
-        """Post an order to the exchange."""
-        ...
+    venue_order_id: str = Field(..., description="Order ID assigned by venue")
+    status: str = Field(..., description="Order status from venue")
+    raw_response: dict[str, Any] = Field(..., description="Raw response from venue")
 
-    def create_or_derive_api_creds(self) -> Any:
-        """Create or derive API credentials."""
-        ...
 
-    def set_api_creds(self, creds: Any) -> None:
-        """Set API credentials on the client."""
-        ...
+class VenueError(Exception):
+    """Venue error with classification.
 
-    def get_orders(self, params: Any) -> list[dict[str, Any]]:
-        """Get active orders from Polymarket CLOB.
+    Attributes:
+        error_type: Type of error (retryable or fatal)
+        message: Error message
+        raw_error: Raw error from venue (for debugging)
+    """
+
+    def __init__(
+        self,
+        error_type: Literal["retryable", "fatal"],
+        message: str,
+        raw_error: Any,
+    ) -> None:
+        """Initialize venue error.
 
         Args:
-            params: OpenOrderParams with optional filters:
-                - market: condition_id
-                - id: order_id
-                - asset_id: token_id
-        Returns:
-            List of open order dictionaries
+            error_type: Type of error (retryable or fatal)
+            message: Error message
+            raw_error: Raw error from venue (for debugging)
         """
-        ...
-
-
-class IClobClientFactory(Protocol):
-    """Protocol for creating CLOB client instances."""
-
-    def __call__(self) -> IClobClient: ...
-
-
-def create_clob_client_factory(secrets: PolymarketSecrets) -> IClobClientFactory:
-    """Create a factory function for ClobClient instances."""
-
-    def factory() -> ClobClient:
-        client = ClobClient(
-            host=CLOB_API_URL,
-            key=secrets.private_key.get_secret_value(),
-            chain_id=CHAIN_ID,
-            signature_type=secrets.signature_type,
-            funder=secrets.funder,
-        )
-        creds = client.create_or_derive_api_creds()
-        client.set_api_creds(creds)
-        return client
-
-    return factory
+        super().__init__(message)
+        self.error_type = error_type
+        self.message = message
+        self.raw_error = raw_error

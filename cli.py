@@ -53,7 +53,7 @@ def order_buy(
     """Place a buy order."""
     _setup_logging(log_file)
 
-    response = buy_task(market, outcome, amount)
+    response = asyncio.run(buy_task(market, outcome, amount))
     if isinstance(response, dict):
         order_id = response.get("order_id") or response.get("id", "N/A")
         status = response.get("status") or response.get("state", "N/A")

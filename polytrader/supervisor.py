@@ -5,11 +5,11 @@ from collections.abc import Callable
 
 from polytrader.adapters import IMarketDataAdapter
 from polytrader.events import MARKET_CHANGE, EventBus
+from polytrader.execution import ExecutionRouter
 from polytrader.logging_config import logger
 from polytrader.market_discovery import IMarketDiscoveryService
 from polytrader.models.protocol import ITradingModel
 from polytrader.observer import IObserver
-from polytrader.order_manager import IOrderManager
 from polytrader.position_manager import IPositionManager
 from polytrader.store import IMarketDataStore
 from polytrader.types import MarketChangeEvent
@@ -18,7 +18,7 @@ from polytrader.types import MarketChangeEvent
 class MarketSupervisor:
     """Supervisor that manages component lifecycle and market transitions.
 
-    Coordinates all trading components (Adapter, Observer, Model, OrderManager)
+    Coordinates all trading components (Adapter, Observer, Model, ExecutionRouter)
     and handles transitions when markets expire and new ones become active.
     """
 
@@ -29,9 +29,9 @@ class MarketSupervisor:
         adapter_factory: Callable[[str], IMarketDataAdapter],
         observer_factory: Callable[[IMarketDataAdapter], IObserver],
         model_factory: Callable[[str], ITradingModel],
-        order_manager_factory: Callable[[], IOrderManager],
         bus: EventBus,
         store: IMarketDataStore,
+        execution_router_factory: Callable[[], ExecutionRouter] | None = None,
         position_manager_factory: Callable[[], IPositionManager] | None = None,
         monitor_interval: float = 1.0,
     ) -> None:
@@ -43,7 +43,8 @@ class MarketSupervisor:
             adapter_factory: Factory function to create adapters
             observer_factory: Factory function to create observers
             model_factory: Factory function to create models
-            order_manager_factory: Factory function to create order managers
+            execution_router_factory: Factory to create execution routers
+                (None = no execution, for predict mode)
             bus: Event bus for communication
             store: Market data store for historical data
             position_manager_factory: Factory function to create position managers (optional)
@@ -54,7 +55,7 @@ class MarketSupervisor:
         self.adapter_factory = adapter_factory
         self.observer_factory = observer_factory
         self.model_factory = model_factory
-        self.order_manager_factory = order_manager_factory
+        self.execution_router_factory = execution_router_factory
         self.position_manager_factory = position_manager_factory
         self.bus = bus
         self.store = store
@@ -65,14 +66,14 @@ class MarketSupervisor:
         self.adapter: IMarketDataAdapter | None = None
         self.observer: IObserver | None = None
         self.model: ITradingModel | None = None
-        self.order_manager: IOrderManager | None = None
+        self.execution_router: ExecutionRouter | None = None
         self.position_manager: IPositionManager | None = None
 
         # Tasks
         self._running = False
         self._observer_task: asyncio.Task | None = None
         self._model_task: asyncio.Task | None = None
-        self._order_manager_task: asyncio.Task | None = None
+        self._execution_router_task: asyncio.Task | None = None
         self._position_manager_task: asyncio.Task | None = None
         self._monitor_task: asyncio.Task | None = None
 
@@ -98,7 +99,7 @@ class MarketSupervisor:
                 for t in [
                     self._observer_task,
                     self._model_task,
-                    self._order_manager_task,
+                    self._execution_router_task,
                     self._position_manager_task,
                     self._monitor_task,
                 ]
@@ -137,7 +138,10 @@ class MarketSupervisor:
         self.adapter = self.adapter_factory(new_market)
         self.observer = self.observer_factory(self.adapter)
         self.model = self.model_factory(new_market)
-        self.order_manager = self.order_manager_factory()
+        if self.execution_router_factory is not None:
+            self.execution_router = self.execution_router_factory()
+        else:
+            self.execution_router = None
 
         # Create position manager if factory provided
         if self.position_manager_factory:
@@ -146,7 +150,8 @@ class MarketSupervisor:
         # Start new components
         self._observer_task = asyncio.create_task(self.observer.run())
         self._model_task = asyncio.create_task(self.model.run())
-        self._order_manager_task = asyncio.create_task(self.order_manager.run())
+        if self.execution_router is not None:
+            self._execution_router_task = asyncio.create_task(self.execution_router.run())
 
         if self.position_manager:
             self._position_manager_task = asyncio.create_task(self.position_manager.run())
@@ -168,8 +173,8 @@ class MarketSupervisor:
             self.observer.stop()
         if self.model:
             self.model.stop()
-        if self.order_manager:
-            self.order_manager.stop()
+        if self.execution_router:
+            self.execution_router.stop()
         if self.position_manager:
             self.position_manager.stop()
 
@@ -177,7 +182,7 @@ class MarketSupervisor:
         tasks = [
             self._observer_task,
             self._model_task,
-            self._order_manager_task,
+            self._execution_router_task,
             self._position_manager_task,
         ]
 
@@ -192,7 +197,7 @@ class MarketSupervisor:
         # Clear references
         self._observer_task = None
         self._model_task = None
-        self._order_manager_task = None
+        self._execution_router_task = None
         self._position_manager_task = None
 
     async def _monitor_market(self) -> None:

@@ -16,7 +16,6 @@ from polytrader.logging_config import logger
 from polytrader.market_discovery import MarketDiscoveryService
 from polytrader.models import create_model_factory
 from polytrader.observer import create_observer_factory
-from polytrader.order_manager import create_noop_order_manager_factory
 from polytrader.store import MemoryMarketDataStore
 from polytrader.supervisor import MarketSupervisor
 from polytrader.types import MarketChangeEvent, OrderIntentEvent
@@ -110,8 +109,8 @@ async def predict_task(
         size=size,
         min_history=min_history,
     )
-    # Use no-op order manager in predict mode - consumes proposals but doesn't execute orders
-    order_manager_factory = create_noop_order_manager_factory(bus)
+    # Predict mode: don't start execution pipeline (no execution router factory)
+    # Proposals are consumed by proposal_handler, no need for execution components
 
     supervisor = MarketSupervisor(
         pattern=market_pattern,
@@ -119,7 +118,7 @@ async def predict_task(
         adapter_factory=adapter_factory,
         observer_factory=observer_factory,
         model_factory=model_factory,
-        order_manager_factory=order_manager_factory,
+        execution_router_factory=None,  # No execution in predict mode
         bus=bus,
         store=store,
     )

@@ -185,7 +185,7 @@ class TestEventSourceEnum:
     def test_event_source_iteration(self) -> None:
         """Test that we can iterate over EventSource values."""
         sources = list(EventSource)
-        assert len(sources) == 8
+        assert len(sources) == 9  # MDP, STRATEGY, PORTFOLIO, RISK, OMS, EXECUTION, and any others
         assert EventSource.OPS in sources
         assert EventSource.MDP in sources
 
@@ -394,3 +394,388 @@ class TestRiskCheckEvent:
         event_json = event.model_dump_json()
         assert isinstance(event_json, str)
         assert "test-market" in event_json
+
+
+class TestOrderCreatedEvent:
+    """Tests for OrderCreatedEvent per flows.mdc §7."""
+
+    def test_order_created_event_creation(self) -> None:
+        """Test that OrderCreatedEvent can be created."""
+        from polytrader.events.types import EventSource, OrderCreatedEvent
+        from polytrader.types import OrderIntentEvent
+
+        intent = OrderIntentEvent(
+            market_slug="test-market",
+            outcome="UP",
+            side="BUY",
+            target_price=0.5,
+            limit_price=0.45,
+            size=1.0,
+            reason="Test",
+        )
+
+        order_id = str(uuid.uuid4())
+        client_order_id = "client-123"
+
+        event = OrderCreatedEvent(
+            order_id=order_id,
+            client_order_id=client_order_id,
+            intent=intent,
+        )
+
+        assert event.order_id == order_id
+        assert event.client_order_id == client_order_id
+        assert event.intent == intent
+        assert event.source == EventSource.OMS
+
+    def test_order_created_event_has_base_fields(self) -> None:
+        """Test that OrderCreatedEvent has all Event base class fields."""
+        from polytrader.events.types import EventSource, OrderCreatedEvent
+        from polytrader.types import OrderIntentEvent
+
+        intent = OrderIntentEvent(
+            market_slug="test-market",
+            outcome="UP",
+            side="BUY",
+            target_price=0.5,
+            limit_price=0.45,
+            size=1.0,
+            reason="Test",
+        )
+
+        event = OrderCreatedEvent(
+            order_id=str(uuid.uuid4()),
+            client_order_id="client-123",
+            intent=intent,
+        )
+
+        assert event.event_id
+        assert event.ts_wall
+        assert event.ts_mono
+        assert event.correlation_id
+        assert event.run_id
+        assert event.schema_version == "1.0"
+        assert event.source == EventSource.OMS
+
+    def test_order_created_event_correlation_id(self) -> None:
+        """Test that OrderCreatedEvent propagates correlation_id from intent."""
+        from polytrader.events.types import OrderCreatedEvent
+        from polytrader.types import OrderIntentEvent
+
+        intent = OrderIntentEvent(
+            market_slug="test-market",
+            outcome="UP",
+            side="BUY",
+            target_price=0.5,
+            limit_price=0.45,
+            size=1.0,
+            reason="Test",
+        )
+
+        # Use the same correlation_id as the intent
+        shared_correlation_id = intent.correlation_id
+        event = OrderCreatedEvent(
+            order_id=str(uuid.uuid4()),
+            client_order_id="client-123",
+            intent=intent,
+            correlation_id=shared_correlation_id,
+        )
+
+        assert event.correlation_id == shared_correlation_id
+        assert event.correlation_id == intent.correlation_id
+
+    def test_order_created_event_serialization(self) -> None:
+        """Test that OrderCreatedEvent can be serialized."""
+        from polytrader.events.types import OrderCreatedEvent
+        from polytrader.types import OrderIntentEvent
+
+        intent = OrderIntentEvent(
+            market_slug="test-market",
+            outcome="UP",
+            side="BUY",
+            target_price=0.5,
+            limit_price=0.45,
+            size=1.0,
+            reason="Test",
+        )
+
+        event = OrderCreatedEvent(
+            order_id=str(uuid.uuid4()),
+            client_order_id="client-123",
+            intent=intent,
+        )
+
+        event_dict = event.model_dump()
+        assert "order_id" in event_dict
+        assert "client_order_id" in event_dict
+        assert "intent" in event_dict
+        assert event_dict["source"] == "oms"
+
+
+class TestOrderSubmittedEvent:
+    """Tests for OrderSubmittedEvent per flows.mdc §7."""
+
+    def test_order_submitted_event_creation(self) -> None:
+        """Test that OrderSubmittedEvent can be created."""
+        from polytrader.events.types import EventSource, OrderSubmittedEvent
+
+        order_id = str(uuid.uuid4())
+        client_order_id = "client-123"
+
+        event = OrderSubmittedEvent(
+            order_id=order_id,
+            client_order_id=client_order_id,
+        )
+
+        assert event.order_id == order_id
+        assert event.client_order_id == client_order_id
+        assert event.source == EventSource.OMS
+
+    def test_order_submitted_event_has_base_fields(self) -> None:
+        """Test that OrderSubmittedEvent has all Event base class fields."""
+        from polytrader.events.types import EventSource, OrderSubmittedEvent
+
+        event = OrderSubmittedEvent(
+            order_id=str(uuid.uuid4()),
+            client_order_id="client-123",
+        )
+
+        assert event.event_id
+        assert event.ts_wall
+        assert event.ts_mono
+        assert event.correlation_id
+        assert event.run_id
+        assert event.schema_version == "1.0"
+        assert event.source == EventSource.OMS
+
+
+class TestOrderAckEvent:
+    """Tests for OrderAckEvent per flows.mdc §10."""
+
+    def test_order_ack_event_creation(self) -> None:
+        """Test that OrderAckEvent can be created."""
+        from polytrader.events.types import EventSource, OrderAckEvent
+
+        order_id = str(uuid.uuid4())
+        venue_order_id = "venue-456"
+
+        event = OrderAckEvent(
+            order_id=order_id,
+            venue_order_id=venue_order_id,
+        )
+
+        assert event.order_id == order_id
+        assert event.venue_order_id == venue_order_id
+        assert event.source == EventSource.OMS
+
+    def test_order_ack_event_has_base_fields(self) -> None:
+        """Test that OrderAckEvent has all Event base class fields."""
+        from polytrader.events.types import EventSource, OrderAckEvent
+
+        event = OrderAckEvent(
+            order_id=str(uuid.uuid4()),
+            venue_order_id="venue-456",
+        )
+
+        assert event.event_id
+        assert event.ts_wall
+        assert event.ts_mono
+        assert event.correlation_id
+        assert event.run_id
+        assert event.schema_version == "1.0"
+        assert event.source == EventSource.OMS
+
+
+class TestOrderRejectedEvent:
+    """Tests for OrderRejectedEvent per flows.mdc §10."""
+
+    def test_order_rejected_event_creation(self) -> None:
+        """Test that OrderRejectedEvent can be created."""
+        from polytrader.events.types import EventSource, OrderRejectedEvent
+
+        order_id = str(uuid.uuid4())
+        reason = "Insufficient balance"
+
+        event = OrderRejectedEvent(
+            order_id=order_id,
+            reason=reason,
+        )
+
+        assert event.order_id == order_id
+        assert event.reason == reason
+        assert event.source == EventSource.OMS
+
+    def test_order_rejected_event_has_base_fields(self) -> None:
+        """Test that OrderRejectedEvent has all Event base class fields."""
+        from polytrader.events.types import EventSource, OrderRejectedEvent
+
+        event = OrderRejectedEvent(
+            order_id=str(uuid.uuid4()),
+            reason="Insufficient balance",
+        )
+
+        assert event.event_id
+        assert event.ts_wall
+        assert event.ts_mono
+        assert event.correlation_id
+        assert event.run_id
+        assert event.schema_version == "1.0"
+        assert event.source == EventSource.OMS
+
+
+class TestFillEvent:
+    """Tests for FillEvent per flows.mdc §10."""
+
+    def test_fill_event_creation(self) -> None:
+        """Test that FillEvent can be created."""
+        from polytrader.events.types import EventSource, FillEvent
+
+        order_id = str(uuid.uuid4())
+        fill_id = str(uuid.uuid4())
+
+        event = FillEvent(
+            order_id=order_id,
+            fill_id=fill_id,
+            size=0.5,
+            price=0.45,
+            fee=0.01,
+        )
+
+        assert event.order_id == order_id
+        assert event.fill_id == fill_id
+        assert event.size == 0.5
+        assert event.price == 0.45
+        assert event.fee == 0.01
+        assert event.venue_fill_id is None
+        assert event.source == EventSource.OMS
+
+    def test_fill_event_with_venue_id(self) -> None:
+        """Test that FillEvent can include venue_fill_id."""
+        from polytrader.events.types import FillEvent
+
+        event = FillEvent(
+            order_id=str(uuid.uuid4()),
+            fill_id=str(uuid.uuid4()),
+            size=0.5,
+            price=0.45,
+            fee=0.01,
+            venue_fill_id="venue-fill-789",
+        )
+
+        assert event.venue_fill_id == "venue-fill-789"
+
+    def test_fill_event_validation(self) -> None:
+        """Test that FillEvent validates size and price constraints."""
+        from polytrader.events.types import FillEvent
+
+        # Valid fill
+        event = FillEvent(
+            order_id=str(uuid.uuid4()),
+            fill_id=str(uuid.uuid4()),
+            size=0.5,
+            price=0.45,
+            fee=0.01,
+        )
+        assert event.size > 0
+        assert 0 < event.price <= 1
+
+        # Invalid: size must be > 0
+        with pytest.raises(ValidationError):
+            FillEvent(
+                order_id=str(uuid.uuid4()),
+                fill_id=str(uuid.uuid4()),
+                size=0.0,
+                price=0.45,
+                fee=0.01,
+            )
+
+        # Invalid: price must be > 0
+        with pytest.raises(ValidationError):
+            FillEvent(
+                order_id=str(uuid.uuid4()),
+                fill_id=str(uuid.uuid4()),
+                size=0.5,
+                price=0.0,
+                fee=0.01,
+            )
+
+        # Invalid: price must be <= 1
+        with pytest.raises(ValidationError):
+            FillEvent(
+                order_id=str(uuid.uuid4()),
+                fill_id=str(uuid.uuid4()),
+                size=0.5,
+                price=1.1,
+                fee=0.01,
+            )
+
+        # Invalid: fee must be >= 0
+        with pytest.raises(ValidationError):
+            FillEvent(
+                order_id=str(uuid.uuid4()),
+                fill_id=str(uuid.uuid4()),
+                size=0.5,
+                price=0.45,
+                fee=-0.01,
+            )
+
+    def test_fill_event_has_base_fields(self) -> None:
+        """Test that FillEvent has all Event base class fields."""
+        from polytrader.events.types import EventSource, FillEvent
+
+        event = FillEvent(
+            order_id=str(uuid.uuid4()),
+            fill_id=str(uuid.uuid4()),
+            size=0.5,
+            price=0.45,
+            fee=0.01,
+        )
+
+        assert event.event_id
+        assert event.ts_wall
+        assert event.ts_mono
+        assert event.correlation_id
+        assert event.run_id
+        assert event.schema_version == "1.0"
+        assert event.source == EventSource.OMS
+
+
+class TestOrderCanceledEvent:
+    """Tests for OrderCanceledEvent per flows.mdc §7, §10."""
+
+    def test_order_canceled_event_creation(self) -> None:
+        """Test that OrderCanceledEvent can be created."""
+        from polytrader.events.types import EventSource, OrderCanceledEvent
+
+        order_id = str(uuid.uuid4())
+
+        event = OrderCanceledEvent(order_id=order_id)
+
+        assert event.order_id == order_id
+        assert event.reason is None
+        assert event.source == EventSource.OMS
+
+    def test_order_canceled_event_with_reason(self) -> None:
+        """Test that OrderCanceledEvent can include a reason."""
+        from polytrader.events.types import OrderCanceledEvent
+
+        event = OrderCanceledEvent(
+            order_id=str(uuid.uuid4()),
+            reason="User requested cancellation",
+        )
+
+        assert event.reason == "User requested cancellation"
+
+    def test_order_canceled_event_has_base_fields(self) -> None:
+        """Test that OrderCanceledEvent has all Event base class fields."""
+        from polytrader.events.types import EventSource, OrderCanceledEvent
+
+        event = OrderCanceledEvent(order_id=str(uuid.uuid4()))
+
+        assert event.event_id
+        assert event.ts_wall
+        assert event.ts_mono
+        assert event.correlation_id
+        assert event.run_id
+        assert event.schema_version == "1.0"
+        assert event.source == EventSource.OMS

@@ -10,6 +10,17 @@ _market_change_topic: Topic | None = None
 _system_lifecycle_topic: Topic | None = None
 _risk_checks_topic: Topic | None = None
 _approved_proposals_topic: Topic | None = None
+_order_created_topic: Topic | None = None
+_order_submitted_topic: Topic | None = None
+_order_acks_topic: Topic | None = None
+_order_rejects_topic: Topic | None = None
+_fills_topic: Topic | None = None
+_order_cancels_topic: Topic | None = None
+_submit_order_commands_topic: Topic | None = None
+_cancel_order_commands_topic: Topic | None = None
+_execution_requests_topic: Topic | None = None
+_execution_responses_topic: Topic | None = None
+_execution_errors_topic: Topic | None = None
 
 
 def _create_market_data_topic() -> Topic:
@@ -121,6 +132,171 @@ def get_approved_proposals_topic() -> Topic:
     return _approved_proposals_topic
 
 
+def _create_order_created_topic() -> Topic:
+    """Create the ORDER_CREATED topic."""
+    from polytrader.events.types import OrderCreatedEvent
+
+    return Topic[OrderCreatedEvent]("order_created")
+
+
+def get_order_created_topic() -> Topic:
+    """Get the ORDER_CREATED topic (singleton)."""
+    global _order_created_topic
+    if _order_created_topic is None:
+        _order_created_topic = _create_order_created_topic()
+    return _order_created_topic
+
+
+def _create_order_submitted_topic() -> Topic:
+    """Create the ORDER_SUBMITTED topic."""
+    from polytrader.events.types import OrderSubmittedEvent
+
+    return Topic[OrderSubmittedEvent]("order_submitted")
+
+
+def get_order_submitted_topic() -> Topic:
+    """Get the ORDER_SUBMITTED topic (singleton)."""
+    global _order_submitted_topic
+    if _order_submitted_topic is None:
+        _order_submitted_topic = _create_order_submitted_topic()
+    return _order_submitted_topic
+
+
+def _create_order_acks_topic() -> Topic:
+    """Create the ORDER_ACKS topic."""
+    from polytrader.events.types import OrderAckEvent
+
+    return Topic[OrderAckEvent]("order_acks")
+
+
+def get_order_acks_topic() -> Topic:
+    """Get the ORDER_ACKS topic (singleton)."""
+    global _order_acks_topic
+    if _order_acks_topic is None:
+        _order_acks_topic = _create_order_acks_topic()
+    return _order_acks_topic
+
+
+def _create_order_rejects_topic() -> Topic:
+    """Create the ORDER_REJECTS topic."""
+    from polytrader.events.types import OrderRejectedEvent
+
+    return Topic[OrderRejectedEvent]("order_rejects")
+
+
+def get_order_rejects_topic() -> Topic:
+    """Get the ORDER_REJECTS topic (singleton)."""
+    global _order_rejects_topic
+    if _order_rejects_topic is None:
+        _order_rejects_topic = _create_order_rejects_topic()
+    return _order_rejects_topic
+
+
+def _create_fills_topic() -> Topic:
+    """Create the FILLS topic."""
+    from polytrader.events.types import FillEvent
+
+    return Topic[FillEvent]("fills")
+
+
+def get_fills_topic() -> Topic:
+    """Get the FILLS topic (singleton)."""
+    global _fills_topic
+    if _fills_topic is None:
+        _fills_topic = _create_fills_topic()
+    return _fills_topic
+
+
+def _create_order_cancels_topic() -> Topic:
+    """Create the ORDER_CANCELS topic."""
+    from polytrader.events.types import OrderCanceledEvent
+
+    return Topic[OrderCanceledEvent]("order_cancels")
+
+
+def get_order_cancels_topic() -> Topic:
+    """Get the ORDER_CANCELS topic (singleton)."""
+    global _order_cancels_topic
+    if _order_cancels_topic is None:
+        _order_cancels_topic = _create_order_cancels_topic()
+    return _order_cancels_topic
+
+
+def _create_submit_order_commands_topic() -> Topic:
+    """Create the SUBMIT_ORDER_COMMANDS topic."""
+    from polytrader.oms.commands import SubmitOrderCommand
+
+    return Topic[SubmitOrderCommand]("submit_order_commands")
+
+
+def get_submit_order_commands_topic() -> Topic:
+    """Get the SUBMIT_ORDER_COMMANDS topic (singleton)."""
+    global _submit_order_commands_topic
+    if _submit_order_commands_topic is None:
+        _submit_order_commands_topic = _create_submit_order_commands_topic()
+    return _submit_order_commands_topic
+
+
+def _create_cancel_order_commands_topic() -> Topic:
+    """Create the CANCEL_ORDER_COMMANDS topic."""
+    from polytrader.oms.commands import CancelOrderCommand
+
+    return Topic[CancelOrderCommand]("cancel_order_commands")
+
+
+def get_cancel_order_commands_topic() -> Topic:
+    """Get the CANCEL_ORDER_COMMANDS topic (singleton)."""
+    global _cancel_order_commands_topic
+    if _cancel_order_commands_topic is None:
+        _cancel_order_commands_topic = _create_cancel_order_commands_topic()
+    return _cancel_order_commands_topic
+
+
+def _create_execution_requests_topic() -> Topic:
+    """Create the EXECUTION_REQUESTS topic."""
+    from polytrader.events.types import ExecutionRequestEvent
+
+    return Topic[ExecutionRequestEvent]("execution_requests")
+
+
+def get_execution_requests_topic() -> Topic:
+    """Get the EXECUTION_REQUESTS topic (singleton)."""
+    global _execution_requests_topic
+    if _execution_requests_topic is None:
+        _execution_requests_topic = _create_execution_requests_topic()
+    return _execution_requests_topic
+
+
+def _create_execution_responses_topic() -> Topic:
+    """Create the EXECUTION_RESPONSES topic."""
+    from polytrader.events.types import ExecutionResponseEvent
+
+    return Topic[ExecutionResponseEvent]("execution_responses")
+
+
+def get_execution_responses_topic() -> Topic:
+    """Get the EXECUTION_RESPONSES topic (singleton)."""
+    global _execution_responses_topic
+    if _execution_responses_topic is None:
+        _execution_responses_topic = _create_execution_responses_topic()
+    return _execution_responses_topic
+
+
+def _create_execution_errors_topic() -> Topic:
+    """Create the EXECUTION_ERRORS topic."""
+    from polytrader.events.types import ExecutionErrorEvent
+
+    return Topic[ExecutionErrorEvent]("execution_errors")
+
+
+def get_execution_errors_topic() -> Topic:
+    """Get the EXECUTION_ERRORS topic (singleton)."""
+    global _execution_errors_topic
+    if _execution_errors_topic is None:
+        _execution_errors_topic = _create_execution_errors_topic()
+    return _execution_errors_topic
+
+
 def __getattr__(name: str) -> Topic:
     """Lazily initialize topic constants on first access.
 
@@ -150,5 +326,27 @@ def __getattr__(name: str) -> Topic:
         return get_risk_checks_topic()
     elif name == "APPROVED_PROPOSALS":
         return get_approved_proposals_topic()
+    elif name == "ORDER_CREATED":
+        return get_order_created_topic()
+    elif name == "ORDER_SUBMITTED":
+        return get_order_submitted_topic()
+    elif name == "ORDER_ACKS":
+        return get_order_acks_topic()
+    elif name == "ORDER_REJECTS":
+        return get_order_rejects_topic()
+    elif name == "FILLS":
+        return get_fills_topic()
+    elif name == "ORDER_CANCELS":
+        return get_order_cancels_topic()
+    elif name == "SUBMIT_ORDER_COMMANDS":
+        return get_submit_order_commands_topic()
+    elif name == "CANCEL_ORDER_COMMANDS":
+        return get_cancel_order_commands_topic()
+    elif name == "EXECUTION_REQUESTS":
+        return get_execution_requests_topic()
+    elif name == "EXECUTION_RESPONSES":
+        return get_execution_responses_topic()
+    elif name == "EXECUTION_ERRORS":
+        return get_execution_errors_topic()
     else:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

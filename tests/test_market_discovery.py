@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from polytrader.gamma import GammaClient
+from polytrader.adapters.polymarket.market_data import GammaClient
 from polytrader.market_discovery import MarketDiscoveryService, MarketPattern
 
 

@@ -6,7 +6,7 @@ import time
 from dataclasses import dataclass
 from typing import Protocol
 
-from polytrader.gamma import GammaClient
+from polytrader.adapters.polymarket.market_data import GammaClient
 from polytrader.logging_config import logger
 
 
