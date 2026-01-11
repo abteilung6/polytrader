@@ -22,7 +22,7 @@ from polytrader.oms.idempotency import IdempotencyStore
 from polytrader.position_manager import create_position_manager_factory
 from polytrader.risk import RiskChecker, RiskEngine, get_default_limits
 from polytrader.store import MemoryMarketDataStore
-from polytrader.supervisor import MarketSupervisor
+from polytrader.supervisor import MarketSupervisor, SystemSupervisor
 from polytrader.types import MarketChangeEvent, OrderExecutedEvent
 
 
@@ -162,61 +162,63 @@ async def auto_buy_task(
         bus, clob_client_factory, sync_interval=60.0
     )
 
-    # Create OMS Core per flows.mdc §7
-    # OMS subscribes to APPROVED_PROPOSALS and creates orders
-    oms_store = InMemoryOrderStore(bus)
-    idempotency_store = IdempotencyStore()
-    oms_core = OMSCore(bus=bus, store=oms_store, idempotency_store=idempotency_store)
-
-    # Create portfolio service per flows.mdc §5
-    # PortfolioService subscribes to SIGNALS and converts to OrderIntentEvent
+    # Create service factories for SystemSupervisor
     from polytrader.portfolio import PortfolioService
 
-    position_manager = position_manager_factory() if position_manager_factory is not None else None
-    portfolio_service = PortfolioService(
+    def portfolio_service_factory() -> PortfolioService:
+        position_manager = (
+            position_manager_factory() if position_manager_factory is not None else None
+        )
+        return PortfolioService(
+            bus=bus,
+            store=store,
+            position_manager=position_manager,
+            fixed_size_usd=size,
+        )
+
+    def risk_checker_factory() -> RiskChecker:
+        risk_limits = get_default_limits()
+        risk_engine = RiskEngine(limits=risk_limits)
+        return RiskChecker(bus=bus, engine=risk_engine, store=store)
+
+    def oms_core_factory() -> OMSCore:
+        oms_store = InMemoryOrderStore(bus)
+        idempotency_store = IdempotencyStore()
+        return OMSCore(bus=bus, store=oms_store, idempotency_store=idempotency_store)
+
+    # Create supervisors
+    system_supervisor = SystemSupervisor(
         bus=bus,
         store=store,
-        position_manager=position_manager,
-        fixed_size_usd=size,
-    )
-
-    # Create risk engine and checker per flows.mdc §6
-    # Risk runs before OMS submission, so RiskChecker subscribes to PROPOSALS
-    # and publishes APPROVED_PROPOSALS that OMS Core consumes
-    risk_limits = get_default_limits()
-    risk_engine = RiskEngine(limits=risk_limits)
-    risk_checker = RiskChecker(bus=bus, engine=risk_engine, store=store)
-
-    supervisor = MarketSupervisor(
-        pattern=market_pattern,
-        discovery_service=discovery,
-        adapter_factory=adapter_factory,
-        observer_factory=observer_factory,
-        strategy_factory=strategy_factory,
+        portfolio_service_factory=portfolio_service_factory,
+        risk_checker_factory=risk_checker_factory,
+        oms_core_factory=oms_core_factory,
         execution_router_factory=execution_router_factory,
-        bus=bus,
-        store=store,
         position_manager_factory=position_manager_factory,
     )
 
     order_queue = bus.subscribe(ORDERS)
     market_change_queue = bus.subscribe(MARKET_CHANGE)
 
-    # Start services in correct order (subscribers before publishers)
-    # 1. PortfolioService subscribes to SIGNALS (must start before Supervisor publishes)
-    portfolio_task = asyncio.create_task(portfolio_service.start())
-    await asyncio.sleep(0.01)  # Give PortfolioService time to subscribe
+    # Start supervisors (system first, then market)
+    await system_supervisor.start()
 
-    # 2. RiskChecker subscribes to PROPOSALS (must start before PortfolioService publishes)
-    risk_checker_task = asyncio.create_task(risk_checker.run())
-    await asyncio.sleep(0.01)  # Give RiskChecker time to subscribe
+    # Create market supervisor after system supervisor is started (to get position manager)
+    market_supervisor = MarketSupervisor(
+        pattern=market_pattern,
+        discovery_service=discovery,
+        adapter_factory=adapter_factory,
+        observer_factory=observer_factory,
+        strategy_factory=strategy_factory,
+        bus=bus,
+        store=store,
+        position_manager=system_supervisor.get_position_manager(),  # Query from SystemSupervisor
+    )
 
-    # 3. OMS Core subscribes to APPROVED_PROPOSALS (must start before RiskChecker publishes)
-    oms_core_task = asyncio.create_task(oms_core.run())
-    await asyncio.sleep(0.01)  # Give OMS Core time to subscribe
+    await market_supervisor.start()
 
-    # 4. Supervisor publishes SignalEvent to SIGNALS (starts last)
-    supervisor_task = asyncio.create_task(supervisor.run())
+    system_supervisor_task = asyncio.create_task(system_supervisor.run())
+    market_supervisor_task = asyncio.create_task(market_supervisor.run())
 
     async def handle_orders() -> None:
         """Handle order events."""
@@ -235,18 +237,14 @@ async def auto_buy_task(
 
     try:
         await asyncio.gather(
-            supervisor_task,
-            portfolio_task,
-            risk_checker_task,
-            oms_core_task,
+            system_supervisor_task,
+            market_supervisor_task,
             orders_task,
             market_changes_task,
         )
     except KeyboardInterrupt:
-        supervisor.stop()
-        await portfolio_service.stop()
-        risk_checker.stop()
-        oms_core.stop()
+        market_supervisor.stop()
+        await system_supervisor.stop()
         # Emit system stopped event (auto-persisted by EventBus)
         stopped_event = SystemStoppedEvent(reason="KeyboardInterrupt")
         await bus.publish(SYSTEM_LIFECYCLE, stopped_event)
@@ -256,20 +254,20 @@ async def auto_buy_task(
         await bus.publish(SYSTEM_LIFECYCLE, stopped_event)
         raise
     finally:
-        supervisor_task.cancel()
-        portfolio_task.cancel()
-        risk_checker_task.cancel()
-        oms_core_task.cancel()
+        system_supervisor_task.cancel()
+        market_supervisor_task.cancel()
+        orders_task.cancel()
         market_changes_task.cancel()
         try:
-            await supervisor_task
-            await portfolio_task
-            await risk_checker_task
-            await oms_core_task
+            await system_supervisor_task
+            await market_supervisor_task
             await orders_task
             await market_changes_task
         except asyncio.CancelledError:
             pass
+        # Stop supervisors
+        market_supervisor.stop()
+        await system_supervisor.stop()
         # Emit system stopped event if not already emitted (auto-persisted by EventBus)
         if not any(
             isinstance(e, SystemStoppedEvent)

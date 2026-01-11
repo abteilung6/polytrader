@@ -144,6 +144,7 @@ async def test_supervisor_evaluates_strategy_on_market_data() -> None:
         strategy_factory=strategy_factory,
         bus=bus,
         store=store,
+        position_manager=None,  # No position manager in test
         monitor_interval=1.0,
     )
 
@@ -161,6 +162,7 @@ async def test_supervisor_evaluates_strategy_on_market_data() -> None:
             pass
 
     collect_task = asyncio.create_task(collect_signals())
+    await supervisor.start()
     supervisor_task = asyncio.create_task(supervisor.run())
 
     # Wait for evaluation
@@ -235,6 +237,7 @@ async def test_strategy_signal_published_to_portfolio() -> None:
             pass
 
     collect_task = asyncio.create_task(collect_signals())
+    await supervisor.start()
     supervisor_task = asyncio.create_task(supervisor.run())
 
     # Wait for signals

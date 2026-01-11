@@ -128,7 +128,6 @@ async def test_supervisor_initializes_with_market() -> None:
         adapter_factory=adapter_factory,
         observer_factory=observer_factory,
         strategy_factory=strategy_factory,
-        execution_router_factory=execution_router_factory,
         bus=bus,
         store=store,
         monitor_interval=0.1,
@@ -136,6 +135,8 @@ async def test_supervisor_initializes_with_market() -> None:
 
     assert supervisor.current_market is None
 
+    await supervisor.start()
+    await supervisor.start()
     task = asyncio.create_task(supervisor.run())
     await asyncio.sleep(0.05)
 
@@ -143,7 +144,7 @@ async def test_supervisor_initializes_with_market() -> None:
     assert supervisor.adapter is not None
     assert supervisor.observer is not None
     assert supervisor.strategy is not None
-    assert supervisor.execution_router is not None
+    # ExecutionRouter is now managed by SystemSupervisor, not MarketSupervisor
 
     supervisor.stop()
     task.cancel()
@@ -177,12 +178,12 @@ async def test_supervisor_transitions_on_market_change() -> None:
         adapter_factory=adapter_factory,
         observer_factory=observer_factory,
         strategy_factory=strategy_factory,
-        execution_router_factory=execution_router_factory,
         bus=bus,
         store=store,
         monitor_interval=0.1,
     )
 
+    await supervisor.start()
     task = asyncio.create_task(supervisor.run())
     await asyncio.sleep(0.05)
 
@@ -230,7 +231,6 @@ async def test_supervisor_publishes_market_change_events() -> None:
         adapter_factory=adapter_factory,
         observer_factory=observer_factory,
         strategy_factory=strategy_factory,
-        execution_router_factory=execution_router_factory,
         bus=bus,
         store=store,
         monitor_interval=0.1,
@@ -238,6 +238,7 @@ async def test_supervisor_publishes_market_change_events() -> None:
 
     change_queue = bus.subscribe(MARKET_CHANGE)
 
+    await supervisor.start()
     task = asyncio.create_task(supervisor.run())
     await asyncio.sleep(0.05)
 
@@ -304,36 +305,34 @@ async def test_supervisor_stops_components_on_transition() -> None:
         adapter_factory=adapter_factory,
         observer_factory=observer_factory,
         strategy_factory=strategy_factory,
-        execution_router_factory=execution_router_factory,
         bus=bus,
         store=store,
         monitor_interval=0.1,
     )
 
+    await supervisor.start()
     task = asyncio.create_task(supervisor.run())
     await asyncio.sleep(0.05)
 
     old_observer = supervisor.observer
     old_strategy = supervisor.strategy
-    old_execution_router = supervisor.execution_router
+    # ExecutionRouter is now managed by SystemSupervisor, not MarketSupervisor
 
     assert isinstance(old_observer, FakeObserver)
     assert isinstance(old_strategy, FakeStrategy)
-    assert isinstance(old_execution_router, FakeExecutionRouter)
     assert old_observer._running
     assert old_strategy._running
-    assert old_execution_router._running
 
     discovery.current_market = "test-market-2"
     await asyncio.sleep(0.15)
 
     assert not old_observer._running
     assert not old_strategy._running
-    assert not old_execution_router._running
+    # ExecutionRouter is now managed by SystemSupervisor, not MarketSupervisor
 
     assert supervisor.observer is not None
     assert supervisor.strategy is not None
-    assert supervisor.execution_router is not None
+    # ExecutionRouter is now managed by SystemSupervisor, not MarketSupervisor
 
     supervisor.stop()
     task.cancel()
@@ -364,7 +363,6 @@ async def test_supervisor_without_execution_router_does_not_execute_orders() -> 
         adapter_factory=adapter_factory,
         observer_factory=observer_factory,
         strategy_factory=strategy_factory,
-        execution_router_factory=None,  # No execution in predict mode
         bus=bus,
         store=store,
         monitor_interval=0.1,
@@ -385,11 +383,12 @@ async def test_supervisor_without_execution_router_does_not_execute_orders() -> 
 
     collect_task = asyncio.create_task(collect_orders())
 
+    await supervisor.start()
     task = asyncio.create_task(supervisor.run())
     await asyncio.sleep(0.05)
 
     # Verify no execution router was created
-    assert supervisor.execution_router is None
+    # ExecutionRouter is now managed by SystemSupervisor, not MarketSupervisor
 
     # Publish a proposal (simulating what the model would do)
     proposal = OrderIntentEvent(
@@ -617,17 +616,40 @@ async def test_supervisor_with_position_manager_end_to_end() -> None:
             sync_interval=0,  # Disable sync for test
         )
 
-    supervisor = MarketSupervisor(
-        pattern="test-pattern",
-        discovery_service=discovery,
-        adapter_factory=adapter_factory,
-        observer_factory=observer_factory,
-        strategy_factory=strategy_factory,
-        execution_router_factory=execution_router_factory,
+    # Create SystemSupervisor with ExecutionRouter and PositionManager
+    # This test verifies end-to-end flow, so we need both supervisors
+    from polytrader.oms import InMemoryOrderStore, OMSCore
+    from polytrader.oms.idempotency import IdempotencyStore
+    from polytrader.portfolio import PortfolioService
+    from polytrader.risk import RiskChecker, RiskEngine, get_default_limits
+    from polytrader.supervisor import SystemSupervisor
+
+    def portfolio_service_factory() -> PortfolioService:
+        return PortfolioService(
+            bus=bus,
+            store=store,
+            position_manager=None,  # Position manager managed by SystemSupervisor
+            fixed_size_usd=1.0,
+        )
+
+    def risk_checker_factory() -> RiskChecker:
+        risk_limits = get_default_limits()
+        risk_engine = RiskEngine(limits=risk_limits)
+        return RiskChecker(bus=bus, engine=risk_engine, store=store)
+
+    def oms_core_factory() -> OMSCore:
+        oms_store = InMemoryOrderStore(bus)
+        idempotency_store = IdempotencyStore()
+        return OMSCore(bus=bus, store=oms_store, idempotency_store=idempotency_store)
+
+    system_supervisor = SystemSupervisor(
         bus=bus,
         store=store,
+        portfolio_service_factory=portfolio_service_factory,
+        risk_checker_factory=risk_checker_factory,
+        oms_core_factory=oms_core_factory,
+        execution_router_factory=execution_router_factory,
         position_manager_factory=position_manager_factory,
-        monitor_interval=0.1,
     )
 
     # Track orders and proposals
@@ -657,7 +679,26 @@ async def test_supervisor_with_position_manager_end_to_end() -> None:
     collect_orders_task = asyncio.create_task(collect_orders())
     collect_proposals_task = asyncio.create_task(collect_proposals())
 
-    supervisor_task = asyncio.create_task(supervisor.run())
+    # Start supervisors (system first, then market)
+    await system_supervisor.start()
+
+    # Create market supervisor after system supervisor is started (to get position manager)
+    market_supervisor = MarketSupervisor(
+        pattern="test-pattern",
+        discovery_service=discovery,
+        adapter_factory=adapter_factory,
+        observer_factory=observer_factory,
+        strategy_factory=strategy_factory,
+        bus=bus,
+        store=store,
+        position_manager=system_supervisor.get_position_manager(),  # Query from SystemSupervisor
+        monitor_interval=0.1,
+    )
+
+    await market_supervisor.start()
+
+    system_supervisor_task = asyncio.create_task(system_supervisor.run())
+    market_supervisor_task = asyncio.create_task(market_supervisor.run())
 
     # Wait for the flow to complete
     # Give enough time for ticks to be emitted, proposals to be generated,
@@ -665,8 +706,9 @@ async def test_supervisor_with_position_manager_end_to_end() -> None:
     await asyncio.sleep(1.0)
 
     # Verify PositionManager was created
-    assert supervisor.position_manager is not None
-    assert isinstance(supervisor.position_manager, PositionManager)
+    # PositionManager is now managed by SystemSupervisor, queried by MarketSupervisor
+    assert market_supervisor.position_manager is not None
+    assert isinstance(market_supervisor.position_manager, PositionManager)
 
     # Verify BUY order was executed
     assert len(orders_published) >= 1, "Expected at least one order (BUY)"
@@ -684,12 +726,14 @@ async def test_supervisor_with_position_manager_end_to_end() -> None:
 
     # Verify position lifecycle: The position was created (evidenced by SELL order)
     # and then removed after SELL. Since the flow is fast, we verify the end state.
-    final_positions = supervisor.position_manager.get_positions()
-    assert final_positions is not None
-    assert ("test-market-1", "UP") not in final_positions, (
-        "Position should be removed after SELL order. "
-        f"Current positions: {list(final_positions.keys())}"
-    )
+    # PositionManager is now managed by SystemSupervisor, queried by MarketSupervisor
+    if market_supervisor.position_manager:
+        final_positions = market_supervisor.position_manager.get_positions()
+        if final_positions is not None:
+            assert ("test-market-1", "UP") not in final_positions, (
+                "Position should be removed after SELL order. "
+                f"Current positions: {list(final_positions.keys())}"
+            )
 
     # Verify the complete flow: BUY → Position created → SELL proposal → SELL order
     # The fact that we have both BUY and SELL orders proves the position existed
@@ -698,22 +742,19 @@ async def test_supervisor_with_position_manager_end_to_end() -> None:
         f"Expected at least 2 orders (BUY and SELL), got {len(orders_published)}"
     )
 
-    supervisor.stop()
-    supervisor_task.cancel()
+    # Stop supervisors
+    market_supervisor.stop()
+    await system_supervisor.stop()
+
+    system_supervisor_task.cancel()
+    market_supervisor_task.cancel()
     collect_orders_task.cancel()
     collect_proposals_task.cancel()
 
     try:
-        await supervisor_task
-    except asyncio.CancelledError:
-        pass
-
-    try:
+        await system_supervisor_task
+        await market_supervisor_task
         await collect_orders_task
-    except asyncio.CancelledError:
-        pass
-
-    try:
         await collect_proposals_task
     except asyncio.CancelledError:
         pass

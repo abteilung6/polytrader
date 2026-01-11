@@ -16,7 +16,7 @@ from polytrader.logging_config import logger
 from polytrader.market_discovery import MarketDiscoveryService
 from polytrader.observer import create_observer_factory
 from polytrader.store import MemoryMarketDataStore
-from polytrader.supervisor import MarketSupervisor
+from polytrader.supervisor import MarketSupervisor, SystemSupervisor
 from polytrader.types import MarketChangeEvent, OrderIntentEvent
 
 
@@ -110,24 +110,62 @@ async def predict_task(
         min_history=min_history,
     )
 
-    # Predict mode: don't start execution pipeline (no execution router factory)
-    # Proposals are consumed by proposal_handler, no need for execution components
+    # Create service factories for SystemSupervisor (predict mode: no execution)
+    from polytrader.oms import InMemoryOrderStore, OMSCore
+    from polytrader.oms.idempotency import IdempotencyStore
+    from polytrader.portfolio import PortfolioService
+    from polytrader.risk import RiskChecker, RiskEngine, get_default_limits
 
-    supervisor = MarketSupervisor(
+    def portfolio_service_factory() -> PortfolioService:
+        return PortfolioService(
+            bus=bus,
+            store=store,
+            position_manager=None,  # No position manager in predict mode
+            fixed_size_usd=size,
+        )
+
+    def risk_checker_factory() -> RiskChecker:
+        risk_limits = get_default_limits()
+        risk_engine = RiskEngine(limits=risk_limits)
+        return RiskChecker(bus=bus, engine=risk_engine, store=store)
+
+    def oms_core_factory() -> OMSCore:
+        oms_store = InMemoryOrderStore(bus)
+        idempotency_store = IdempotencyStore()
+        return OMSCore(bus=bus, store=oms_store, idempotency_store=idempotency_store)
+
+    # Create supervisors
+    # Predict mode: SystemSupervisor without ExecutionRouter (proposals go to handler)
+    system_supervisor = SystemSupervisor(
+        bus=bus,
+        store=store,
+        portfolio_service_factory=portfolio_service_factory,
+        risk_checker_factory=risk_checker_factory,
+        oms_core_factory=oms_core_factory,
+        execution_router_factory=None,  # No execution in predict mode
+        position_manager_factory=None,  # No position manager in predict mode
+    )
+
+    market_supervisor = MarketSupervisor(
         pattern=market_pattern,
         discovery_service=discovery,
         adapter_factory=adapter_factory,
         observer_factory=observer_factory,
         strategy_factory=strategy_factory,
-        execution_router_factory=None,  # No execution in predict mode
         bus=bus,
         store=store,
+        position_manager=None,  # No position manager in predict mode
     )
 
     proposal_queue = bus.subscribe(PROPOSALS)
     market_change_queue = bus.subscribe(MARKET_CHANGE)
 
-    supervisor_task = asyncio.create_task(supervisor.run())
+    # Start supervisors (system first, then market)
+    await system_supervisor.start()
+    await market_supervisor.start()
+
+    system_supervisor_task = asyncio.create_task(system_supervisor.run())
+    market_supervisor_task = asyncio.create_task(market_supervisor.run())
 
     async def handle_proposals() -> None:
         """Handle proposal events."""
@@ -145,9 +183,15 @@ async def predict_task(
     market_changes_task = asyncio.create_task(handle_market_changes())
 
     try:
-        await asyncio.gather(supervisor_task, proposals_task, market_changes_task)
+        await asyncio.gather(
+            system_supervisor_task,
+            market_supervisor_task,
+            proposals_task,
+            market_changes_task,
+        )
     except KeyboardInterrupt:
-        supervisor.stop()
+        market_supervisor.stop()
+        await system_supervisor.stop()
         # Emit system stopped event (auto-persisted by EventBus)
         stopped_event = SystemStoppedEvent(reason="KeyboardInterrupt")
         await bus.publish(SYSTEM_LIFECYCLE, stopped_event)
@@ -157,15 +201,20 @@ async def predict_task(
         await bus.publish(SYSTEM_LIFECYCLE, stopped_event)
         raise
     finally:
-        supervisor_task.cancel()
+        system_supervisor_task.cancel()
+        market_supervisor_task.cancel()
         proposals_task.cancel()
         market_changes_task.cancel()
         try:
-            await supervisor_task
+            await system_supervisor_task
+            await market_supervisor_task
             await proposals_task
             await market_changes_task
         except asyncio.CancelledError:
             pass
+        # Stop supervisors
+        market_supervisor.stop()
+        await system_supervisor.stop()
         # Emit system stopped event if not already emitted (auto-persisted by EventBus)
         if not any(
             isinstance(e, SystemStoppedEvent)
