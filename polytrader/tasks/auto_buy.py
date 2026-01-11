@@ -174,12 +174,53 @@ async def auto_buy_task(
     risk_engine = RiskEngine(limits=risk_limits)
     risk_checker = RiskChecker(bus=bus, engine=risk_engine, store=store)
 
+    # TODO: Replace with strategy_factory in Commit 4 when SimpleThresholdStrategy is implemented
+    # For now, create a temporary adapter that will be replaced
+    from polytrader.events.types import SignalEvent
+    from polytrader.models.protocol import ITradingModel
+    from polytrader.strategies import IStrategy
+    from polytrader.types import MarketDataEvent, Position
+
+    def temporary_strategy_factory(market_slug: str) -> IStrategy:
+        """Temporary factory that wraps ITradingModel as IStrategy.
+
+        This will be replaced in Commit 4 when SimpleThresholdStrategy is implemented.
+        """
+
+        # Create the old model (will be refactored in Commit 4)
+        model = model_factory(market_slug)
+
+        # Wrap it as IStrategy (temporary adapter)
+        class StrategyAdapter:
+            def __init__(self, model: ITradingModel) -> None:
+                self._model = model
+                self._running = False
+
+            def evaluate(
+                self,
+                market_data: MarketDataEvent,
+                positions: dict[tuple[str, str], Position] | None = None,
+            ) -> SignalEvent | None:
+                # TODO: This will be replaced in Commit 4 with proper signal generation
+                # For now, return None (strategy evaluation will be implemented in Commit 4)
+                return None
+
+            async def run(self) -> None:
+                self._running = True
+                await self._model.run()
+
+            def stop(self) -> None:
+                self._running = False
+                self._model.stop()
+
+        return StrategyAdapter(model)
+
     supervisor = MarketSupervisor(
         pattern=market_pattern,
         discovery_service=discovery,
         adapter_factory=adapter_factory,
         observer_factory=observer_factory,
-        model_factory=model_factory,
+        strategy_factory=temporary_strategy_factory,
         execution_router_factory=execution_router_factory,
         bus=bus,
         store=store,
