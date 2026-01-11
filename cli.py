@@ -8,7 +8,6 @@ import typer
 from polytrader.logging_config import logger, setup_logging
 from polytrader.tasks import (
     auto_buy_task,
-    buy_task,
     paper_trading_task,
     watch_task,
 )
@@ -17,11 +16,9 @@ app = typer.Typer(help="Polymarket trading system")
 
 # Create sub-apps for command groups
 market_app = typer.Typer(help="Market operations")
-order_app = typer.Typer(help="Order operations")
 model_app = typer.Typer(help="Trading model operations")
 
 app.add_typer(market_app, name="market")
-app.add_typer(order_app, name="order")
 app.add_typer(model_app, name="model")
 
 
@@ -46,33 +43,6 @@ def market_watch(
         logger.info("Limit: {limit} ticks", limit=limit)
     logger.info("Press Ctrl+C to stop")
     asyncio.run(watch_task(pattern, frequency, limit))
-
-
-@order_app.command("buy")
-def order_buy(
-    market: str = typer.Option(..., "--market", "-m", help="Market slug"),
-    outcome: str = typer.Option(..., "--outcome", "-o", help="Outcome name (e.g., 'Up', 'Down')"),
-    amount: float = typer.Option(..., "--amount", "-a", help="Order amount in USDC"),
-    log_file: str | None = typer.Option(None, "--log-file", help="Optional file path to save logs"),
-) -> None:
-    """Place a buy order."""
-    _setup_logging(log_file)
-
-    response = asyncio.run(buy_task(market, outcome, amount))
-    if isinstance(response, dict):
-        order_id = response.get("order_id") or response.get("id", "N/A")
-        status = response.get("status") or response.get("state", "N/A")
-    else:
-        order_id = "N/A"
-        status = "N/A"
-    logger.info(
-        "✅ Order placed: {market}/{outcome} ${amount:.2f}  ID:{order_id}  Status:{status}",
-        market=market,
-        outcome=outcome,
-        amount=amount,
-        order_id=order_id,
-        status=status,
-    )
 
 
 @model_app.command("run")
