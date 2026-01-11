@@ -72,7 +72,6 @@ class SystemSupervisor:
 
         # Service tasks
         self._running = False
-        self._portfolio_task: asyncio.Task | None = None
         self._risk_checker_task: asyncio.Task | None = None
         self._oms_core_task: asyncio.Task | None = None
         self._execution_router_task: asyncio.Task | None = None
@@ -149,7 +148,6 @@ class SystemSupervisor:
             self._execution_router_task,
             self._oms_core_task,
             self._risk_checker_task,
-            self._portfolio_task,
         ]
 
         for task in tasks:
@@ -165,7 +163,6 @@ class SystemSupervisor:
         self._execution_router_task = None
         self._oms_core_task = None
         self._risk_checker_task = None
-        self._portfolio_task = None
 
         logger.info("SystemSupervisor stopped")
 
