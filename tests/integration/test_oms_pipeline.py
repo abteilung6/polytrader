@@ -25,6 +25,7 @@ from polytrader.execution.throttle import ExecutionThrottle
 
 if TYPE_CHECKING:
     pass
+from polytrader.adapters.polymarket.models import VenueResponse
 from polytrader.oms import InMemoryOrderStore, OMSCore
 from polytrader.oms.commands import SubmitOrderCommand
 from polytrader.oms.idempotency import IdempotencyStore
@@ -35,11 +36,12 @@ class FakeVenueAdapter:
     """Fake venue adapter for testing.
 
     Per testing.md §3.B: Deterministic adapter that emits user-stream events.
+    Implements IVenueAdapter protocol.
     """
 
     def __init__(self) -> None:
         self.submit_calls: list[tuple[str, OrderIntentEvent]] = []
-        self.cancel_calls: list[str] = []
+        self.cancel_calls: list[tuple[str, str]] = []
         self._should_reject = False
         self._should_ack = True
         self._venue_order_id = "venue-123"
@@ -48,27 +50,41 @@ class FakeVenueAdapter:
         self,
         client_order_id: str,
         intent: OrderIntentEvent,
-    ) -> dict:
+    ) -> VenueResponse:
         """Submit order and return normalized response."""
         self.submit_calls.append((client_order_id, intent))
 
         if self._should_reject:
-            return {
-                "status": "rejected",
-                "error": "Insufficient balance",
-                "error_type": "fatal",
-            }
+            from polytrader.adapters.polymarket.models import VenueError
 
-        return {
-            "status": "acknowledged",
-            "order_id": self._venue_order_id,
-            "client_order_id": client_order_id,
-        }
+            raise VenueError(
+                error_type="fatal",
+                message="Insufficient balance",
+                raw_error=ValueError("Insufficient balance"),
+            )
 
-    async def cancel_order(self, venue_order_id: str) -> dict:
+        return VenueResponse(
+            venue_order_id=self._venue_order_id,
+            status="acknowledged",
+            raw_response={
+                "status": "acknowledged",
+                "order_id": self._venue_order_id,
+                "client_order_id": client_order_id,
+            },
+        )
+
+    async def cancel_order(
+        self,
+        client_order_id: str,
+        venue_order_id: str,
+    ) -> VenueResponse:
         """Cancel order."""
-        self.cancel_calls.append(venue_order_id)
-        return {"status": "cancelled", "order_id": venue_order_id}
+        self.cancel_calls.append((client_order_id, venue_order_id))
+        return VenueResponse(
+            venue_order_id=venue_order_id,
+            status="cancelled",
+            raw_response={"status": "cancelled", "order_id": venue_order_id},
+        )
 
     def set_should_reject(self, value: bool) -> None:
         """Configure adapter to reject orders."""
@@ -175,8 +191,8 @@ async def test_oms_pipeline_execution_router_processes_commands() -> None:
     bus = EventBus(store=MemoryEventStore())
     fake_adapter = FakeVenueAdapter()
     tactics = ExecutionTactics(throttle=ExecutionThrottle())
-    # Type ignore: FakeVenueAdapter matches the protocol but not the concrete type
-    execution_router = ExecutionRouter(bus=bus, adapter=fake_adapter, tactics=tactics)  # type: ignore[arg-type]
+    # FakeVenueAdapter implements IVenueAdapter protocol
+    execution_router = ExecutionRouter(bus=bus, adapter=fake_adapter, tactics=tactics)
 
     intent = OrderIntentEvent(
         market_slug="test-market",
@@ -240,8 +256,8 @@ async def test_oms_pipeline_end_to_end_ack() -> None:
     fake_adapter = FakeVenueAdapter()
     fake_adapter.set_venue_order_id("venue-456")
     tactics = ExecutionTactics(throttle=ExecutionThrottle())
-    # Type ignore: FakeVenueAdapter matches the protocol but not the concrete type
-    execution_router = ExecutionRouter(bus=bus, adapter=fake_adapter, tactics=tactics)  # type: ignore[arg-type]
+    # FakeVenueAdapter implements IVenueAdapter protocol
+    execution_router = ExecutionRouter(bus=bus, adapter=fake_adapter, tactics=tactics)
 
     intent = OrderIntentEvent(
         market_slug="test-market",
@@ -326,8 +342,8 @@ async def test_oms_pipeline_rejection_flow() -> None:
     fake_adapter = FakeVenueAdapter()
     fake_adapter.set_should_reject(True)
     tactics = ExecutionTactics(throttle=ExecutionThrottle())
-    # Type ignore: FakeVenueAdapter matches the protocol but not the concrete type
-    execution_router = ExecutionRouter(bus=bus, adapter=fake_adapter, tactics=tactics)  # type: ignore[arg-type]
+    # FakeVenueAdapter implements IVenueAdapter protocol
+    execution_router = ExecutionRouter(bus=bus, adapter=fake_adapter, tactics=tactics)
 
     intent = OrderIntentEvent(
         market_slug="test-market",

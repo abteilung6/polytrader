@@ -8,9 +8,10 @@ from collections.abc import Callable
 from polytrader.adapters.polymarket.market_data import GammaClient
 from polytrader.clob import IClobClientFactory
 from polytrader.events import EventBus
+from polytrader.execution.adapter import IVenueAdapter
 from polytrader.execution.router import ExecutionRouter
 
-__all__ = ["ExecutionRouter", "create_execution_router_factory"]
+__all__ = ["ExecutionRouter", "IVenueAdapter", "create_execution_router_factory"]
 
 
 def create_execution_router_factory(

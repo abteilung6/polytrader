@@ -21,10 +21,10 @@ from polytrader.events.types import (
     ExecutionRequestEvent,
     ExecutionResponseEvent,
 )
+from polytrader.execution.adapter import IVenueAdapter
 from polytrader.execution.tactics import ExecutionTactics
 
 if TYPE_CHECKING:
-    from polytrader.adapters.polymarket.trading import ClobVenueAdapter
     from polytrader.oms.commands import CancelOrderCommand, SubmitOrderCommand
 
 
@@ -39,7 +39,7 @@ class ExecutionRouter:
 
     Attributes:
         _bus: Event bus for publishing events
-        _adapter: Venue adapter (e.g., ClobVenueAdapter)
+        _adapter: Venue adapter (implements IVenueAdapter protocol)
         _tactics: Execution tactics engine
         _running: Flag to control async loop
     """
@@ -47,14 +47,14 @@ class ExecutionRouter:
     def __init__(
         self,
         bus: EventBus,
-        adapter: "ClobVenueAdapter",
+        adapter: IVenueAdapter,
         tactics: ExecutionTactics | None = None,
     ) -> None:
         """Initialize execution router.
 
         Args:
             bus: Event bus for publishing events
-            adapter: Venue adapter for order submission
+            adapter: Venue adapter for order submission (implements IVenueAdapter)
             tactics: Execution tactics engine (defaults to new instance)
         """
         from polytrader.execution.tactics import ExecutionTactics
