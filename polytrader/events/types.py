@@ -336,6 +336,39 @@ class ExecutionErrorEvent(Event):
     venue: str = Field(description="Venue name")
 
 
+class MarketDiscoveryEvent(Event):
+    """Event emitted during market discovery operations.
+
+    Per observability.mdc §1: All important actions emit immutable events.
+    This event provides observability for market discovery operations.
+
+    Attributes:
+        pattern: Market pattern being searched (e.g., "btc-updown-15m")
+        discovered_market: Market slug if found, None otherwise
+        search_strategy: Search strategy used (e.g., "current_first")
+        windows_checked: Number of windows checked during search
+        latency_ms: Discovery latency in milliseconds
+        success: Whether discovery was successful
+        error: Error message if discovery failed
+        error_class: Error classification ("retryable", "fatal", or None)
+    """
+
+    source: EventSource = Field(default=EventSource.OPS)
+
+    pattern: str = Field(description="Market pattern being searched")
+    discovered_market: str | None = Field(
+        default=None, description="Market slug if found, None otherwise"
+    )
+    search_strategy: str = Field(default="current_first", description="Search strategy used")
+    windows_checked: int = Field(ge=0, description="Number of windows checked")
+    latency_ms: float = Field(ge=0, description="Discovery latency in milliseconds")
+    success: bool = Field(description="Whether discovery was successful")
+    error: str | None = Field(default=None, description="Error message if failed")
+    error_class: str | None = Field(
+        default=None, description="Error classification: 'retryable', 'fatal', or None"
+    )
+
+
 # Rebuild models to resolve forward references
 # This is needed because OrderCreatedEvent uses OrderIntentEvent
 # which is defined in polytrader.types

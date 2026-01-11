@@ -10,6 +10,7 @@ from polytrader.events.types import (
     ExecutionRequestEvent,
     ExecutionResponseEvent,
     FillEvent,
+    MarketDiscoveryEvent,
     OrderAckEvent,
     OrderCanceledEvent,
     OrderCreatedEvent,
@@ -38,6 +39,8 @@ __all__ = [
     "IEventStore",
     "MARKET_CHANGE",
     "MARKET_DATA",
+    "MARKET_DISCOVERY",
+    "MarketDiscoveryEvent",
     "MemoryEventStore",
     "OrderAckEvent",
     "ORDER_ACKS",
@@ -148,4 +151,8 @@ def __getattr__(name: str):
         from polytrader.events.topics import get_execution_errors_topic
 
         return get_execution_errors_topic()
+    elif name == "MARKET_DISCOVERY":
+        from polytrader.events.topics import get_market_discovery_topic
+
+        return get_market_discovery_topic()
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

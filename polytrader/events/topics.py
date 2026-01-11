@@ -21,6 +21,7 @@ _cancel_order_commands_topic: Topic | None = None
 _execution_requests_topic: Topic | None = None
 _execution_responses_topic: Topic | None = None
 _execution_errors_topic: Topic | None = None
+_market_discovery_topic: Topic | None = None
 
 
 def _create_market_data_topic() -> Topic:
@@ -60,6 +61,13 @@ def _create_system_lifecycle_topic() -> Topic:
     from polytrader.events.types import Event
 
     return Topic[Event]("system_lifecycle")
+
+
+def _create_market_discovery_topic() -> Topic:
+    """Create the MARKET_DISCOVERY topic."""
+    from polytrader.events.types import MarketDiscoveryEvent
+
+    return Topic[MarketDiscoveryEvent]("market_discovery")
 
 
 def get_market_data_topic() -> Topic:
@@ -297,6 +305,14 @@ def get_execution_errors_topic() -> Topic:
     return _execution_errors_topic
 
 
+def get_market_discovery_topic() -> Topic:
+    """Get the MARKET_DISCOVERY topic (singleton)."""
+    global _market_discovery_topic
+    if _market_discovery_topic is None:
+        _market_discovery_topic = _create_market_discovery_topic()
+    return _market_discovery_topic
+
+
 def __getattr__(name: str) -> Topic:
     """Lazily initialize topic constants on first access.
 
@@ -348,5 +364,7 @@ def __getattr__(name: str) -> Topic:
         return get_execution_responses_topic()
     elif name == "EXECUTION_ERRORS":
         return get_execution_errors_topic()
+    elif name == "MARKET_DISCOVERY":
+        return get_market_discovery_topic()
     else:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
