@@ -9,9 +9,17 @@ from polytrader.adapters.polymarket.market_data import GammaClient
 from polytrader.clob import IClobClientFactory
 from polytrader.events import EventBus
 from polytrader.execution.adapter import IVenueAdapter
+from polytrader.execution.fill_models import FillModel
+from polytrader.execution.paper import PaperExecutionAdapter
 from polytrader.execution.router import ExecutionRouter
 
-__all__ = ["ExecutionRouter", "IVenueAdapter", "create_execution_router_factory"]
+__all__ = [
+    "ExecutionRouter",
+    "FillModel",
+    "IVenueAdapter",
+    "PaperExecutionAdapter",
+    "create_execution_router_factory",
+]
 
 
 def create_execution_router_factory(

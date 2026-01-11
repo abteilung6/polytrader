@@ -9,12 +9,15 @@ import pytest
 
 from polytrader.common.ids import generate_correlation_id
 from polytrader.events import APPROVED_PROPOSALS, PROPOSALS, SIGNALS, TARGETS, EventBus
-from polytrader.events.types import SignalEvent, TargetEvent
+from polytrader.events.types import SignalEvent, TargetEvent, rebuild_event_models
 from polytrader.obs.metrics import MemoryMetricsCollector
 from polytrader.portfolio.service import PortfolioService
 from polytrader.risk import RiskChecker, RiskEngine, get_default_limits
 from polytrader.store import MemoryMarketDataStore
-from polytrader.types import MarketDataEvent, OrderIntentEvent
+from polytrader.types import MarketDataEvent, OrderIntentEvent, Outcome  # noqa: F401
+
+# Rebuild event models to resolve forward references
+rebuild_event_models()
 
 
 class TestPortfolioPipeline:

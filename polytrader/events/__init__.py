@@ -176,3 +176,14 @@ def __getattr__(name: str):
 
         return get_targets_topic()
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+# Rebuild event models after all imports are complete
+# This ensures forward references are resolved when the events module is imported
+try:
+    from polytrader.events.types import rebuild_event_models
+
+    rebuild_event_models()
+except (ImportError, AttributeError):
+    # Types not available yet, will be rebuilt when types module is imported
+    pass

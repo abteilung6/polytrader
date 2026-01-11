@@ -191,3 +191,25 @@ class MarketChangeEvent(Event):
         default=None, description="Previous market slug (None if initial)"
     )
     new_market: str = Field(description="New market slug")
+
+
+# Rebuild event models that depend on types defined here
+# This ensures forward references are resolved after types are loaded
+# We use a lazy import to avoid circular dependency
+def _rebuild_dependent_models() -> None:
+    """Rebuild event models that depend on types defined in this module."""
+    try:
+        # Lazy import to avoid circular dependency
+        # Import the module, not the function directly
+        import polytrader.events.types as events_types
+
+        # Call the rebuild function
+        events_types.rebuild_event_models()
+    except (ImportError, AttributeError):
+        # Events module not available yet or function doesn't exist
+        pass
+
+
+# Rebuild dependent models after types are defined
+# This will succeed if events/types.py was already imported
+_rebuild_dependent_models()

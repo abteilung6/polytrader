@@ -218,7 +218,7 @@ class SignalEvent(Event):
     source: EventSource = Field(default=EventSource.STRATEGY)
 
     market_slug: str = Field(description="Polymarket market identifier")
-    outcome: Outcome = Field(description="Market outcome: UP or DOWN")
+    outcome: "Outcome" = Field(description="Market outcome: UP or DOWN")  # noqa: UP037
 
     # Probabilistic scores (per flows.mdc §4)
     p_up: float = Field(ge=0.0, le=1.0, description="Probability that UP outcome wins (0-1)")
@@ -273,7 +273,7 @@ class TargetEvent(Event):
     source: EventSource = Field(default=EventSource.PORTFOLIO)
 
     market_slug: str = Field(description="Polymarket market identifier")
-    outcome: Outcome = Field(description="Market outcome: UP or DOWN")
+    outcome: "Outcome" = Field(description="Market outcome: UP or DOWN")  # noqa: UP037
 
     # Target exposure (per flows.mdc §5)
     target_exposure: float = Field(
@@ -319,8 +319,8 @@ class RiskCheckEvent(Event):
 
     source: EventSource = Field(default=EventSource.RISK)
 
-    intent: OrderIntentEvent = Field(description="Order intent that was checked")
-    result: RiskResult = Field(description="Risk check result")
+    intent: "OrderIntentEvent" = Field(description="Order intent that was checked")  # noqa: UP037
+    result: "RiskResult" = Field(description="Risk check result")  # noqa: UP037
 
     @property
     def allowed(self) -> bool:
@@ -328,7 +328,7 @@ class RiskCheckEvent(Event):
         return self.result.allowed
 
     @property
-    def reason_codes(self) -> list[RiskReasonCode]:
+    def reason_codes(self) -> "list[RiskReasonCode]":  # noqa: UP037
         """Convenience property to get reason codes."""
         return self.result.reason_codes
 
@@ -349,7 +349,7 @@ class OrderCreatedEvent(Event):
 
     order_id: str = Field(description="Internal UUID for the order")
     client_order_id: str = Field(description="Idempotency key (deterministic from intent)")
-    intent: OrderIntentEvent = Field(description="Original approved order intent")
+    intent: "OrderIntentEvent" = Field(description="Original approved order intent")  # noqa: UP037
 
 
 class OrderSubmittedEvent(Event):
@@ -548,18 +548,28 @@ class MarketDiscoveryEvent(Event):
 # This is needed because OrderCreatedEvent uses OrderIntentEvent
 # and SignalEvent/TargetEvent use Outcome
 # which are defined in polytrader.types
-def _rebuild_models() -> None:
-    """Rebuild Pydantic models to resolve forward references."""
+def rebuild_event_models() -> None:
+    """Rebuild Pydantic models to resolve forward references.
+
+    This function should be called after polytrader.types is fully loaded.
+    It's safe to call multiple times.
+    """
     try:
+        # Import here to avoid circular import at module level
+        from polytrader.risk.models import RiskResult  # noqa: F401
         from polytrader.types import OrderIntentEvent, Outcome  # noqa: F401
 
-        OrderCreatedEvent.model_rebuild()
+        # Rebuild models that use forward references
         SignalEvent.model_rebuild()
         TargetEvent.model_rebuild()
-    except ImportError:
-        # Types module not available yet, will be rebuilt on first use
+        RiskCheckEvent.model_rebuild()
+        OrderCreatedEvent.model_rebuild()
+    except (ImportError, AttributeError):
+        # Types module not available yet or models not fully defined
+        # Will be rebuilt when first used or when types module is imported
         pass
 
 
-# Rebuild on module import
-_rebuild_models()
+# Attempt to rebuild immediately (will succeed if types are already loaded)
+# This handles the case where types.py is imported before events/types.py
+rebuild_event_models()
