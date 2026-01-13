@@ -6,7 +6,7 @@ import time
 import uuid
 from datetime import UTC, datetime
 from enum import Enum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -704,3 +704,69 @@ class MarketChangeEvent(Event):
         default=None, description="Previous market slug (None if initial)"
     )
     new_market: str = Field(description="New market slug")
+
+
+class ReconcileEvent(Event):
+    """Event emitted when reconciliation detects divergence between OMS and venue.
+
+    Per flows.mdc §12: Reconciliation compares venue truth vs OMS projection
+    and emits ReconcileEvent for any divergences detected.
+
+    Attributes:
+        divergence_type: Type of divergence detected
+        order_id: Internal order ID (if applicable)
+        venue_order_id: Venue order ID (if applicable)
+        severity: Severity level (INFO, WARNING, ERROR)
+        details: Dictionary with divergence details (diff, expected, actual, etc.)
+
+    Note:
+        - Timestamps come from Event base class (ts_wall, ts_mono)
+        - Source is automatically set to EventSource.OPS
+        - All Event base class fields are inherited (event_id, correlation_id, run_id, etc.)
+    """
+
+    source: EventSource = Field(default=EventSource.OPS)
+
+    divergence_type: Literal["phantom_order", "orphan_order", "fill_mismatch", "none"] = Field(
+        description="Type of divergence detected"
+    )
+    order_id: str | None = Field(default=None, description="Internal order ID (if applicable)")
+    venue_order_id: str | None = Field(default=None, description="Venue order ID (if applicable)")
+    severity: Literal["INFO", "WARNING", "ERROR"] = Field(
+        description="Severity level of the divergence"
+    )
+    details: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Dictionary with divergence details (diff, expected, actual, etc.)",
+    )
+
+
+class CircuitBreakerEvent(Event):
+    """Event emitted when circuit breaker triggers or resets.
+
+    Per flows.mdc §13: Circuit breakers trigger on severe divergence or system issues
+    and emit CircuitBreakerEvent to disable execution.
+
+    Attributes:
+        breaker_type: Type of circuit breaker (reconcile_divergence, data_stale, error_rate)
+        triggered: True if circuit breaker triggered, False if reset
+        reason: Human-readable reason for trigger/reset
+        details: Dictionary with additional context (thresholds, counts, etc.)
+
+    Note:
+        - Timestamps come from Event base class (ts_wall, ts_mono)
+        - Source is automatically set to EventSource.OPS
+        - All Event base class fields are inherited (event_id, correlation_id, run_id, etc.)
+    """
+
+    source: EventSource = Field(default=EventSource.OPS)
+
+    breaker_type: Literal["reconcile_divergence", "data_stale", "error_rate"] = Field(
+        description="Type of circuit breaker"
+    )
+    triggered: bool = Field(description="True if triggered, False if reset")
+    reason: str = Field(description="Human-readable reason for trigger/reset")
+    details: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Dictionary with additional context (thresholds, counts, etc.)",
+    )
