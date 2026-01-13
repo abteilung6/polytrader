@@ -64,6 +64,14 @@ class ExecutionRouter:
         self._tactics = tactics or ExecutionTactics()
         self._running = False
 
+    def get_adapter(self) -> IVenueAdapter:
+        """Get the venue adapter (for reconciliation).
+
+        Returns:
+            Venue adapter instance
+        """
+        return self._adapter
+
     async def run(self) -> None:
         """Start execution router async loop.
 

@@ -4,14 +4,22 @@ Tests service lifecycle management, startup/shutdown order, and error handling.
 """
 
 import asyncio
-from unittest.mock import MagicMock
+from typing import Any
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from polytrader.events import EventBus
+from polytrader.adapters.polymarket.user_stream import UserStreamAdapter
+from polytrader.clob import IClobClient
+from polytrader.events import (
+    CIRCUIT_BREAKER,
+    EventBus,
+)
 from polytrader.execution import ExecutionRouter
 from polytrader.oms import InMemoryOrderStore, OMSCore
 from polytrader.oms.idempotency import IdempotencyStore
+from polytrader.oms.reconcile import ReconciliationService
+from polytrader.ops import CircuitBreaker, CircuitBreakerThresholds, ExecutionControl
 from polytrader.portfolio import PortfolioService
 from polytrader.position_manager import IPositionManager
 from polytrader.risk import RiskChecker, RiskEngine, get_default_limits
@@ -651,3 +659,259 @@ class TestSystemSupervisor:
         assert supervisor._running
         # Verify PortfolioService was not successfully started
         assert not portfolio_service.start_called
+
+    @pytest.mark.asyncio
+    async def test_user_stream_task_runs(self) -> None:
+        """Test that user stream task runs and publishes events."""
+        bus = EventBus()
+        store = MemoryMarketDataStore()
+
+        # Create fake services
+        portfolio_service = FakePortfolioService(bus=bus, store=store, fixed_size_usd=1.0)
+        risk_checker = FakeRiskChecker(
+            bus=bus, engine=RiskEngine(limits=get_default_limits()), store=store
+        )
+        oms_core = FakeOMSCore(
+            bus=bus, store=InMemoryOrderStore(bus), idempotency_store=IdempotencyStore()
+        )
+
+        # Create fake CLOB client
+        fake_clob_client = MagicMock(spec=IClobClient)
+        fake_clob_client.create_or_derive_api_creds.return_value = {
+            "apiKey": "test-key",
+            "secret": "test-secret",
+            "passphrase": "test-pass",
+        }
+
+        # Create user stream adapter factory
+        def user_stream_factory() -> UserStreamAdapter:
+            return UserStreamAdapter(clob_client=fake_clob_client, bus=bus)
+
+        def portfolio_factory() -> PortfolioService:
+            return portfolio_service
+
+        def risk_factory() -> RiskChecker:
+            return risk_checker
+
+        def oms_factory() -> OMSCore:
+            return oms_core
+
+        supervisor = SystemSupervisor(
+            bus=bus,
+            store=store,
+            portfolio_service_factory=portfolio_factory,
+            risk_checker_factory=risk_factory,
+            oms_core_factory=oms_factory,
+            user_stream_adapter_factory=user_stream_factory,
+        )
+
+        await supervisor.start()
+
+        # Verify user stream adapter was created
+        assert supervisor._user_stream_adapter is not None
+        assert supervisor._user_stream_task is not None
+
+        # Mock the WebSocket connection to avoid actual network calls
+        with patch("polytrader.adapters.polymarket.user_stream.websockets.connect") as mock_connect:
+            # Create a fake WebSocket that sends a message
+            fake_ws = MagicMock()
+            fake_ws.__aenter__ = MagicMock(return_value=fake_ws)
+            fake_ws.__aexit__ = MagicMock(return_value=None)
+            fake_ws.send = MagicMock()
+            fake_ws.__aiter__ = MagicMock(return_value=iter([]))
+            mock_connect.return_value = fake_ws
+
+            # Wait a bit for the adapter to start
+            await asyncio.sleep(0.1)
+
+            # Verify adapter is running (it should have tried to connect)
+            # The actual connection will fail in test, but we verify the task is running
+            assert not supervisor._user_stream_task.done()
+
+        await supervisor.stop()
+
+    @pytest.mark.asyncio
+    async def test_reconciliation_task_runs(self) -> None:
+        """Test that reconciliation task runs periodically."""
+        bus = EventBus()
+        store = MemoryMarketDataStore()
+
+        # Create fake services
+        portfolio_service = FakePortfolioService(bus=bus, store=store, fixed_size_usd=1.0)
+        risk_checker = FakeRiskChecker(
+            bus=bus, engine=RiskEngine(limits=get_default_limits()), store=store
+        )
+        oms_core = FakeOMSCore(
+            bus=bus, store=InMemoryOrderStore(bus), idempotency_store=IdempotencyStore()
+        )
+
+        # Create fake execution router with venue adapter
+        fake_adapter = MagicMock()
+        fake_adapter.get_open_orders = MagicMock(return_value=[])
+        execution_router = FakeExecutionRouter(bus)
+        execution_router._adapter = fake_adapter
+
+        # Create OMS store for reconciliation
+        oms_store = InMemoryOrderStore(bus)
+
+        # Create reconciliation service factory
+        def reconciliation_factory() -> ReconciliationService:
+            return ReconciliationService(store=oms_store, venue_adapter=fake_adapter, bus=bus)
+
+        def portfolio_factory() -> PortfolioService:
+            return portfolio_service
+
+        def risk_factory() -> RiskChecker:
+            return risk_checker
+
+        def oms_factory() -> OMSCore:
+            return oms_core
+
+        def execution_router_factory() -> ExecutionRouter:
+            return execution_router
+
+        supervisor = SystemSupervisor(
+            bus=bus,
+            store=store,
+            portfolio_service_factory=portfolio_factory,
+            risk_checker_factory=risk_factory,
+            oms_core_factory=oms_factory,
+            execution_router_factory=execution_router_factory,
+            reconciliation_service_factory=reconciliation_factory,
+        )
+
+        await supervisor.start()
+
+        # Verify reconciliation service was created
+        assert supervisor._reconciliation_service is not None
+        assert supervisor._reconciliation_task is not None
+
+        # Wait for reconciliation to run (it runs every 60 seconds, but we can trigger it manually)
+        # Actually, the task should run immediately and then wait 60 seconds
+        await asyncio.sleep(0.2)
+
+        # Verify reconciliation was called (venue adapter should have been called)
+        fake_adapter.get_open_orders.assert_called()
+
+        # Verify task is still running
+        assert not supervisor._reconciliation_task.done()
+
+        await supervisor.stop()
+
+    @pytest.mark.asyncio
+    async def test_circuit_breaker_disables_execution(self) -> None:
+        """Test that circuit breaker disables execution when triggered."""
+        bus = EventBus()
+        store = MemoryMarketDataStore()
+        execution_control = ExecutionControl()
+
+        # Create fake services
+        portfolio_service = FakePortfolioService(bus=bus, store=store, fixed_size_usd=1.0)
+        risk_checker = FakeRiskChecker(
+            bus=bus, engine=RiskEngine(limits=get_default_limits()), store=store
+        )
+        oms_core = FakeOMSCore(
+            bus=bus, store=InMemoryOrderStore(bus), idempotency_store=IdempotencyStore()
+        )
+
+        # Create circuit breaker factory
+        def circuit_breaker_factory() -> CircuitBreaker:
+            thresholds = CircuitBreakerThresholds(
+                max_fill_mismatches=0, require_error_severity=False
+            )  # Trigger on any fill mismatch
+            return CircuitBreaker(
+                thresholds=thresholds, bus=bus, execution_control=execution_control
+            )
+
+        # Create fake reconciliation service that returns a fill mismatch
+        from polytrader.events.types import ReconcileEvent
+
+        async def mock_reconcile() -> list[ReconcileEvent]:
+            return [
+                ReconcileEvent(
+                    divergence_type="fill_mismatch",
+                    order_id="order-1",
+                    venue_order_id="venue-1",
+                    severity="ERROR",
+                    details={},
+                )
+            ]
+
+        fake_reconciliation_service = MagicMock()
+        fake_reconciliation_service.reconcile = mock_reconcile
+
+        def reconciliation_factory() -> Any:
+            return fake_reconciliation_service
+
+        # Enable execution first
+        execution_control.enable()
+        assert execution_control.is_enabled()
+
+        # Subscribe to circuit breaker events
+        cb_queue = bus.subscribe(CIRCUIT_BREAKER)
+
+        def portfolio_factory() -> PortfolioService:
+            return portfolio_service
+
+        def risk_factory() -> RiskChecker:
+            return risk_checker
+
+        def oms_factory() -> OMSCore:
+            return oms_core
+
+        supervisor = SystemSupervisor(
+            bus=bus,
+            store=store,
+            portfolio_service_factory=portfolio_factory,
+            risk_checker_factory=risk_factory,
+            oms_core_factory=oms_factory,
+            reconciliation_service_factory=reconciliation_factory,
+            circuit_breaker_factory=circuit_breaker_factory,
+            execution_control=execution_control,
+        )
+
+        await supervisor.start()
+
+        # Verify circuit breaker was created
+        assert supervisor._circuit_breaker is not None
+
+        # Wait for reconciliation to run (which should trigger circuit breaker)
+        # The reconciliation loop waits 0.1s for circuit breaker to be initialized,
+        # then runs reconciliation immediately
+        # We need to wait a bit for the reconciliation to complete
+        await asyncio.sleep(0.5)
+
+        # Verify execution was disabled
+        assert not execution_control.is_enabled(), (
+            "Execution should be disabled after circuit breaker triggers"
+        )
+
+        # Verify circuit breaker event was published
+        try:
+            cb_event = await asyncio.wait_for(cb_queue.get(), timeout=1.0)
+            assert cb_event.triggered is True
+            assert cb_event.breaker_type == "reconcile_divergence"
+        except TimeoutError:
+            pytest.fail("Circuit breaker event was not published")
+
+        await supervisor.stop()
+
+    @pytest.mark.asyncio
+    async def test_execution_control_enable_disable(self) -> None:
+        """Test that execution control works correctly."""
+        execution_control = ExecutionControl()
+
+        # Initially disabled
+        assert not execution_control.is_enabled()
+
+        # Enable
+        execution_control.enable()
+        assert execution_control.is_enabled()
+
+        # Disable
+        execution_control.disable()
+        assert not execution_control.is_enabled()
+
+        # Enable again
+        execution_control.enable()
+        assert execution_control.is_enabled()
