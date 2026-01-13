@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from polytrader.adapters import create_adapter_factory
 from polytrader.clob import create_clob_client_factory
-from polytrader.config import PolymarketSecrets
+from polytrader.config import PolymarketSecrets, load_config
 from polytrader.events import EventBus
 from polytrader.execution import ExecutionRouter, create_execution_router_factory
 from polytrader.execution.fill_models import FillModel
@@ -90,6 +90,8 @@ class PaperTradingSystemBuilder:
         # Shared dependencies (created on first access)
         self._shared_oms_store: InMemoryOrderStore | None = None
         self._secrets: PolymarketSecrets | None = None
+        self._config: dict[str, Any] | None = None
+        self._config_path: str | None = None
         self._adapter_factory: Callable[[str], IMarketDataAdapter] | None = None
         self._observer_factory: Callable[[IMarketDataAdapter], IObserver] | None = None
         self._strategy_factory: Callable[[str], IStrategy] | None = None
@@ -396,6 +398,23 @@ class PaperTradingSystemBuilder:
         market_supervisor = self.build_market_supervisor(position_manager=None)
         return system_supervisor, market_supervisor
 
+    async def load_config(self, config_path: str | None = None) -> None:
+        """Load configuration from file or environment (optional for paper trading).
+
+        Per Phase 7: Load and validate configuration on boot.
+        This method loads config, validates it, calculates hash, and emits ConfigLoadedEvent.
+
+        Args:
+            config_path: Path to config file (JSON). If None, loads from environment.
+
+        Raises:
+            FileNotFoundError: If config_path is provided but file doesn't exist
+            ValueError: If configuration is invalid
+            json.JSONDecodeError: If config file is not valid JSON
+        """
+        self._config_path = config_path
+        self._config = await load_config(config_path=config_path, bus=self._bus)
+
 
 class LiveTradingSystemBuilder:
     """Builder for live trading system components.
@@ -456,6 +475,8 @@ class LiveTradingSystemBuilder:
         self._observer_factory: Callable[[IMarketDataAdapter], IObserver] | None = None
         self._strategy_factory: Callable[[str], IStrategy] | None = None
         self._clob_client_factory: IClobClientFactory | None = None
+        self._config: dict[str, Any] | None = None
+        self._config_path: str | None = None
 
     def strategy_config(
         self,
@@ -760,3 +781,20 @@ class LiveTradingSystemBuilder:
         # For now, pass None - caller must get it from system_supervisor after start()
         market_supervisor = self.build_market_supervisor(position_manager=None)
         return system_supervisor, market_supervisor
+
+    async def load_config(self, config_path: str | None = None) -> None:
+        """Load configuration from file or environment.
+
+        Per Phase 7: Load and validate configuration on boot.
+        This method loads config, validates it, calculates hash, and emits ConfigLoadedEvent.
+
+        Args:
+            config_path: Path to config file (JSON). If None, loads from environment.
+
+        Raises:
+            FileNotFoundError: If config_path is provided but file doesn't exist
+            ValueError: If configuration is invalid
+            json.JSONDecodeError: If config file is not valid JSON
+        """
+        self._config_path = config_path
+        self._config = await load_config(config_path=config_path, bus=self._bus)
