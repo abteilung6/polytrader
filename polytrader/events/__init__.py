@@ -72,6 +72,7 @@ __all__ = [
     "OrderSubmittedEvent",
     "ORDERS",
     "PROPOSALS",
+    "RECONCILE",
     "ReconcileEvent",
     "RISK_CHECKS",
     "RiskCheckEvent",
@@ -209,6 +210,10 @@ def __getattr__(name: str):
         from polytrader.events.topics import get_user_stream_cancels_topic
 
         return get_user_stream_cancels_topic()
+    elif name == "RECONCILE":
+        from polytrader.events.topics import get_reconcile_topic
+
+        return get_reconcile_topic()
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 

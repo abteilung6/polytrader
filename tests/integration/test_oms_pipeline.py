@@ -8,7 +8,7 @@ and assert emitted events + resulting projections.
 """
 
 import asyncio
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -85,6 +85,22 @@ class FakeVenueAdapter:
             status="cancelled",
             raw_response={"status": "cancelled", "order_id": venue_order_id},
         )
+
+    async def get_open_orders(
+        self,
+        market_slug: str | None = None,
+        token_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Get active orders from fake venue.
+
+        Args:
+            market_slug: Market slug (optional filter, ignored)
+            token_id: Token ID (optional filter, ignored)
+
+        Returns:
+            Empty list (fake adapter doesn't track orders)
+        """
+        return []
 
     def set_should_reject(self, value: bool) -> None:
         """Configure adapter to reject orders."""

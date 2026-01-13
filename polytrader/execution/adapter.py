@@ -6,7 +6,7 @@ This protocol defines the interface for both real and paper trading adapters.
 Both ClobVenueAdapter and PaperExecutionAdapter (future) implement this protocol.
 """
 
-from typing import Protocol
+from typing import Any, Protocol
 
 from polytrader.adapters.polymarket.models import VenueResponse
 from polytrader.events.types import OrderIntentEvent
@@ -61,5 +61,23 @@ class IVenueAdapter(Protocol):
 
         Raises:
             VenueError: If cancellation fails (with error_type classification)
+        """
+        ...
+
+    async def get_open_orders(
+        self,
+        market_slug: str | None = None,
+        token_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Get active orders from venue.
+
+        Per flows.mdc §12: Reconciliation fetches venue orders.
+
+        Args:
+            market_slug: Market slug (optional filter)
+            token_id: Token ID (optional filter)
+
+        Returns:
+            List of active orders from venue (raw dict format)
         """
         ...

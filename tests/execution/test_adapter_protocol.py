@@ -3,6 +3,8 @@
 Per Commit 1: Verify that adapters implement IVenueAdapter protocol correctly.
 """
 
+from typing import Any
+
 from polytrader.adapters.polymarket.models import VenueResponse
 from polytrader.events.types import OrderIntentEvent
 
@@ -62,6 +64,14 @@ class TestIVenueAdapterProtocol:
                     status="CANCELLED",
                     raw_response={},
                 )
+
+            async def get_open_orders(
+                self,
+                market_slug: str | None = None,
+                token_id: str | None = None,
+            ) -> list[dict[str, Any]]:
+                """Get active orders from mock venue."""
+                return []
 
         # Verify ExecutionRouter accepts it
         bus = EventBus()

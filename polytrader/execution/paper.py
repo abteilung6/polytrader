@@ -10,6 +10,7 @@ Fill simulation is deterministic based on configuration.
 import asyncio
 import random
 import uuid
+from typing import Any
 
 from polytrader.adapters.polymarket.models import VenueError, VenueResponse
 from polytrader.events.bus import EventBus
@@ -230,3 +231,24 @@ class PaperExecutionAdapter(IVenueAdapter):
                 "client_order_id": client_order_id,
             },
         )
+
+    async def get_open_orders(
+        self,
+        market_slug: str | None = None,
+        token_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Get active orders from paper trading venue.
+
+        Per flows.mdc §12: Reconciliation fetches venue orders.
+        Paper trading: Returns empty list (paper orders are not tracked for reconciliation).
+
+        Args:
+            market_slug: Market slug (optional filter, ignored in paper trading)
+            token_id: Token ID (optional filter, ignored in paper trading)
+
+        Returns:
+            Empty list (paper trading doesn't maintain order state)
+        """
+        # Paper trading doesn't maintain order state for reconciliation
+        # All orders are immediately filled or rejected
+        return []

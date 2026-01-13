@@ -28,6 +28,7 @@ _user_stream_acks_topic: Topic | None = None
 _user_stream_rejects_topic: Topic | None = None
 _user_stream_fills_topic: Topic | None = None
 _user_stream_cancels_topic: Topic | None = None
+_reconcile_topic: Topic | None = None
 
 
 def _create_market_data_topic() -> Topic:
@@ -409,6 +410,21 @@ def get_user_stream_cancels_topic() -> Topic:
     return _user_stream_cancels_topic
 
 
+def _create_reconcile_topic() -> Topic:
+    """Create the RECONCILE topic."""
+    from polytrader.events.types import ReconcileEvent
+
+    return Topic[ReconcileEvent]("reconcile")
+
+
+def get_reconcile_topic() -> Topic:
+    """Get the RECONCILE topic (singleton)."""
+    global _reconcile_topic
+    if _reconcile_topic is None:
+        _reconcile_topic = _create_reconcile_topic()
+    return _reconcile_topic
+
+
 def __getattr__(name: str) -> Topic:
     """Lazily initialize topic constants on first access.
 
@@ -474,5 +490,7 @@ def __getattr__(name: str) -> Topic:
         return get_user_stream_fills_topic()
     elif name == "USER_STREAM_CANCELS":
         return get_user_stream_cancels_topic()
+    elif name == "RECONCILE":
+        return get_reconcile_topic()
     else:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
