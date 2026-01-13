@@ -71,6 +71,7 @@ __all__ = [
     "OrderRejectedEvent",
     "OrderSubmittedEvent",
     "ORDERS",
+    "CIRCUIT_BREAKER",
     "PROPOSALS",
     "RECONCILE",
     "ReconcileEvent",
@@ -214,6 +215,10 @@ def __getattr__(name: str):
         from polytrader.events.topics import get_reconcile_topic
 
         return get_reconcile_topic()
+    elif name == "CIRCUIT_BREAKER":
+        from polytrader.events.topics import get_circuit_breaker_topic
+
+        return get_circuit_breaker_topic()
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 

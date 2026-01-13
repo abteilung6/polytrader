@@ -29,6 +29,7 @@ _user_stream_rejects_topic: Topic | None = None
 _user_stream_fills_topic: Topic | None = None
 _user_stream_cancels_topic: Topic | None = None
 _reconcile_topic: Topic | None = None
+_circuit_breaker_topic: Topic | None = None
 
 
 def _create_market_data_topic() -> Topic:
@@ -425,6 +426,21 @@ def get_reconcile_topic() -> Topic:
     return _reconcile_topic
 
 
+def _create_circuit_breaker_topic() -> Topic:
+    """Create the CIRCUIT_BREAKER topic."""
+    from polytrader.events.types import CircuitBreakerEvent
+
+    return Topic[CircuitBreakerEvent]("circuit_breaker")
+
+
+def get_circuit_breaker_topic() -> Topic:
+    """Get the CIRCUIT_BREAKER topic (singleton)."""
+    global _circuit_breaker_topic
+    if _circuit_breaker_topic is None:
+        _circuit_breaker_topic = _create_circuit_breaker_topic()
+    return _circuit_breaker_topic
+
+
 def __getattr__(name: str) -> Topic:
     """Lazily initialize topic constants on first access.
 
@@ -492,5 +508,7 @@ def __getattr__(name: str) -> Topic:
         return get_user_stream_cancels_topic()
     elif name == "RECONCILE":
         return get_reconcile_topic()
+    elif name == "CIRCUIT_BREAKER":
+        return get_circuit_breaker_topic()
     else:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
