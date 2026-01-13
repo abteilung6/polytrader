@@ -35,11 +35,9 @@ from polytrader.adapters.polymarket.models import (
 )
 from polytrader.clob import IClobClient
 from polytrader.events.bus import EventBus
-from polytrader.events.types import (
-    FillEvent,
-    OrderAckEvent,
-    OrderCanceledEvent,
-)
+
+# Note: User stream adapter publishes canonical events, not OMS events
+# OMS will subscribe and convert canonical events to OMS events
 from polytrader.logging_config import logger
 
 # Polymarket WebSocket endpoint
@@ -316,15 +314,10 @@ class UserStreamAdapter:
                 timestamp=iso_timestamp,
             )
 
-            # Publish OrderAckEvent
-            from polytrader.events import ORDER_ACKS
+            # Publish canonical ack to user stream topic
+            from polytrader.events import USER_STREAM_ACKS
 
-            ack_event = OrderAckEvent(
-                order_id="",  # Will be matched by OMS using venue_order_id
-                client_order_id="",  # Not available from Polymarket
-                venue_order_id=canonical_ack.venue_order_id,
-            )
-            await self.bus.publish(ORDER_ACKS, ack_event)
+            await self.bus.publish(USER_STREAM_ACKS, canonical_ack)
             logger.info(
                 "Published order acknowledgment (PLACEMENT)",
                 venue_order_id=venue_order_id,
@@ -341,16 +334,10 @@ class UserStreamAdapter:
                 timestamp=iso_timestamp,
             )
 
-            # Publish OrderCanceledEvent
-            from polytrader.events import ORDER_CANCELS
+            # Publish canonical cancel to user stream topic
+            from polytrader.events import USER_STREAM_CANCELS
 
-            cancel_event = OrderCanceledEvent(
-                order_id="",  # Will be matched by OMS using venue_order_id
-                reason=(
-                    f"Order cancelled on venue (venue_order_id: {canonical_cancel.venue_order_id})"
-                ),
-            )
-            await self.bus.publish(ORDER_CANCELS, cancel_event)
+            await self.bus.publish(USER_STREAM_CANCELS, canonical_cancel)
             logger.info(
                 "Published order cancellation",
                 venue_order_id=venue_order_id,
@@ -492,18 +479,10 @@ class UserStreamAdapter:
             timestamp=timestamp,
         )
 
-        # Publish FillEvent
-        from polytrader.events import FILLS
+        # Publish canonical fill to user stream topic
+        from polytrader.events import USER_STREAM_FILLS
 
-        fill_event = FillEvent(
-            order_id="",  # Will be matched by OMS using venue_order_id
-            fill_id=canonical_fill.fill_id,
-            size=canonical_fill.size,
-            price=canonical_fill.price,
-            fee=canonical_fill.fee,
-            venue_fill_id=canonical_fill.venue_order_id,  # Use venue_order_id as venue_fill_id
-        )
-        await self.bus.publish(FILLS, fill_event)
+        await self.bus.publish(USER_STREAM_FILLS, canonical_fill)
         logger.info(
             "Published fill event (trade MATCHED)",
             fill_id=canonical_fill.fill_id,

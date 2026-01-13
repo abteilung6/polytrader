@@ -64,6 +64,17 @@ class IOrderStore(Protocol):
         """
         ...
 
+    def get_order_by_venue_id(self, venue_order_id: str) -> Order | None:
+        """Get order by venue_order_id.
+
+        Args:
+            venue_order_id: Venue-assigned order ID
+
+        Returns:
+            Order if found, None otherwise
+        """
+        ...
+
     def get_open_orders(self) -> list[Order]:
         """Get all non-terminal orders.
 
@@ -174,6 +185,7 @@ class InMemoryOrderStore(IEventHandlingOrderStore):
         self._bus = bus
         self._orders: dict[str, Order] = {}
         self._client_order_ids: dict[str, str] = {}  # client_order_id → order_id
+        self._venue_order_ids: dict[str, str] = {}  # venue_order_id → order_id
         self._order_events: dict[str, list[Event]] = {}
 
     async def create_order(self, intent: "OrderIntentEvent", client_order_id: str) -> Order:
@@ -245,6 +257,20 @@ class InMemoryOrderStore(IEventHandlingOrderStore):
             return self._orders.get(order_id)
         return None
 
+    def get_order_by_venue_id(self, venue_order_id: str) -> Order | None:
+        """Get order by venue_order_id.
+
+        Args:
+            venue_order_id: Venue-assigned order ID
+
+        Returns:
+            Order if found, None otherwise
+        """
+        order_id = self._venue_order_ids.get(venue_order_id)
+        if order_id:
+            return self._orders.get(order_id)
+        return None
+
     def get_open_orders(self) -> list[Order]:
         """Get all non-terminal orders.
 
@@ -297,6 +323,17 @@ class InMemoryOrderStore(IEventHandlingOrderStore):
                 del self._client_order_ids[existing_order.client_order_id]
             # Add new mapping
             self._client_order_ids[order.client_order_id] = order.order_id
+        # Update venue_order_id mapping if changed
+        if order.venue_order_id != existing_order.venue_order_id:
+            # Remove old mapping
+            if (
+                existing_order.venue_order_id
+                and existing_order.venue_order_id in self._venue_order_ids
+            ):
+                del self._venue_order_ids[existing_order.venue_order_id]
+            # Add new mapping
+            if order.venue_order_id:
+                self._venue_order_ids[order.venue_order_id] = order.order_id
 
     def rebuild_from_events(self, events: list[Event]) -> None:
         """Rebuild order state from event log.
@@ -378,6 +415,9 @@ class InMemoryOrderStore(IEventHandlingOrderStore):
             # Update venue_order_id using model_copy (Order is immutable)
             order = order.model_copy(update={"venue_order_id": event.venue_order_id})
             self._orders[event.order_id] = order
+            # Update venue_order_id mapping
+            if event.venue_order_id:
+                self._venue_order_ids[event.venue_order_id] = event.order_id
             self._order_events[event.order_id].append(event)
 
     def handle_order_rejected(self, event: "OrderRejectedEvent") -> None:

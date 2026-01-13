@@ -15,7 +15,13 @@ from unittest.mock import patch
 
 import pytest
 
-from polytrader.adapters.polymarket.models import OrderMessage, TradeMessage
+from polytrader.adapters.polymarket.models import (
+    CanonicalCancel,
+    CanonicalFill,
+    CanonicalOrderAck,
+    OrderMessage,
+    TradeMessage,
+)
 from polytrader.adapters.polymarket.user_stream import (
     INITIAL_RECONNECT_DELAY,
     MAX_RECONNECT_DELAY,
@@ -24,9 +30,12 @@ from polytrader.adapters.polymarket.user_stream import (
     UserStreamAdapter,
 )
 from polytrader.clob import IClobClient
-from polytrader.events import FILLS, ORDER_ACKS, ORDER_CANCELS
+from polytrader.events import (
+    USER_STREAM_ACKS,
+    USER_STREAM_CANCELS,
+    USER_STREAM_FILLS,
+)
 from polytrader.events.bus import EventBus
-from polytrader.events.types import FillEvent, OrderAckEvent, OrderCanceledEvent
 
 
 class FakeClobClient(IClobClient):
@@ -159,9 +168,9 @@ class TestUserStreamAdapter:
     async def test_handle_order_placement_message(
         self, adapter: UserStreamAdapter, bus: EventBus
     ) -> None:
-        """Test that order placement messages are converted to OrderAckEvent."""
-        # Subscribe to ORDER_ACKS topic
-        ack_queue = bus.subscribe(ORDER_ACKS)
+        """Test that order placement messages are converted to CanonicalOrderAck."""
+        # Subscribe to USER_STREAM_ACKS topic
+        ack_queue = bus.subscribe(USER_STREAM_ACKS)
 
         # Create order placement message
         order_msg = OrderMessage(
@@ -182,18 +191,18 @@ class TestUserStreamAdapter:
 
         await adapter._handle_order_message(order_msg)
 
-        # Should have published OrderAckEvent
-        ack_event = await asyncio.wait_for(ack_queue.get(), timeout=1.0)
-        assert isinstance(ack_event, OrderAckEvent)
-        assert ack_event.venue_order_id == "venue-order-456"
+        # Should have published CanonicalOrderAck
+        canonical_ack = await asyncio.wait_for(ack_queue.get(), timeout=1.0)
+        assert isinstance(canonical_ack, CanonicalOrderAck)
+        assert canonical_ack.venue_order_id == "venue-order-456"
 
     @pytest.mark.asyncio
     async def test_handle_order_cancellation_message(
         self, adapter: UserStreamAdapter, bus: EventBus
     ) -> None:
-        """Test that order cancellation messages are converted to OrderCanceledEvent."""
-        # Subscribe to ORDER_CANCELS topic
-        cancel_queue = bus.subscribe(ORDER_CANCELS)
+        """Test that order cancellation messages are converted to CanonicalCancel."""
+        # Subscribe to USER_STREAM_CANCELS topic
+        cancel_queue = bus.subscribe(USER_STREAM_CANCELS)
 
         # Create order cancellation message
         order_msg = OrderMessage(
@@ -214,21 +223,20 @@ class TestUserStreamAdapter:
 
         await adapter._handle_order_message(order_msg)
 
-        # Should have published OrderCanceledEvent
-        cancel_event = await asyncio.wait_for(cancel_queue.get(), timeout=1.0)
-        assert isinstance(cancel_event, OrderCanceledEvent)
-        # OrderCanceledEvent only has order_id and reason, not venue_order_id
-        assert cancel_event.order_id == ""  # Will be matched by OMS using venue_order_id
+        # Should have published CanonicalCancel
+        canonical_cancel = await asyncio.wait_for(cancel_queue.get(), timeout=1.0)
+        assert isinstance(canonical_cancel, CanonicalCancel)
+        assert canonical_cancel.venue_order_id == "venue-order-456"
 
     @pytest.mark.asyncio
     async def test_handle_order_update_message(
         self, adapter: UserStreamAdapter, bus: EventBus
     ) -> None:
         """Test that order update messages are logged but not published."""
-        # Subscribe to all topics
-        ack_queue = bus.subscribe(ORDER_ACKS)
-        cancel_queue = bus.subscribe(ORDER_CANCELS)
-        fill_queue = bus.subscribe(FILLS)
+        # Subscribe to all user stream topics
+        ack_queue = bus.subscribe(USER_STREAM_ACKS)
+        cancel_queue = bus.subscribe(USER_STREAM_CANCELS)
+        fill_queue = bus.subscribe(USER_STREAM_FILLS)
 
         # Create order update message (partial fill)
         order_msg = OrderMessage(
@@ -273,9 +281,9 @@ class TestUserStreamAdapter:
     async def test_handle_trade_matched_message(
         self, adapter: UserStreamAdapter, bus: EventBus
     ) -> None:
-        """Test that MATCHED trade messages are converted to FillEvent."""
-        # Subscribe to FILLS topic
-        fill_queue = bus.subscribe(FILLS)
+        """Test that MATCHED trade messages are converted to CanonicalFill."""
+        # Subscribe to USER_STREAM_FILLS topic
+        fill_queue = bus.subscribe(USER_STREAM_FILLS)
 
         # Create trade message with MATCHED status
         trade_msg = TradeMessage(
@@ -300,22 +308,21 @@ class TestUserStreamAdapter:
 
         await adapter._handle_trade_message(trade_msg)
 
-        # Should have published FillEvent
-        fill_event = await asyncio.wait_for(fill_queue.get(), timeout=1.0)
-        assert isinstance(fill_event, FillEvent)
-        # FillEvent has order_id, fill_id, size, price, fee, venue_fill_id (not venue_order_id)
-        assert fill_event.order_id == ""  # Will be matched by OMS using venue_order_id
-        assert fill_event.size == 1.0
-        assert fill_event.price == 0.55
-        assert fill_event.fill_id == "trade-789"
+        # Should have published CanonicalFill
+        canonical_fill = await asyncio.wait_for(fill_queue.get(), timeout=1.0)
+        assert isinstance(canonical_fill, CanonicalFill)
+        assert canonical_fill.venue_order_id == "venue-order-456"
+        assert canonical_fill.size == 1.0
+        assert canonical_fill.price == 0.55
+        assert canonical_fill.fill_id == "trade-789"
 
     @pytest.mark.asyncio
     async def test_handle_trade_non_matched_message(
         self, adapter: UserStreamAdapter, bus: EventBus
     ) -> None:
         """Test that non-MATCHED trade messages are not published."""
-        # Subscribe to FILLS topic
-        fill_queue = bus.subscribe(FILLS)
+        # Subscribe to USER_STREAM_FILLS topic
+        fill_queue = bus.subscribe(USER_STREAM_FILLS)
 
         # Create trade message with MINED status (not MATCHED)
         trade_msg = TradeMessage(
@@ -340,10 +347,10 @@ class TestUserStreamAdapter:
 
         await adapter._handle_trade_message(trade_msg)
 
-        # Should not have published FillEvent
+        # Should not have published CanonicalFill
         try:
             await asyncio.wait_for(fill_queue.get(), timeout=0.1)
-            raise AssertionError("Should not have published FillEvent for non-MATCHED trade")
+            raise AssertionError("Should not have published CanonicalFill for non-MATCHED trade")
         except TimeoutError:
             pass
 
@@ -358,8 +365,8 @@ class TestUserStreamAdapter:
         self, adapter: UserStreamAdapter, bus: EventBus
     ) -> None:
         """Test that unknown message types are handled gracefully."""
-        # Subscribe to all topics
-        ack_queue = bus.subscribe(ORDER_ACKS)
+        # Subscribe to user stream topics
+        ack_queue = bus.subscribe(USER_STREAM_ACKS)
 
         # Create message with unknown event_type
         unknown_message = json.dumps(
@@ -433,8 +440,8 @@ class TestUserStreamAdapter:
         self, adapter: UserStreamAdapter, bus: EventBus
     ) -> None:
         """Test that connect_and_listen processes incoming messages."""
-        # Subscribe to ORDER_ACKS
-        ack_queue = bus.subscribe(ORDER_ACKS)
+        # Subscribe to USER_STREAM_ACKS
+        ack_queue = bus.subscribe(USER_STREAM_ACKS)
 
         # Create order placement message
         order_msg = {
@@ -466,11 +473,11 @@ class TestUserStreamAdapter:
             except StopAsyncIteration:
                 pass
 
-        # Should have published OrderAckEvent
+        # Should have published CanonicalOrderAck
         try:
-            ack_event = await asyncio.wait_for(ack_queue.get(), timeout=1.0)
-            assert isinstance(ack_event, OrderAckEvent)
-            assert ack_event.venue_order_id == "venue-order-456"
+            canonical_ack = await asyncio.wait_for(ack_queue.get(), timeout=1.0)
+            assert isinstance(canonical_ack, CanonicalOrderAck)
+            assert canonical_ack.venue_order_id == "venue-order-456"
         except TimeoutError:
             # Message might not have been processed if we timed out
             pass
@@ -531,8 +538,8 @@ class TestUserStreamAdapter:
         self, adapter: UserStreamAdapter, bus: EventBus
     ) -> None:
         """Test that bytes messages are handled correctly."""
-        # Subscribe to ORDER_ACKS
-        ack_queue = bus.subscribe(ORDER_ACKS)
+        # Subscribe to USER_STREAM_ACKS
+        ack_queue = bus.subscribe(USER_STREAM_ACKS)
 
         # Create order placement message as bytes
         order_msg = {
@@ -555,9 +562,9 @@ class TestUserStreamAdapter:
         # (The actual conversion happens in _connect_and_listen before calling _handle_message)
         await adapter._handle_message(json.dumps(order_msg))
 
-        # Should have published OrderAckEvent
+        # Should have published CanonicalOrderAck
         try:
-            ack_event = await asyncio.wait_for(ack_queue.get(), timeout=1.0)
-            assert isinstance(ack_event, OrderAckEvent)
+            canonical_ack = await asyncio.wait_for(ack_queue.get(), timeout=1.0)
+            assert isinstance(canonical_ack, CanonicalOrderAck)
         except TimeoutError:
             pass

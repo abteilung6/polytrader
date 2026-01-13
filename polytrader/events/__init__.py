@@ -87,6 +87,10 @@ __all__ = [
     "TARGETS",
     "TargetEvent",
     "Topic",
+    "USER_STREAM_ACKS",
+    "USER_STREAM_CANCELS",
+    "USER_STREAM_FILLS",
+    "USER_STREAM_REJECTS",
 ]
 
 
@@ -189,6 +193,22 @@ def __getattr__(name: str):
         from polytrader.events.topics import get_targets_topic
 
         return get_targets_topic()
+    elif name == "USER_STREAM_ACKS":
+        from polytrader.events.topics import get_user_stream_acks_topic
+
+        return get_user_stream_acks_topic()
+    elif name == "USER_STREAM_REJECTS":
+        from polytrader.events.topics import get_user_stream_rejects_topic
+
+        return get_user_stream_rejects_topic()
+    elif name == "USER_STREAM_FILLS":
+        from polytrader.events.topics import get_user_stream_fills_topic
+
+        return get_user_stream_fills_topic()
+    elif name == "USER_STREAM_CANCELS":
+        from polytrader.events.topics import get_user_stream_cancels_topic
+
+        return get_user_stream_cancels_topic()
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 

@@ -24,6 +24,10 @@ _execution_errors_topic: Topic | None = None
 _market_discovery_topic: Topic | None = None
 _signals_topic: Topic | None = None
 _targets_topic: Topic | None = None
+_user_stream_acks_topic: Topic | None = None
+_user_stream_rejects_topic: Topic | None = None
+_user_stream_fills_topic: Topic | None = None
+_user_stream_cancels_topic: Topic | None = None
 
 
 def _create_market_data_topic() -> Topic:
@@ -345,6 +349,66 @@ def get_targets_topic() -> Topic:
     return _targets_topic
 
 
+def _create_user_stream_acks_topic() -> Topic:
+    """Create the USER_STREAM_ACKS topic."""
+    from polytrader.adapters.polymarket.models import CanonicalOrderAck
+
+    return Topic[CanonicalOrderAck]("user_stream_acks")
+
+
+def get_user_stream_acks_topic() -> Topic:
+    """Get the USER_STREAM_ACKS topic (singleton)."""
+    global _user_stream_acks_topic
+    if _user_stream_acks_topic is None:
+        _user_stream_acks_topic = _create_user_stream_acks_topic()
+    return _user_stream_acks_topic
+
+
+def _create_user_stream_rejects_topic() -> Topic:
+    """Create the USER_STREAM_REJECTS topic."""
+    from polytrader.adapters.polymarket.models import CanonicalOrderReject
+
+    return Topic[CanonicalOrderReject]("user_stream_rejects")
+
+
+def get_user_stream_rejects_topic() -> Topic:
+    """Get the USER_STREAM_REJECTS topic (singleton)."""
+    global _user_stream_rejects_topic
+    if _user_stream_rejects_topic is None:
+        _user_stream_rejects_topic = _create_user_stream_rejects_topic()
+    return _user_stream_rejects_topic
+
+
+def _create_user_stream_fills_topic() -> Topic:
+    """Create the USER_STREAM_FILLS topic."""
+    from polytrader.adapters.polymarket.models import CanonicalFill
+
+    return Topic[CanonicalFill]("user_stream_fills")
+
+
+def get_user_stream_fills_topic() -> Topic:
+    """Get the USER_STREAM_FILLS topic (singleton)."""
+    global _user_stream_fills_topic
+    if _user_stream_fills_topic is None:
+        _user_stream_fills_topic = _create_user_stream_fills_topic()
+    return _user_stream_fills_topic
+
+
+def _create_user_stream_cancels_topic() -> Topic:
+    """Create the USER_STREAM_CANCELS topic."""
+    from polytrader.adapters.polymarket.models import CanonicalCancel
+
+    return Topic[CanonicalCancel]("user_stream_cancels")
+
+
+def get_user_stream_cancels_topic() -> Topic:
+    """Get the USER_STREAM_CANCELS topic (singleton)."""
+    global _user_stream_cancels_topic
+    if _user_stream_cancels_topic is None:
+        _user_stream_cancels_topic = _create_user_stream_cancels_topic()
+    return _user_stream_cancels_topic
+
+
 def __getattr__(name: str) -> Topic:
     """Lazily initialize topic constants on first access.
 
@@ -402,5 +466,13 @@ def __getattr__(name: str) -> Topic:
         return get_signals_topic()
     elif name == "TARGETS":
         return get_targets_topic()
+    elif name == "USER_STREAM_ACKS":
+        return get_user_stream_acks_topic()
+    elif name == "USER_STREAM_REJECTS":
+        return get_user_stream_rejects_topic()
+    elif name == "USER_STREAM_FILLS":
+        return get_user_stream_fills_topic()
+    elif name == "USER_STREAM_CANCELS":
+        return get_user_stream_cancels_topic()
     else:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
