@@ -10,6 +10,7 @@ from polytrader.ops.health import (
     HealthService,
     HealthStatus,
 )
+from polytrader.ops.replay import StateReconstructionService
 
 __all__ = [
     "CircuitBreaker",
@@ -18,4 +19,5 @@ __all__ = [
     "HealthGateThresholds",
     "HealthService",
     "HealthStatus",
+    "StateReconstructionService",
 ]

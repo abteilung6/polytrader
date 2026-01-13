@@ -102,6 +102,17 @@ class OMSCore:
         # order_id -> {"created": ts, "submitted": ts, "acked": ts, "first_fill": ts}
         self._order_timestamps: dict[str, dict[str, float]] = {}
 
+    def get_store(self) -> IEventHandlingOrderStore:
+        """Get the order store for state reconstruction.
+
+        Per flows.mdc §7: Used by StateReconstructionService to rebuild
+        order state from event log on boot.
+
+        Returns:
+            The order store instance
+        """
+        return self._store
+
     async def run(self) -> None:
         """Start OMS Core async loop.
 

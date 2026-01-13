@@ -15,7 +15,7 @@ from polytrader.events.types import ServiceErrorEvent, ServiceStartedEvent, Serv
 from polytrader.execution import ExecutionRouter
 from polytrader.logging_config import logger
 from polytrader.oms import OMSCore
-from polytrader.ops import CircuitBreaker, ExecutionControl
+from polytrader.ops import CircuitBreaker, ExecutionControl, StateReconstructionService
 from polytrader.portfolio import PortfolioService
 from polytrader.position_manager import IPositionManager
 from polytrader.risk import RiskChecker
@@ -178,6 +178,38 @@ class SystemSupervisor:
             # 3. OMS Core subscribes to APPROVED_PROPOSALS (must start before RiskChecker publishes)
             oms_core = self.oms_core_factory()
             self.oms_core = oms_core
+
+            # 3a. State reconstruction (Phase 7) - rebuild from event log before starting OMS
+            # Only for live trading (paper trading doesn't need this)
+            if self.position_manager_factory is not None and self.bus._store is not None:
+                logger.info("Starting state reconstruction from event log")
+                try:
+                    # Get OMS store from OMS core for state reconstruction
+                    oms_store = oms_core.get_store()
+
+                    # Get position manager (create but don't start yet)
+                    position_manager = self.position_manager_factory()
+
+                    # Create reconstruction service
+                    reconstruction_service = StateReconstructionService(
+                        event_store=self.bus._store,
+                        oms_store=oms_store,
+                        position_manager=position_manager,
+                    )
+
+                    # Reconstruct state
+                    await reconstruction_service.reconstruct_all()
+
+                    logger.info("State reconstruction complete")
+                except Exception as e:
+                    logger.exception(
+                        "Error during state reconstruction: {error}",
+                        error=str(e),
+                        error_type=type(e).__name__,
+                    )
+                    # Continue with startup even if reconstruction fails
+                    # (system can still operate, just without historical state)
+
             await self._start_service_task(
                 "OMSCore",
                 oms_core,
