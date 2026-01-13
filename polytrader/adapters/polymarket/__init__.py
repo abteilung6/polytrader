@@ -10,10 +10,22 @@ Import them directly from there when needed.
 """
 
 from polytrader.adapters.polymarket.market_data import GammaClient, Market
-from polytrader.adapters.polymarket.models import ExternalOrder, VenueError, VenueResponse
+from polytrader.adapters.polymarket.models import (
+    CanonicalCancel,
+    CanonicalFill,
+    CanonicalOrderAck,
+    CanonicalOrderReject,
+    ExternalOrder,
+    VenueError,
+    VenueResponse,
+)
 from polytrader.adapters.polymarket.trading import ClobVenueAdapter
 
 __all__ = [
+    "CanonicalCancel",
+    "CanonicalFill",
+    "CanonicalOrderAck",
+    "CanonicalOrderReject",
     "ClobVenueAdapter",
     "ExternalOrder",
     "GammaClient",

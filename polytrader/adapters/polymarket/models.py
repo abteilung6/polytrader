@@ -150,3 +150,90 @@ class VenueError(Exception):
         self.error_type = error_type
         self.message = message
         self.raw_error = raw_error
+
+
+# Canonical User Stream Event Models
+# These models normalize venue WebSocket messages to a canonical format.
+# Per flows.mdc §10: User stream adapter normalizes venue messages to canonical events.
+
+
+class CanonicalOrderAck(BaseModel):
+    """Canonical order acknowledgment from venue user stream.
+
+    Per flows.mdc §10: User stream adapter normalizes venue ack messages
+    to this canonical format before publishing to EventBus.
+
+    Attributes:
+        client_order_id: Our idempotency key (from order submission)
+        venue_order_id: Venue-assigned order ID
+        timestamp: Timestamp from venue (ISO format UTC)
+    """
+
+    client_order_id: str = Field(..., description="Our idempotency key")
+    venue_order_id: str = Field(..., description="Venue-assigned order ID")
+    timestamp: str = Field(..., description="Timestamp from venue (ISO format UTC)")
+
+
+class CanonicalOrderReject(BaseModel):
+    """Canonical order rejection from venue user stream.
+
+    Per flows.mdc §10: User stream adapter normalizes venue reject messages
+    to this canonical format before publishing to EventBus.
+
+    Attributes:
+        client_order_id: Our idempotency key (from order submission)
+        reason: Rejection reason from venue
+        timestamp: Timestamp from venue (ISO format UTC)
+    """
+
+    client_order_id: str = Field(..., description="Our idempotency key")
+    reason: str = Field(..., description="Rejection reason from venue")
+    timestamp: str = Field(..., description="Timestamp from venue (ISO format UTC)")
+
+
+class CanonicalFill(BaseModel):
+    """Canonical fill event from venue user stream.
+
+    Per flows.mdc §10: User stream adapter normalizes venue fill messages
+    to this canonical format before publishing to EventBus.
+
+    Attributes:
+        client_order_id: Our idempotency key (optional, may not be present)
+        venue_order_id: Venue-assigned order ID (optional, may not be present)
+        fill_id: Venue-assigned fill ID (for deduplication)
+        size: Fill size in USD
+        price: Fill price (0-1 range)
+        fee: Fee amount for this fill
+        timestamp: Timestamp from venue (ISO format UTC)
+    """
+
+    client_order_id: str | None = Field(
+        default=None, description="Our idempotency key (may not be present)"
+    )
+    venue_order_id: str | None = Field(
+        default=None, description="Venue-assigned order ID (may not be present)"
+    )
+    fill_id: str = Field(..., description="Venue-assigned fill ID (for deduplication)")
+    size: float = Field(gt=0, description="Fill size in USD")
+    price: float = Field(gt=0, le=1, description="Fill price (0-1 range)")
+    fee: float = Field(ge=0, description="Fee amount for this fill")
+    timestamp: str = Field(..., description="Timestamp from venue (ISO format UTC)")
+
+
+class CanonicalCancel(BaseModel):
+    """Canonical cancel confirmation from venue user stream.
+
+    Per flows.mdc §10: User stream adapter normalizes venue cancel messages
+    to this canonical format before publishing to EventBus.
+
+    Attributes:
+        client_order_id: Our idempotency key (optional, may not be present)
+        venue_order_id: Venue-assigned order ID (required)
+        timestamp: Timestamp from venue (ISO format UTC)
+    """
+
+    client_order_id: str | None = Field(
+        default=None, description="Our idempotency key (may not be present)"
+    )
+    venue_order_id: str = Field(..., description="Venue-assigned order ID")
+    timestamp: str = Field(..., description="Timestamp from venue (ISO format UTC)")
