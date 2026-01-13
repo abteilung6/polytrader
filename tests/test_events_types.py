@@ -7,7 +7,12 @@ import pytest
 from pydantic import ValidationError
 
 from polytrader.common.ids import generate_correlation_id, get_run_id, reset_run_id
-from polytrader.events.types import Event, EventSource
+from polytrader.events.types import (
+    CircuitBreakerEvent,
+    Event,
+    EventSource,
+    ReconcileEvent,
+)
 
 
 class TestEventBaseClass:
@@ -773,3 +778,157 @@ class TestOrderCanceledEvent:
         assert event.run_id
         assert event.schema_version == "1.0"
         assert event.source == EventSource.OMS
+
+
+class TestReconcileEvent:
+    """Tests for ReconcileEvent per flows.mdc §12."""
+
+    def test_reconcile_event_creation(self) -> None:
+        """Test that ReconcileEvent can be created."""
+        event = ReconcileEvent(
+            divergence_type="phantom_order",
+            order_id="order-123",
+            venue_order_id="venue-456",
+            severity="ERROR",
+            details={"expected": "exists", "actual": "missing"},
+        )
+
+        assert event.divergence_type == "phantom_order"
+        assert event.order_id == "order-123"
+        assert event.venue_order_id == "venue-456"
+        assert event.severity == "ERROR"
+        assert event.details == {"expected": "exists", "actual": "missing"}
+        assert event.source == EventSource.OPS
+
+    def test_reconcile_event_has_base_fields(self) -> None:
+        """Test that ReconcileEvent has all base Event fields."""
+        event = ReconcileEvent(
+            divergence_type="none",
+            severity="INFO",
+        )
+
+        assert event.event_id
+        assert event.ts_wall
+        assert event.ts_mono
+        assert event.correlation_id
+        assert event.run_id
+        assert event.schema_version == "1.0"
+
+    def test_reconcile_event_optional_fields(self) -> None:
+        """Test that ReconcileEvent optional fields work."""
+        event = ReconcileEvent(
+            divergence_type="orphan_order",
+            severity="WARNING",
+        )
+
+        assert event.order_id is None
+        assert event.venue_order_id is None
+        assert event.details == {}
+
+    def test_reconcile_event_serialization(self) -> None:
+        """Test that ReconcileEvent can be serialized."""
+        event = ReconcileEvent(
+            divergence_type="fill_mismatch",
+            order_id="order-123",
+            severity="ERROR",
+            details={"oms_filled": 0.5, "venue_filled": 1.0},
+        )
+
+        # Pydantic model can be serialized
+        event_dict = event.model_dump()
+        assert event_dict["divergence_type"] == "fill_mismatch"
+        assert event_dict["order_id"] == "order-123"
+        assert event_dict["severity"] == "ERROR"
+        assert event_dict["details"]["oms_filled"] == 0.5
+
+        # JSON serialization
+        event_json = event.model_dump_json()
+        assert isinstance(event_json, str)
+        assert "fill_mismatch" in event_json
+
+    def test_reconcile_event_is_immutable(self) -> None:
+        """Test that ReconcileEvent is immutable (frozen model)."""
+        event = ReconcileEvent(
+            divergence_type="phantom_order",
+            severity="ERROR",
+        )
+
+        with pytest.raises(ValidationError):
+            event.divergence_type = "orphan_order"  # type: ignore[misc]
+
+
+class TestCircuitBreakerEvent:
+    """Tests for CircuitBreakerEvent per flows.mdc §13."""
+
+    def test_circuit_breaker_event_creation(self) -> None:
+        """Test that CircuitBreakerEvent can be created."""
+        event = CircuitBreakerEvent(
+            breaker_type="reconcile_divergence",
+            triggered=True,
+            reason="Multiple phantom orders detected",
+            details={"phantom_count": 5, "threshold": 3},
+        )
+
+        assert event.breaker_type == "reconcile_divergence"
+        assert event.triggered is True
+        assert event.reason == "Multiple phantom orders detected"
+        assert event.details == {"phantom_count": 5, "threshold": 3}
+        assert event.source == EventSource.OPS
+
+    def test_circuit_breaker_event_has_base_fields(self) -> None:
+        """Test that CircuitBreakerEvent has all base Event fields."""
+        event = CircuitBreakerEvent(
+            breaker_type="data_stale",
+            triggered=False,
+            reason="Reset by operator",
+        )
+
+        assert event.event_id
+        assert event.ts_wall
+        assert event.ts_mono
+        assert event.correlation_id
+        assert event.run_id
+        assert event.schema_version == "1.0"
+
+    def test_circuit_breaker_event_reset(self) -> None:
+        """Test that CircuitBreakerEvent can represent reset."""
+        event = CircuitBreakerEvent(
+            breaker_type="error_rate",
+            triggered=False,
+            reason="Error rate normalized",
+            details={"error_rate": 0.01, "threshold": 0.05},
+        )
+
+        assert event.triggered is False
+        assert event.reason == "Error rate normalized"
+
+    def test_circuit_breaker_event_serialization(self) -> None:
+        """Test that CircuitBreakerEvent can be serialized."""
+        event = CircuitBreakerEvent(
+            breaker_type="reconcile_divergence",
+            triggered=True,
+            reason="Severe divergence detected",
+            details={"divergence_count": 10},
+        )
+
+        # Pydantic model can be serialized
+        event_dict = event.model_dump()
+        assert event_dict["breaker_type"] == "reconcile_divergence"
+        assert event_dict["triggered"] is True
+        assert event_dict["reason"] == "Severe divergence detected"
+
+        # JSON serialization
+        event_json = event.model_dump_json()
+        assert isinstance(event_json, str)
+        assert "reconcile_divergence" in event_json
+
+    def test_circuit_breaker_event_is_immutable(self) -> None:
+        """Test that CircuitBreakerEvent is immutable (frozen model)."""
+        event = CircuitBreakerEvent(
+            breaker_type="data_stale",
+            triggered=True,
+            reason="Data stale",
+        )
+
+        with pytest.raises(ValidationError):
+            event.triggered = False  # type: ignore[misc]

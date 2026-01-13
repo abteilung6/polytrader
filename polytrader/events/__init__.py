@@ -5,6 +5,7 @@ from polytrader.events.store import IEventStore, MemoryEventStore
 
 # Import event types first
 from polytrader.events.types import (
+    CircuitBreakerEvent,
     ConfigLoadedEvent,
     Event,
     EventSource,
@@ -22,6 +23,7 @@ from polytrader.events.types import (
     OrderIntentEvent,
     OrderRejectedEvent,
     OrderSubmittedEvent,
+    ReconcileEvent,
     RiskCheckEvent,
     ServiceErrorEvent,
     ServiceStartedEvent,
@@ -35,6 +37,7 @@ from polytrader.events.types import (
 __all__ = [
     "APPROVED_PROPOSALS",
     "CANCEL_ORDER_COMMANDS",
+    "CircuitBreakerEvent",
     "ConfigLoadedEvent",
     "Event",
     "EventBus",
@@ -68,7 +71,10 @@ __all__ = [
     "OrderRejectedEvent",
     "OrderSubmittedEvent",
     "ORDERS",
+    "CIRCUIT_BREAKER",
     "PROPOSALS",
+    "RECONCILE",
+    "ReconcileEvent",
     "RISK_CHECKS",
     "RiskCheckEvent",
     "ServiceErrorEvent",
@@ -83,6 +89,10 @@ __all__ = [
     "TARGETS",
     "TargetEvent",
     "Topic",
+    "USER_STREAM_ACKS",
+    "USER_STREAM_CANCELS",
+    "USER_STREAM_FILLS",
+    "USER_STREAM_REJECTS",
 ]
 
 
@@ -185,6 +195,30 @@ def __getattr__(name: str):
         from polytrader.events.topics import get_targets_topic
 
         return get_targets_topic()
+    elif name == "USER_STREAM_ACKS":
+        from polytrader.events.topics import get_user_stream_acks_topic
+
+        return get_user_stream_acks_topic()
+    elif name == "USER_STREAM_REJECTS":
+        from polytrader.events.topics import get_user_stream_rejects_topic
+
+        return get_user_stream_rejects_topic()
+    elif name == "USER_STREAM_FILLS":
+        from polytrader.events.topics import get_user_stream_fills_topic
+
+        return get_user_stream_fills_topic()
+    elif name == "USER_STREAM_CANCELS":
+        from polytrader.events.topics import get_user_stream_cancels_topic
+
+        return get_user_stream_cancels_topic()
+    elif name == "RECONCILE":
+        from polytrader.events.topics import get_reconcile_topic
+
+        return get_reconcile_topic()
+    elif name == "CIRCUIT_BREAKER":
+        from polytrader.events.topics import get_circuit_breaker_topic
+
+        return get_circuit_breaker_topic()
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 

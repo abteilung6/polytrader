@@ -18,6 +18,10 @@ from polytrader.events import (
     ORDER_REJECTS,
     ORDER_SUBMITTED,
     SUBMIT_ORDER_COMMANDS,
+    USER_STREAM_ACKS,
+    USER_STREAM_CANCELS,
+    USER_STREAM_FILLS,
+    USER_STREAM_REJECTS,
 )
 from polytrader.events.bus import EventBus
 from polytrader.events.types import (
@@ -43,6 +47,14 @@ from polytrader.oms.metrics import (
 )
 from polytrader.oms.models import Order, OrderState
 from polytrader.oms.store import IEventHandlingOrderStore
+
+if TYPE_CHECKING:
+    from polytrader.adapters.polymarket.models import (
+        CanonicalCancel,
+        CanonicalFill,
+        CanonicalOrderAck,
+        CanonicalOrderReject,
+    )
 
 if TYPE_CHECKING:
     from polytrader.events.types import OrderIntentEvent
@@ -94,10 +106,18 @@ class OMSCore:
         """Start OMS Core async loop.
 
         Subscribes to APPROVED_PROPOSALS and processes order creation requests.
+        Also subscribes to user stream events and converts them to OMS events.
         Per flows.mdc §7: OMS receives approved intents from Risk layer.
+        Per flows.mdc §10: OMS handles user stream updates.
         """
         self._running = True
         proposal_queue = self._bus.subscribe(APPROVED_PROPOSALS)
+
+        # Subscribe to user stream topics
+        user_stream_acks_queue = self._bus.subscribe(USER_STREAM_ACKS)
+        user_stream_rejects_queue = self._bus.subscribe(USER_STREAM_REJECTS)
+        user_stream_fills_queue = self._bus.subscribe(USER_STREAM_FILLS)
+        user_stream_cancels_queue = self._bus.subscribe(USER_STREAM_CANCELS)
 
         # Periodic queue depth and orders_live gauge update
         async def update_gauges():
@@ -119,6 +139,75 @@ class OMSCore:
 
         gauge_task = asyncio.create_task(update_gauges())
 
+        # Process each queue separately
+        async def process_user_stream_acks():
+            """Process user stream acks."""
+            while self._running:
+                try:
+                    canonical_ack = await asyncio.wait_for(
+                        user_stream_acks_queue.get(), timeout=0.1
+                    )
+                    await self._handle_canonical_ack(canonical_ack)
+                except TimeoutError:
+                    continue
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    logger.exception("Error handling canonical ack", error=str(e))
+
+        async def process_user_stream_rejects():
+            """Process user stream rejects."""
+            while self._running:
+                try:
+                    canonical_reject = await asyncio.wait_for(
+                        user_stream_rejects_queue.get(), timeout=0.1
+                    )
+                    await self._handle_canonical_reject(canonical_reject)
+                except TimeoutError:
+                    continue
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    logger.exception("Error handling canonical reject", error=str(e))
+
+        async def process_user_stream_fills():
+            """Process user stream fills."""
+            while self._running:
+                try:
+                    canonical_fill = await asyncio.wait_for(
+                        user_stream_fills_queue.get(), timeout=0.1
+                    )
+                    await self._handle_canonical_fill(canonical_fill)
+                except TimeoutError:
+                    continue
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    logger.exception("Error handling canonical fill", error=str(e))
+
+        async def process_user_stream_cancels():
+            """Process user stream cancels."""
+            while self._running:
+                try:
+                    canonical_cancel = await asyncio.wait_for(
+                        user_stream_cancels_queue.get(), timeout=0.1
+                    )
+                    await self._handle_canonical_cancel(canonical_cancel)
+                except TimeoutError:
+                    continue
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    logger.exception("Error handling canonical cancel", error=str(e))
+
+        # Start user stream handlers
+        user_stream_tasks = [
+            asyncio.create_task(process_user_stream_acks()),
+            asyncio.create_task(process_user_stream_rejects()),
+            asyncio.create_task(process_user_stream_fills()),
+            asyncio.create_task(process_user_stream_cancels()),
+        ]
+
         try:
             while self._running:
                 intent = await proposal_queue.get()
@@ -127,10 +216,17 @@ class OMSCore:
             pass
         finally:
             gauge_task.cancel()
+            for task in user_stream_tasks:
+                task.cancel()
             try:
                 await gauge_task
             except asyncio.CancelledError:
                 pass
+            for task in user_stream_tasks:
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
             self._running = False
 
     def stop(self) -> None:
@@ -635,4 +731,134 @@ class OMSCore:
             "Order cancelled: {order_id} reason={reason}",
             order_id=order.order_id,
             reason=reason or "unknown",
+        )
+
+    async def _handle_canonical_ack(self, canonical_ack: "CanonicalOrderAck") -> None:
+        """Handle canonical order ack from user stream.
+
+        Per flows.mdc §10: Convert canonical ack to OMS ack event.
+
+        Args:
+            canonical_ack: Canonical order ack from user stream adapter
+        """
+        # Find order by venue_order_id (or client_order_id if available)
+        order = None
+        if canonical_ack.client_order_id:
+            order = self._store.get_order_by_client_id(canonical_ack.client_order_id)
+        if not order and canonical_ack.venue_order_id:
+            order = self._store.get_order_by_venue_id(canonical_ack.venue_order_id)
+
+        if not order:
+            logger.bind(
+                client_order_id=canonical_ack.client_order_id or "",
+                venue_order_id=canonical_ack.venue_order_id,
+            ).warning(
+                "Order not found for canonical ack (venue_order_id={venue_order_id})",
+                venue_order_id=canonical_ack.venue_order_id,
+            )
+            return
+
+        # Convert to OMS ack
+        await self.handle_venue_ack(
+            client_order_id=order.client_order_id,
+            venue_order_id=canonical_ack.venue_order_id,
+        )
+
+    async def _handle_canonical_reject(self, canonical_reject: "CanonicalOrderReject") -> None:
+        """Handle canonical order reject from user stream.
+
+        Per flows.mdc §10: Convert canonical reject to OMS reject event.
+
+        Args:
+            canonical_reject: Canonical order reject from user stream adapter
+        """
+        # Find order by client_order_id (CanonicalOrderReject doesn't have venue_order_id)
+        order = None
+        if canonical_reject.client_order_id:
+            order = self._store.get_order_by_client_id(canonical_reject.client_order_id)
+
+        if not order:
+            logger.bind(
+                client_order_id=canonical_reject.client_order_id or "",
+            ).warning(
+                "Order not found for canonical reject (client_order_id={client_order_id})",
+                client_order_id=canonical_reject.client_order_id or "",
+            )
+            return
+
+        # Convert to OMS reject
+        await self.handle_venue_reject(
+            client_order_id=order.client_order_id,
+            reason=canonical_reject.reason,
+        )
+
+    async def _handle_canonical_fill(self, canonical_fill: "CanonicalFill") -> None:
+        """Handle canonical fill from user stream.
+
+        Per flows.mdc §10: Convert canonical fill to OMS fill event.
+
+        Args:
+            canonical_fill: Canonical fill from user stream adapter
+        """
+        # Find order by venue_order_id (or client_order_id if available)
+        order = None
+        if canonical_fill.client_order_id:
+            order = self._store.get_order_by_client_id(canonical_fill.client_order_id)
+        if not order and canonical_fill.venue_order_id:
+            order = self._store.get_order_by_venue_id(canonical_fill.venue_order_id)
+
+        if not order:
+            logger.bind(
+                client_order_id=canonical_fill.client_order_id or "",
+                venue_order_id=canonical_fill.venue_order_id or "",
+                fill_id=canonical_fill.fill_id,
+            ).warning(
+                (
+                    "Order not found for canonical fill "
+                    "(venue_order_id={venue_order_id}, fill_id={fill_id})"
+                ),
+                venue_order_id=canonical_fill.venue_order_id or "",
+                fill_id=canonical_fill.fill_id,
+            )
+            return
+
+        # Convert to OMS fill
+        await self.handle_fill(
+            client_order_id=order.client_order_id,
+            size=canonical_fill.size,
+            price=canonical_fill.price,
+            fee=canonical_fill.fee,
+            venue_fill_id=canonical_fill.fill_id,
+        )
+
+    async def _handle_canonical_cancel(self, canonical_cancel: "CanonicalCancel") -> None:
+        """Handle canonical cancel from user stream.
+
+        Per flows.mdc §10: Convert canonical cancel to OMS cancel event.
+
+        Args:
+            canonical_cancel: Canonical cancel from user stream adapter
+        """
+        # Find order by venue_order_id (or client_order_id if available)
+        order = None
+        if canonical_cancel.client_order_id:
+            order = self._store.get_order_by_client_id(canonical_cancel.client_order_id)
+        if not order and canonical_cancel.venue_order_id:
+            order = self._store.get_order_by_venue_id(canonical_cancel.venue_order_id)
+
+        if not order:
+            logger.bind(
+                client_order_id=canonical_cancel.client_order_id or "",
+                venue_order_id=canonical_cancel.venue_order_id,
+            ).warning(
+                "Order not found for canonical cancel (venue_order_id={venue_order_id})",
+                venue_order_id=canonical_cancel.venue_order_id,
+            )
+            return
+
+        # Convert to OMS cancel
+        reason = f"Order cancelled on venue (venue_order_id: {canonical_cancel.venue_order_id})"
+        await self.handle_cancel(
+            client_order_id=order.client_order_id,
+            reason=reason,
         )

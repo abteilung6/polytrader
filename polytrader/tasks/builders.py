@@ -5,7 +5,7 @@ for paper trading mode.
 """
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from polytrader.adapters import create_adapter_factory
 from polytrader.clob import create_clob_client_factory
@@ -574,6 +574,70 @@ class LiveTradingSystemBuilder:
         return create_position_manager_factory(
             self._bus, clob_client_factory, sync_interval=self._sync_interval
         )
+
+    def _create_user_stream_adapter_factory(self) -> Callable[[], Any] | None:
+        """Create user stream adapter factory.
+
+        Returns:
+            Factory function for UserStreamAdapter, or None if not available
+        """
+        from polytrader.adapters.polymarket.user_stream import UserStreamAdapter
+
+        clob_client_factory = self._get_clob_client_factory()
+
+        def factory() -> UserStreamAdapter:
+            clob_client = clob_client_factory()
+            return UserStreamAdapter(clob_client=clob_client, bus=self._bus)
+
+        return factory
+
+    def _create_reconciliation_service_factory(self) -> Callable[[], Any] | None:
+        """Create reconciliation service factory.
+
+        Returns:
+            Factory function for ReconciliationService, or None if not available
+        """
+        from polytrader.oms.reconcile import ReconciliationService
+        from polytrader.oms.store import InMemoryOrderStore
+
+        # We need to get the OMS store from the OMS core factory
+        # Since we can't easily access it, we'll create a new store instance
+        # In practice, this should be the same store instance used by OMS Core
+        # TODO: Refactor to share store instance between OMS Core and ReconciliationService
+        oms_store = InMemoryOrderStore(self._bus)
+
+        # We need the venue adapter from ExecutionRouter
+        # Since we can't easily access it, we'll create it from the factory
+        execution_router_factory = self._create_execution_router_factory()
+
+        def factory() -> ReconciliationService:
+            execution_router = execution_router_factory()
+            venue_adapter = execution_router.get_adapter()
+            return ReconciliationService(
+                store=oms_store, venue_adapter=venue_adapter, bus=self._bus
+            )
+
+        return factory
+
+    def _create_circuit_breaker_factory(
+        self,
+    ) -> tuple[Callable[[], Any] | None, Any | None]:
+        """Create circuit breaker factory and execution control.
+
+        Returns:
+            Tuple of (factory function for CircuitBreaker, ExecutionControl instance)
+        """
+        from polytrader.ops import CircuitBreaker, CircuitBreakerThresholds, ExecutionControl
+
+        execution_control = ExecutionControl()
+
+        def factory() -> CircuitBreaker:
+            thresholds = CircuitBreakerThresholds()  # Use defaults
+            return CircuitBreaker(
+                thresholds=thresholds, bus=self._bus, execution_control=execution_control
+            )
+
+        return factory, execution_control
 
     def _create_portfolio_service_factory(
         self, position_manager_factory: Callable[[], IPositionManager]

@@ -15,6 +15,7 @@ from polytrader.events.types import ServiceErrorEvent, ServiceStartedEvent, Serv
 from polytrader.execution import ExecutionRouter
 from polytrader.logging_config import logger
 from polytrader.oms import OMSCore
+from polytrader.ops import CircuitBreaker, ExecutionControl
 from polytrader.portfolio import PortfolioService
 from polytrader.position_manager import IPositionManager
 from polytrader.risk import RiskChecker
@@ -66,6 +67,10 @@ class SystemSupervisor:
         oms_core_factory: Callable[[], OMSCore],
         execution_router_factory: Callable[[], ExecutionRouter] | None = None,
         position_manager_factory: Callable[[], IPositionManager] | None = None,
+        user_stream_adapter_factory: Callable[[], Any] | None = None,
+        reconciliation_service_factory: Callable[[], Any] | None = None,
+        circuit_breaker_factory: Callable[[], CircuitBreaker] | None = None,
+        execution_control: ExecutionControl | None = None,
         startup_delay_s: float = STARTUP_DELAY_S,
         startup_timeout_s: float = STARTUP_TIMEOUT_S,
     ) -> None:
@@ -79,6 +84,11 @@ class SystemSupervisor:
             oms_core_factory: Factory for OMSCore
             execution_router_factory: Factory for ExecutionRouter (optional, for predict mode)
             position_manager_factory: Factory for PositionManager (optional)
+            user_stream_adapter_factory: Factory for UserStreamAdapter (optional, for live trading)
+            reconciliation_service_factory: Factory for ReconciliationService
+                (optional, for live trading)
+            circuit_breaker_factory: Factory for CircuitBreaker (optional, for live trading)
+            execution_control: ExecutionControl instance (optional, for live trading)
             startup_delay_s: Time between service starts (default: 0.01s)
             startup_timeout_s: Max time to start all services (default: 30.0s)
         """
@@ -91,6 +101,10 @@ class SystemSupervisor:
         self.oms_core_factory = oms_core_factory
         self.execution_router_factory = execution_router_factory
         self.position_manager_factory = position_manager_factory
+        self.user_stream_adapter_factory = user_stream_adapter_factory
+        self.reconciliation_service_factory = reconciliation_service_factory
+        self.circuit_breaker_factory = circuit_breaker_factory
+        self._execution_control = execution_control
 
         # Configuration
         self.startup_delay_s = startup_delay_s
@@ -103,12 +117,19 @@ class SystemSupervisor:
         self.execution_router: ExecutionRouter | None = None
         self.position_manager: IPositionManager | None = None
 
+        # User stream and reconciliation components (optional, for live trading)
+        self._user_stream_adapter: Any | None = None
+        self._reconciliation_service: Any | None = None
+        self._circuit_breaker: CircuitBreaker | None = None
+
         # Service tasks
         self._running = False
         self._risk_checker_task: asyncio.Task | None = None
         self._oms_core_task: asyncio.Task | None = None
         self._execution_router_task: asyncio.Task | None = None
         self._position_manager_task: asyncio.Task | None = None
+        self._user_stream_task: asyncio.Task | None = None
+        self._reconciliation_task: asyncio.Task | None = None
 
     async def start(self) -> None:
         """Start all global services in correct order.
@@ -186,6 +207,36 @@ class SystemSupervisor:
                     position_manager,
                     lambda: position_manager.run(),
                     lambda task: setattr(self, "_position_manager_task", task),
+                )
+                services_started += 1
+
+            # 6. UserStreamAdapter (for live trading, after OMS Core)
+            if self.user_stream_adapter_factory is not None:
+                user_stream_adapter = self.user_stream_adapter_factory()
+                self._user_stream_adapter = user_stream_adapter
+                await self._start_service_task(
+                    "UserStreamAdapter",
+                    user_stream_adapter,
+                    lambda: user_stream_adapter.run(),
+                    lambda task: setattr(self, "_user_stream_task", task),
+                )
+                services_started += 1
+
+            # 7. ReconciliationService (for live trading, after OMS Core and ExecutionRouter)
+            if self.reconciliation_service_factory is not None:
+                reconciliation_service = self.reconciliation_service_factory()
+                self._reconciliation_service = reconciliation_service
+                await self._start_reconciliation_task(reconciliation_service)
+                services_started += 1
+
+            # 8. CircuitBreaker (for live trading, monitors reconciliation)
+            if self.circuit_breaker_factory is not None:
+                circuit_breaker = self.circuit_breaker_factory()
+                self._circuit_breaker = circuit_breaker
+                await self._start_service(
+                    "CircuitBreaker",
+                    circuit_breaker,
+                    lambda: asyncio.sleep(0),  # Circuit breaker doesn't need async start
                 )
                 services_started += 1
 
@@ -415,6 +466,107 @@ class SystemSupervisor:
                     f"Retryable error starting {service_name}: {error_msg}"
                 ) from e
 
+    async def _start_reconciliation_task(self, reconciliation_service: Any) -> None:
+        """Start reconciliation service as a periodic task.
+
+        Args:
+            reconciliation_service: ReconciliationService instance
+        """
+        service_start = time.perf_counter()
+        reconciliation_interval_s = 60.0  # Reconcile every 60 seconds
+
+        async def reconciliation_loop() -> None:
+            """Periodic reconciliation loop."""
+            try:
+                # Wait a short time to ensure circuit breaker is initialized
+                # (circuit breaker is created after reconciliation service in start())
+                await asyncio.sleep(0.1)
+
+                while self._running:
+                    # Run reconciliation
+                    reconcile_events = await reconciliation_service.reconcile()
+
+                    # Check circuit breaker if configured
+                    if self._circuit_breaker is not None:
+                        await self._circuit_breaker.check(reconcile_events)
+
+                    # Wait for next interval
+                    await asyncio.sleep(reconciliation_interval_s)
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                logger.bind(
+                    supervisor=SUPERVISOR_TYPE,
+                    service="ReconciliationService",
+                    error_type=type(e).__name__,
+                ).exception("Error in reconciliation loop: {error}", error=str(e))
+
+        try:
+            # Start reconciliation task
+            task = asyncio.create_task(reconciliation_loop())
+            self._reconciliation_task = task
+
+            # Wait for subscription to be active
+            await asyncio.sleep(self.startup_delay_s)
+
+            # Record metrics and emit event
+            startup_time_ms = (time.perf_counter() - service_start) * 1000
+            record_service_started("ReconciliationService", SUPERVISOR_TYPE, startup_time_ms)
+
+            started_event = ServiceStartedEvent(
+                service_name="ReconciliationService",
+                supervisor_type=SUPERVISOR_TYPE,
+                startup_time_ms=startup_time_ms,
+            )
+            await self.bus.publish(SYSTEM_LIFECYCLE, started_event)
+
+            logger.bind(
+                supervisor=SUPERVISOR_TYPE,
+                service="ReconciliationService",
+                startup_time_ms=startup_time_ms,
+            ).debug(
+                "ReconciliationService started in {time_ms:.1f}ms",
+                time_ms=startup_time_ms,
+            )
+
+        except Exception as e:
+            error_class = classify_service_error(e)
+            error_type = type(e).__name__
+            error_msg = str(e)
+
+            logger.bind(
+                supervisor=SUPERVISOR_TYPE,
+                service="ReconciliationService",
+                error_type=error_type,
+                error_class=error_class,
+            ).exception(
+                "Failed to start ReconciliationService: {error}",
+                error=error_msg,
+            )
+
+            # Emit error event
+            error_event = ServiceErrorEvent(
+                service_name="ReconciliationService",
+                supervisor_type=SUPERVISOR_TYPE,
+                error_type=error_type,
+                error_message=error_msg,
+                error_class=error_class,
+            )
+            await self.bus.publish(SYSTEM_LIFECYCLE, error_event)
+
+            # Record metric
+            record_service_error("ReconciliationService", SUPERVISOR_TYPE, error_type, error_class)
+
+            # Re-raise with appropriate error class
+            if error_class == "fatal":
+                raise FatalSupervisorError(
+                    f"Fatal error starting ReconciliationService: {error_msg}"
+                ) from e
+            else:
+                raise RetryableSupervisorError(
+                    f"Retryable error starting ReconciliationService: {error_msg}"
+                ) from e
+
     async def stop(self) -> None:
         """Stop all global services in reverse order.
 
@@ -432,6 +584,55 @@ class SystemSupervisor:
         services_stopped = 0
 
         # Stop in reverse order
+        # Stop reconciliation task
+        if self._reconciliation_task is not None:
+            try:
+                self._reconciliation_task.cancel()
+                await asyncio.wait_for(self._reconciliation_task, timeout=5.0)
+            except (asyncio.CancelledError, TimeoutError):
+                pass
+            except Exception as e:
+                logger.bind(
+                    supervisor=SUPERVISOR_TYPE,
+                    service="ReconciliationService",
+                    error_type=type(e).__name__,
+                ).exception("Error stopping ReconciliationService: {error}", error=str(e))
+            finally:
+                record_service_stopped("ReconciliationService", SUPERVISOR_TYPE)
+                stopped_event = ServiceStoppedEvent(
+                    service_name="ReconciliationService",
+                    supervisor_type=SUPERVISOR_TYPE,
+                    reason=None,
+                )
+                await self.bus.publish(SYSTEM_LIFECYCLE, stopped_event)
+                logger.bind(supervisor=SUPERVISOR_TYPE, service="ReconciliationService").debug(
+                    "ReconciliationService stopped"
+                )
+                services_stopped += 1
+                self._reconciliation_task = None
+
+        # Stop user stream adapter
+        if self._user_stream_adapter is not None:
+            try:
+                self._user_stream_adapter.stop()
+                record_service_stopped("UserStreamAdapter", SUPERVISOR_TYPE)
+                stopped_event = ServiceStoppedEvent(
+                    service_name="UserStreamAdapter",
+                    supervisor_type=SUPERVISOR_TYPE,
+                    reason=None,
+                )
+                await self.bus.publish(SYSTEM_LIFECYCLE, stopped_event)
+                logger.bind(supervisor=SUPERVISOR_TYPE, service="UserStreamAdapter").debug(
+                    "UserStreamAdapter stopped"
+                )
+                services_stopped += 1
+            except Exception as e:
+                logger.bind(
+                    supervisor=SUPERVISOR_TYPE,
+                    service="UserStreamAdapter",
+                    error_type=type(e).__name__,
+                ).exception("Error stopping UserStreamAdapter: {error}", error=str(e))
+
         if self.position_manager is not None:
             try:
                 self.position_manager.stop()
@@ -537,6 +738,8 @@ class SystemSupervisor:
 
         # Cancel tasks
         tasks = [
+            self._reconciliation_task,
+            self._user_stream_task,
             self._position_manager_task,
             self._execution_router_task,
             self._oms_core_task,
@@ -552,6 +755,8 @@ class SystemSupervisor:
             await asyncio.gather(*[t for t in tasks if t], return_exceptions=True)
 
         # Clear references
+        self._reconciliation_task = None
+        self._user_stream_task = None
         self._position_manager_task = None
         self._execution_router_task = None
         self._oms_core_task = None
@@ -584,6 +789,8 @@ class SystemSupervisor:
                     self._oms_core_task,
                     self._execution_router_task,
                     self._position_manager_task,
+                    self._user_stream_task,
+                    self._reconciliation_task,
                 ]
                 if t is not None
             ]

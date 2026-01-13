@@ -24,6 +24,12 @@ _execution_errors_topic: Topic | None = None
 _market_discovery_topic: Topic | None = None
 _signals_topic: Topic | None = None
 _targets_topic: Topic | None = None
+_user_stream_acks_topic: Topic | None = None
+_user_stream_rejects_topic: Topic | None = None
+_user_stream_fills_topic: Topic | None = None
+_user_stream_cancels_topic: Topic | None = None
+_reconcile_topic: Topic | None = None
+_circuit_breaker_topic: Topic | None = None
 
 
 def _create_market_data_topic() -> Topic:
@@ -345,6 +351,96 @@ def get_targets_topic() -> Topic:
     return _targets_topic
 
 
+def _create_user_stream_acks_topic() -> Topic:
+    """Create the USER_STREAM_ACKS topic."""
+    from polytrader.adapters.polymarket.models import CanonicalOrderAck
+
+    return Topic[CanonicalOrderAck]("user_stream_acks")
+
+
+def get_user_stream_acks_topic() -> Topic:
+    """Get the USER_STREAM_ACKS topic (singleton)."""
+    global _user_stream_acks_topic
+    if _user_stream_acks_topic is None:
+        _user_stream_acks_topic = _create_user_stream_acks_topic()
+    return _user_stream_acks_topic
+
+
+def _create_user_stream_rejects_topic() -> Topic:
+    """Create the USER_STREAM_REJECTS topic."""
+    from polytrader.adapters.polymarket.models import CanonicalOrderReject
+
+    return Topic[CanonicalOrderReject]("user_stream_rejects")
+
+
+def get_user_stream_rejects_topic() -> Topic:
+    """Get the USER_STREAM_REJECTS topic (singleton)."""
+    global _user_stream_rejects_topic
+    if _user_stream_rejects_topic is None:
+        _user_stream_rejects_topic = _create_user_stream_rejects_topic()
+    return _user_stream_rejects_topic
+
+
+def _create_user_stream_fills_topic() -> Topic:
+    """Create the USER_STREAM_FILLS topic."""
+    from polytrader.adapters.polymarket.models import CanonicalFill
+
+    return Topic[CanonicalFill]("user_stream_fills")
+
+
+def get_user_stream_fills_topic() -> Topic:
+    """Get the USER_STREAM_FILLS topic (singleton)."""
+    global _user_stream_fills_topic
+    if _user_stream_fills_topic is None:
+        _user_stream_fills_topic = _create_user_stream_fills_topic()
+    return _user_stream_fills_topic
+
+
+def _create_user_stream_cancels_topic() -> Topic:
+    """Create the USER_STREAM_CANCELS topic."""
+    from polytrader.adapters.polymarket.models import CanonicalCancel
+
+    return Topic[CanonicalCancel]("user_stream_cancels")
+
+
+def get_user_stream_cancels_topic() -> Topic:
+    """Get the USER_STREAM_CANCELS topic (singleton)."""
+    global _user_stream_cancels_topic
+    if _user_stream_cancels_topic is None:
+        _user_stream_cancels_topic = _create_user_stream_cancels_topic()
+    return _user_stream_cancels_topic
+
+
+def _create_reconcile_topic() -> Topic:
+    """Create the RECONCILE topic."""
+    from polytrader.events.types import ReconcileEvent
+
+    return Topic[ReconcileEvent]("reconcile")
+
+
+def get_reconcile_topic() -> Topic:
+    """Get the RECONCILE topic (singleton)."""
+    global _reconcile_topic
+    if _reconcile_topic is None:
+        _reconcile_topic = _create_reconcile_topic()
+    return _reconcile_topic
+
+
+def _create_circuit_breaker_topic() -> Topic:
+    """Create the CIRCUIT_BREAKER topic."""
+    from polytrader.events.types import CircuitBreakerEvent
+
+    return Topic[CircuitBreakerEvent]("circuit_breaker")
+
+
+def get_circuit_breaker_topic() -> Topic:
+    """Get the CIRCUIT_BREAKER topic (singleton)."""
+    global _circuit_breaker_topic
+    if _circuit_breaker_topic is None:
+        _circuit_breaker_topic = _create_circuit_breaker_topic()
+    return _circuit_breaker_topic
+
+
 def __getattr__(name: str) -> Topic:
     """Lazily initialize topic constants on first access.
 
@@ -402,5 +498,17 @@ def __getattr__(name: str) -> Topic:
         return get_signals_topic()
     elif name == "TARGETS":
         return get_targets_topic()
+    elif name == "USER_STREAM_ACKS":
+        return get_user_stream_acks_topic()
+    elif name == "USER_STREAM_REJECTS":
+        return get_user_stream_rejects_topic()
+    elif name == "USER_STREAM_FILLS":
+        return get_user_stream_fills_topic()
+    elif name == "USER_STREAM_CANCELS":
+        return get_user_stream_cancels_topic()
+    elif name == "RECONCILE":
+        return get_reconcile_topic()
+    elif name == "CIRCUIT_BREAKER":
+        return get_circuit_breaker_topic()
     else:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
