@@ -210,6 +210,73 @@ class SystemSupervisor:
                     # Continue with startup even if reconstruction fails
                     # (system can still operate, just without historical state)
 
+            # 3b. Initial reconciliation (Phase 7) - run reconciliation snapshot before health gates
+            # Only for live trading (paper trading doesn't need this)
+            initial_reconciliation_divergences: list[Any] = []
+            if (
+                self.reconciliation_service_factory is not None
+                and self.execution_router_factory is not None
+            ):
+                logger.info("Starting initial reconciliation snapshot")
+                try:
+                    # Create execution router early to get venue adapter
+                    # (we'll start it as a service later)
+                    execution_router = self.execution_router_factory()
+                    self.execution_router = execution_router
+
+                    # Get OMS store and venue adapter
+                    oms_store = oms_core.get_store()
+                    venue_adapter = execution_router.get_adapter()
+
+                    # Create reconciliation service for initial reconciliation
+                    from polytrader.oms.reconcile import ReconciliationService
+
+                    reconciliation_service = ReconciliationService(
+                        store=oms_store,
+                        venue_adapter=venue_adapter,
+                        bus=self.bus,
+                    )
+
+                    # Run initial reconciliation
+                    initial_reconciliation_divergences = await reconciliation_service.reconcile()
+
+                    # Check for severe divergences (ERROR severity)
+                    severe_divergences = [
+                        d for d in initial_reconciliation_divergences if d.severity == "ERROR"
+                    ]
+
+                    if severe_divergences:
+                        logger.error(
+                            f"Initial reconciliation detected {len(severe_divergences)} "
+                            "severe divergence(s)",
+                            count=len(severe_divergences),
+                            divergences=[d.dict() for d in severe_divergences],
+                        )
+                        # Store for health gates to check later
+                        # (health gates will fail if severe divergences detected)
+                    elif initial_reconciliation_divergences:
+                        count = len(initial_reconciliation_divergences)
+                        logger.warning(
+                            f"Initial reconciliation detected {count} divergence(s) (non-severe)",
+                            count=count,
+                        )
+                    else:
+                        logger.info("Initial reconciliation complete: no divergences detected")
+
+                    # Store reconciliation service for periodic reconciliation later
+                    self._reconciliation_service = reconciliation_service
+
+                except Exception as e:
+                    logger.exception(
+                        "Error during initial reconciliation: {error}",
+                        error=str(e),
+                        error_type=type(e).__name__,
+                    )
+                    # Continue with startup even if reconciliation fails
+                    # (health gates will fail if reconciliation is required)
+                    # Store empty list to indicate reconciliation failed
+                    initial_reconciliation_divergences = []
+
             await self._start_service_task(
                 "OMSCore",
                 oms_core,
@@ -219,9 +286,16 @@ class SystemSupervisor:
             services_started += 1
 
             # 4. ExecutionRouter subscribes to SUBMIT_ORDER_COMMANDS (if enabled)
+            # (Already created above for initial reconciliation, just start it now)
             if self.execution_router_factory is not None:
-                execution_router = self.execution_router_factory()
-                self.execution_router = execution_router
+                if self.execution_router is None:
+                    # Create execution router if not already created
+                    # (shouldn't happen in live trading, but handle gracefully)
+                    execution_router = self.execution_router_factory()
+                    self.execution_router = execution_router
+                else:
+                    execution_router = self.execution_router
+
                 await self._start_service_task(
                     "ExecutionRouter",
                     execution_router,
@@ -255,7 +329,14 @@ class SystemSupervisor:
                 services_started += 1
 
             # 7. ReconciliationService (for live trading, after OMS Core and ExecutionRouter)
-            if self.reconciliation_service_factory is not None:
+            # (Already created above for initial reconciliation, just start periodic task now)
+            if self._reconciliation_service is not None:
+                reconciliation_service = self._reconciliation_service
+                await self._start_reconciliation_task(reconciliation_service)
+                services_started += 1
+            elif self.reconciliation_service_factory is not None:
+                # Fallback: create reconciliation service if not already created
+                # (shouldn't happen in live trading, but handle gracefully)
                 reconciliation_service = self.reconciliation_service_factory()
                 self._reconciliation_service = reconciliation_service
                 await self._start_reconciliation_task(reconciliation_service)
