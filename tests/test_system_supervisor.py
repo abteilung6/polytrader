@@ -16,7 +16,13 @@ from polytrader.execution import ExecutionRouter
 from polytrader.oms import InMemoryOrderStore, OMSCore
 from polytrader.oms.idempotency import IdempotencyStore
 from polytrader.oms.reconcile import ReconciliationService
-from polytrader.ops import CircuitBreaker, CircuitBreakerThresholds, ExecutionControl
+from polytrader.ops import (
+    CircuitBreaker,
+    CircuitBreakerThresholds,
+    ExecutionControl,
+    HealthGateThresholds,
+    HealthService,
+)
 from polytrader.portfolio import PortfolioService
 from polytrader.risk import RiskChecker, RiskEngine, get_default_limits
 from polytrader.store import MemoryMarketDataStore
@@ -122,6 +128,7 @@ class FakeUserStreamAdapter:
         self.start_called = False
         self.stop_called = False
         self._running = False
+        self._ws: Any | None = None  # WebSocket connection (None when disconnected)
 
     async def run(self) -> None:
         """Mark run as called."""
@@ -788,3 +795,356 @@ class TestSystemSupervisor:
         assert supervisor.oms_core is not None
 
         await supervisor.stop()
+
+    @pytest.mark.asyncio
+    async def test_health_gates_passing_in_boot_sequence(self) -> None:
+        """Test boot sequence with all health gates passing."""
+        bus = EventBus()
+        store = MemoryMarketDataStore()
+
+        # Add fresh market data
+        import time
+
+        from polytrader.events.types import MarketDataEvent
+
+        fresh_event = MarketDataEvent(
+            market_slug="test-market",
+            outcome="UP",
+            best_bid=0.44,
+            best_ask=0.46,
+            ts_mono=time.monotonic() - 1.0,  # 1 second old (fresh)
+        )
+        store.add(fresh_event)
+
+        # Create fake services
+        portfolio_service = FakePortfolioService(bus=bus, store=store, fixed_size_usd=1.0)
+        risk_checker = FakeRiskChecker(
+            bus=bus, engine=RiskEngine(limits=get_default_limits()), store=store
+        )
+        oms_store = InMemoryOrderStore(bus)
+        oms_core = FakeOMSCore(bus=bus, store=oms_store, idempotency_store=IdempotencyStore())
+
+        # Create fake execution router with venue adapter
+        fake_adapter = MagicMock()
+        fake_adapter.get_open_orders = MagicMock(return_value=[])
+        execution_router = FakeExecutionRouter(bus)
+        execution_router._adapter = fake_adapter
+
+        # Create fake user stream adapter (connected)
+        fake_user_stream = FakeUserStreamAdapter()
+        fake_user_stream._running = True
+        fake_user_stream._ws = MagicMock()
+
+        # Create circuit breaker (not triggered)
+        execution_control = ExecutionControl()
+        circuit_breaker = CircuitBreaker(
+            thresholds=CircuitBreakerThresholds(max_fill_mismatches=1),
+            bus=bus,
+            execution_control=execution_control,
+        )
+
+        # Create health service factory
+        def health_service_factory() -> HealthService:
+            return HealthService(
+                store=store,
+                thresholds=HealthGateThresholds(
+                    max_market_data_staleness_seconds=60.0,
+                    max_reconciliation_divergences=0,
+                    max_error_rate=0.1,
+                    require_user_stream=False,  # Don't require for initial boot
+                ),
+                user_stream_adapter=fake_user_stream,
+                circuit_breaker=circuit_breaker,
+                execution_control=execution_control,
+                kill_switch_active=False,
+                error_rate=None,
+                recent_reconcile_events=[],
+            )
+
+        def portfolio_factory() -> PortfolioService:
+            return portfolio_service
+
+        def risk_factory() -> RiskChecker:
+            return risk_checker
+
+        def oms_factory() -> OMSCore:
+            return oms_core
+
+        def execution_router_factory() -> ExecutionRouter:
+            return execution_router
+
+        def user_stream_factory() -> Any:
+            return fake_user_stream
+
+        def reconciliation_factory() -> ReconciliationService:
+            return ReconciliationService(store=oms_store, venue_adapter=fake_adapter, bus=bus)
+
+        def circuit_breaker_factory() -> CircuitBreaker:
+            return circuit_breaker
+
+        supervisor = SystemSupervisor(
+            bus=bus,
+            store=store,
+            portfolio_service_factory=portfolio_factory,
+            risk_checker_factory=risk_factory,
+            oms_core_factory=oms_factory,
+            execution_router_factory=execution_router_factory,
+            user_stream_adapter_factory=user_stream_factory,
+            reconciliation_service_factory=reconciliation_factory,
+            circuit_breaker_factory=circuit_breaker_factory,
+            execution_control=execution_control,
+            health_service_factory=health_service_factory,
+        )
+
+        # Start should succeed
+        await supervisor.start()
+
+        # Verify that supervisor started successfully
+        assert supervisor.oms_core is not None
+
+        await supervisor.stop()
+
+    @pytest.mark.asyncio
+    async def test_health_gates_failing_market_data_stale(self) -> None:
+        """Test boot sequence with market data staleness gate failing."""
+        bus = EventBus()
+        store = MemoryMarketDataStore()
+
+        # Add stale market data (100 seconds old)
+        import time
+
+        from polytrader.events.types import MarketDataEvent
+
+        stale_event = MarketDataEvent(
+            market_slug="test-market",
+            outcome="UP",
+            best_bid=0.44,
+            best_ask=0.46,
+            ts_mono=time.monotonic() - 100.0,  # 100 seconds old (stale)
+        )
+        store.add(stale_event)
+
+        # Create fake services
+        portfolio_service = FakePortfolioService(bus=bus, store=store, fixed_size_usd=1.0)
+        risk_checker = FakeRiskChecker(
+            bus=bus, engine=RiskEngine(limits=get_default_limits()), store=store
+        )
+        oms_store = InMemoryOrderStore(bus)
+        oms_core = FakeOMSCore(bus=bus, store=oms_store, idempotency_store=IdempotencyStore())
+
+        # Create fake execution router with venue adapter
+        fake_adapter = MagicMock()
+        fake_adapter.get_open_orders = MagicMock(return_value=[])
+        execution_router = FakeExecutionRouter(bus)
+        execution_router._adapter = fake_adapter
+
+        # Create health service factory with strict thresholds
+        execution_control = ExecutionControl()
+
+        def health_service_factory() -> HealthService:
+            return HealthService(
+                store=store,
+                thresholds=HealthGateThresholds(
+                    max_market_data_staleness_seconds=60.0,  # Stricter than 100 seconds
+                    max_reconciliation_divergences=0,
+                    max_error_rate=0.1,
+                    require_user_stream=False,
+                ),
+                user_stream_adapter=None,
+                circuit_breaker=None,
+                execution_control=execution_control,
+                kill_switch_active=False,
+                error_rate=None,
+                recent_reconcile_events=[],
+            )
+
+        def portfolio_factory() -> PortfolioService:
+            return portfolio_service
+
+        def risk_factory() -> RiskChecker:
+            return risk_checker
+
+        def oms_factory() -> OMSCore:
+            return oms_core
+
+        def execution_router_factory() -> ExecutionRouter:
+            return execution_router
+
+        def reconciliation_factory() -> ReconciliationService:
+            return ReconciliationService(store=oms_store, venue_adapter=fake_adapter, bus=bus)
+
+        supervisor = SystemSupervisor(
+            bus=bus,
+            store=store,
+            portfolio_service_factory=portfolio_factory,
+            risk_checker_factory=risk_factory,
+            oms_core_factory=oms_factory,
+            execution_router_factory=execution_router_factory,
+            reconciliation_service_factory=reconciliation_factory,
+            execution_control=execution_control,
+            health_service_factory=health_service_factory,
+        )
+
+        # Start should still succeed (health gates fail but don't prevent startup)
+        # Execution will not be enabled (handled in commit 7)
+        await supervisor.start()
+
+        # Verify that supervisor started successfully
+        assert supervisor.oms_core is not None
+
+        await supervisor.stop()
+
+    @pytest.mark.asyncio
+    async def test_health_gates_paper_trading_mode(self) -> None:
+        """Test boot sequence with missing optional components (paper trading)."""
+        bus = EventBus()
+        store = MemoryMarketDataStore()
+
+        # Create fake services (minimal setup for paper trading)
+        portfolio_service = FakePortfolioService(bus=bus, store=store, fixed_size_usd=1.0)
+        risk_checker = FakeRiskChecker(
+            bus=bus, engine=RiskEngine(limits=get_default_limits()), store=store
+        )
+        oms_core = FakeOMSCore(
+            bus=bus, store=InMemoryOrderStore(bus), idempotency_store=IdempotencyStore()
+        )
+
+        def portfolio_factory() -> PortfolioService:
+            return portfolio_service
+
+        def risk_factory() -> RiskChecker:
+            return risk_checker
+
+        def oms_factory() -> OMSCore:
+            return oms_core
+
+        supervisor = SystemSupervisor(
+            bus=bus,
+            store=store,
+            portfolio_service_factory=portfolio_factory,
+            risk_checker_factory=risk_factory,
+            oms_core_factory=oms_factory,
+            # No execution router, user stream, reconciliation, circuit breaker, or health service
+            # (paper trading mode)
+        )
+
+        # Start should succeed (health gates skipped for paper trading)
+        await supervisor.start()
+
+        # Verify that supervisor started successfully
+        assert supervisor.oms_core is not None
+
+        await supervisor.stop()
+
+    @pytest.mark.asyncio
+    async def test_health_gate_thresholds(self) -> None:
+        """Test health gate thresholds with various configurations."""
+        bus = EventBus()
+        store = MemoryMarketDataStore()
+
+        # Add market data with varying staleness
+        import time
+
+        from polytrader.events.types import MarketDataEvent
+
+        # Test 1: Market data just within threshold (59 seconds old, threshold 60)
+        event1 = MarketDataEvent(
+            market_slug="test-market",
+            outcome="UP",
+            best_bid=0.44,
+            best_ask=0.46,
+            ts_mono=time.monotonic() - 59.0,
+        )
+        store.add(event1)
+
+        portfolio_service = FakePortfolioService(bus=bus, store=store, fixed_size_usd=1.0)
+        risk_checker = FakeRiskChecker(
+            bus=bus, engine=RiskEngine(limits=get_default_limits()), store=store
+        )
+        oms_store = InMemoryOrderStore(bus)
+        oms_core = FakeOMSCore(bus=bus, store=oms_store, idempotency_store=IdempotencyStore())
+
+        fake_adapter = MagicMock()
+        fake_adapter.get_open_orders = MagicMock(return_value=[])
+        execution_router = FakeExecutionRouter(bus)
+        execution_router._adapter = fake_adapter
+
+        execution_control = ExecutionControl()
+
+        # Test with threshold of 60 seconds (should pass)
+        def health_service_factory() -> HealthService:
+            return HealthService(
+                store=store,
+                thresholds=HealthGateThresholds(
+                    max_market_data_staleness_seconds=60.0,
+                    max_reconciliation_divergences=0,
+                    max_error_rate=0.1,
+                    require_user_stream=False,
+                ),
+                user_stream_adapter=None,
+                circuit_breaker=None,
+                execution_control=execution_control,
+                kill_switch_active=False,
+                error_rate=None,
+                recent_reconcile_events=[],
+            )
+
+        def portfolio_factory() -> PortfolioService:
+            return portfolio_service
+
+        def risk_factory() -> RiskChecker:
+            return risk_checker
+
+        def oms_factory() -> OMSCore:
+            return oms_core
+
+        def execution_router_factory() -> ExecutionRouter:
+            return execution_router
+
+        def reconciliation_factory() -> ReconciliationService:
+            return ReconciliationService(store=oms_store, venue_adapter=fake_adapter, bus=bus)
+
+        supervisor = SystemSupervisor(
+            bus=bus,
+            store=store,
+            portfolio_service_factory=portfolio_factory,
+            risk_checker_factory=risk_factory,
+            oms_core_factory=oms_factory,
+            execution_router_factory=execution_router_factory,
+            reconciliation_service_factory=reconciliation_factory,
+            execution_control=execution_control,
+            health_service_factory=health_service_factory,
+        )
+
+        # Start should succeed
+        await supervisor.start()
+        assert supervisor.oms_core is not None
+        await supervisor.stop()
+
+        # Test 2: Market data just over threshold (61 seconds old, threshold 60)
+        event2 = MarketDataEvent(
+            market_slug="test-market",
+            outcome="UP",
+            best_bid=0.44,
+            best_ask=0.46,
+            ts_mono=time.monotonic() - 61.0,
+        )
+        store.add(event2)
+
+        # Create new supervisor with same configuration
+        supervisor2 = SystemSupervisor(
+            bus=bus,
+            store=store,
+            portfolio_service_factory=portfolio_factory,
+            risk_checker_factory=risk_factory,
+            oms_core_factory=oms_factory,
+            execution_router_factory=execution_router_factory,
+            reconciliation_service_factory=reconciliation_factory,
+            execution_control=execution_control,
+            health_service_factory=health_service_factory,
+        )
+
+        # Start should still succeed (health gates fail but don't prevent startup)
+        await supervisor2.start()
+        assert supervisor2.oms_core is not None
+        await supervisor2.stop()

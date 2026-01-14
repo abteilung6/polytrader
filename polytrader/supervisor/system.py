@@ -15,7 +15,13 @@ from polytrader.events.types import ServiceErrorEvent, ServiceStartedEvent, Serv
 from polytrader.execution import ExecutionRouter
 from polytrader.logging_config import logger
 from polytrader.oms import OMSCore
-from polytrader.ops import CircuitBreaker, ExecutionControl, StateReconstructionService
+from polytrader.ops import (
+    CircuitBreaker,
+    ExecutionControl,
+    HealthGateThresholds,
+    HealthService,
+    StateReconstructionService,
+)
 from polytrader.portfolio import PortfolioService
 from polytrader.position_manager import IPositionManager
 from polytrader.risk import RiskChecker
@@ -71,6 +77,8 @@ class SystemSupervisor:
         reconciliation_service_factory: Callable[[], Any] | None = None,
         circuit_breaker_factory: Callable[[], CircuitBreaker] | None = None,
         execution_control: ExecutionControl | None = None,
+        health_service_factory: Callable[[], HealthService] | None = None,
+        health_gate_thresholds: HealthGateThresholds | None = None,
         startup_delay_s: float = STARTUP_DELAY_S,
         startup_timeout_s: float = STARTUP_TIMEOUT_S,
     ) -> None:
@@ -89,6 +97,8 @@ class SystemSupervisor:
                 (optional, for live trading)
             circuit_breaker_factory: Factory for CircuitBreaker (optional, for live trading)
             execution_control: ExecutionControl instance (optional, for live trading)
+            health_service_factory: Factory for HealthService (optional, for live trading)
+            health_gate_thresholds: Health gate thresholds (optional, uses defaults if not provided)
             startup_delay_s: Time between service starts (default: 0.01s)
             startup_timeout_s: Max time to start all services (default: 30.0s)
         """
@@ -105,6 +115,8 @@ class SystemSupervisor:
         self.reconciliation_service_factory = reconciliation_service_factory
         self.circuit_breaker_factory = circuit_breaker_factory
         self._execution_control = execution_control
+        self.health_service_factory = health_service_factory
+        self.health_gate_thresholds = health_gate_thresholds or HealthGateThresholds()
 
         # Configuration
         self.startup_delay_s = startup_delay_s
@@ -121,6 +133,9 @@ class SystemSupervisor:
         self._user_stream_adapter: Any | None = None
         self._reconciliation_service: Any | None = None
         self._circuit_breaker: CircuitBreaker | None = None
+
+        # Health gate status (set during boot, used in commit 7 for execution permit)
+        self._health_gates_passed: bool = True
 
         # Service tasks
         self._running = False
@@ -250,7 +265,7 @@ class SystemSupervisor:
                             f"Initial reconciliation detected {len(severe_divergences)} "
                             "severe divergence(s)",
                             count=len(severe_divergences),
-                            divergences=[d.dict() for d in severe_divergences],
+                            divergences=[d.model_dump() for d in severe_divergences],
                         )
                         # Store for health gates to check later
                         # (health gates will fail if severe divergences detected)
@@ -276,6 +291,98 @@ class SystemSupervisor:
                     # (health gates will fail if reconciliation is required)
                     # Store empty list to indicate reconciliation failed
                     initial_reconciliation_divergences = []
+
+            # 3c. Health gate evaluation (Phase 7) - evaluate health gates before enabling execution
+            # Only for live trading (paper trading doesn't need this)
+            self._health_gates_passed = True
+            if self.health_service_factory is not None or (
+                self.execution_router_factory is not None
+                and self.user_stream_adapter_factory is not None
+            ):
+                logger.info("Evaluating health gates")
+                try:
+                    # Create user stream adapter early if needed for health check
+                    # (it will be started as a service later)
+                    # Note: User stream adapter may not be connected yet at this point,
+                    # so we create it but don't require connection for initial health gates
+                    user_stream_adapter_for_health = None
+                    if self.user_stream_adapter_factory is not None:
+                        user_stream_adapter_for_health = self.user_stream_adapter_factory()
+                        self._user_stream_adapter = user_stream_adapter_for_health
+
+                    # Create health service if factory provided, otherwise create default
+                    if self.health_service_factory is not None:
+                        health_service = self.health_service_factory()
+                    else:
+                        # Create default health service with available components
+                        # Note: For initial health gates, user stream may not be connected yet,
+                        # so we use thresholds that don't require user stream for initial boot
+                        # (user stream will be checked after it's started)
+                        initial_thresholds = HealthGateThresholds(
+                            max_market_data_staleness_seconds=self.health_gate_thresholds.max_market_data_staleness_seconds,
+                            max_reconciliation_divergences=self.health_gate_thresholds.max_reconciliation_divergences,
+                            max_error_rate=self.health_gate_thresholds.max_error_rate,
+                            require_user_stream=False,  # Don't require user stream for initial boot
+                        )
+                        health_service = HealthService(
+                            store=self.store,
+                            thresholds=initial_thresholds,
+                            user_stream_adapter=user_stream_adapter_for_health,
+                            circuit_breaker=self._circuit_breaker,
+                            execution_control=self._execution_control,
+                            kill_switch_active=False,  # Kill switch not active on boot
+                            error_rate=None,  # Error rate not tracked on boot
+                            recent_reconcile_events=initial_reconciliation_divergences,
+                        )
+
+                    # Evaluate health status
+                    health_status = await health_service.evaluate()
+
+                    # Check all gates
+                    all_passed, failed_gates = health_service.check_gates(health_status)
+
+                    if all_passed:
+                        logger.info(
+                            "All health gates passed",
+                            market_data_fresh=health_status.market_data_fresh,
+                            user_stream_connected=health_status.user_stream_connected,
+                            reconciliation_healthy=health_status.reconciliation_healthy,
+                            error_rate_ok=health_status.error_rate_ok,
+                            circuit_breaker_triggered=health_status.circuit_breaker_triggered,
+                            kill_switch_active=health_status.kill_switch_active,
+                        )
+                        self._health_gates_passed = True
+                    else:
+                        logger.error(
+                            "Health gates failed: {gates}",
+                            gates=", ".join(failed_gates),
+                            market_data_fresh=health_status.market_data_fresh,
+                            market_data_staleness_seconds=health_status.market_data_staleness_seconds,
+                            user_stream_connected=health_status.user_stream_connected,
+                            reconciliation_healthy=health_status.reconciliation_healthy,
+                            reconciliation_divergence_count=health_status.reconciliation_divergence_count,
+                            error_rate_ok=health_status.error_rate_ok,
+                            error_rate=health_status.error_rate,
+                            circuit_breaker_triggered=health_status.circuit_breaker_triggered,
+                            kill_switch_active=health_status.kill_switch_active,
+                        )
+                        self._health_gates_passed = False
+                        # Do NOT enable execution if health gates fail
+                        # (execution permit will be issued in commit 7 only if gates pass)
+
+                except Exception as e:
+                    logger.exception(
+                        "Error during health gate evaluation: {error}",
+                        error=str(e),
+                        error_type=type(e).__name__,
+                    )
+                    # Fail health gates if evaluation fails
+                    self._health_gates_passed = False
+            else:
+                # Paper trading mode - health gates not required
+                logger.debug("Health gates skipped (paper trading mode)")
+                # health_gates_passed will be used in commit 7 for execution permit issuance
+                self._health_gates_passed = True
 
             await self._start_service_task(
                 "OMSCore",
@@ -317,9 +424,15 @@ class SystemSupervisor:
                 services_started += 1
 
             # 6. UserStreamAdapter (for live trading, after OMS Core)
+            # Note: User stream adapter may have been created earlier for health gate evaluation
             if self.user_stream_adapter_factory is not None:
-                user_stream_adapter = self.user_stream_adapter_factory()
-                self._user_stream_adapter = user_stream_adapter
+                if self._user_stream_adapter is None:
+                    # Create user stream adapter if not already created (for health gates)
+                    user_stream_adapter = self.user_stream_adapter_factory()
+                    self._user_stream_adapter = user_stream_adapter
+                else:
+                    # Use existing adapter (created for health gates)
+                    user_stream_adapter = self._user_stream_adapter
                 await self._start_service_task(
                     "UserStreamAdapter",
                     user_stream_adapter,
