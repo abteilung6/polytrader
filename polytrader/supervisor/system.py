@@ -7,11 +7,21 @@ Per two-supervisor architecture:
 
 import asyncio
 import time
+import uuid
 from collections.abc import Awaitable, Callable, Coroutine
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+if TYPE_CHECKING:
+    from polytrader.ops.health import HealthStatus
+
+from polytrader.config import load_config
 from polytrader.events import SYSTEM_LIFECYCLE, EventBus
-from polytrader.events.types import ServiceErrorEvent, ServiceStartedEvent, ServiceStoppedEvent
+from polytrader.events.types import (
+    ServiceErrorEvent,
+    ServiceStartedEvent,
+    ServiceStoppedEvent,
+    SystemStartedEvent,
+)
 from polytrader.execution import ExecutionRouter
 from polytrader.logging_config import logger
 from polytrader.oms import OMSCore
@@ -79,6 +89,7 @@ class SystemSupervisor:
         execution_control: ExecutionControl | None = None,
         health_service_factory: Callable[[], HealthService] | None = None,
         health_gate_thresholds: HealthGateThresholds | None = None,
+        config_path: str | None = None,
         startup_delay_s: float = STARTUP_DELAY_S,
         startup_timeout_s: float = STARTUP_TIMEOUT_S,
     ) -> None:
@@ -99,6 +110,7 @@ class SystemSupervisor:
             execution_control: ExecutionControl instance (optional, for live trading)
             health_service_factory: Factory for HealthService (optional, for live trading)
             health_gate_thresholds: Health gate thresholds (optional, uses defaults if not provided)
+            config_path: Path to config file (optional, for live trading)
             startup_delay_s: Time between service starts (default: 0.01s)
             startup_timeout_s: Max time to start all services (default: 30.0s)
         """
@@ -117,6 +129,7 @@ class SystemSupervisor:
         self._execution_control = execution_control
         self.health_service_factory = health_service_factory
         self.health_gate_thresholds = health_gate_thresholds or HealthGateThresholds()
+        self.config_path = config_path
 
         # Configuration
         self.startup_delay_s = startup_delay_s
@@ -147,10 +160,20 @@ class SystemSupervisor:
         self._reconciliation_task: asyncio.Task | None = None
 
     async def start(self) -> None:
-        """Start all global services in correct order.
+        """Start all global services following boot sequence.
 
-        Order: PortfolioService → RiskChecker → OMS Core → ExecutionRouter → PositionManager
-        (Subscribers before publishers)
+        Per flows.mdc §2: Boot sequence with health checks and execution gating.
+
+        Boot Sequence:
+        1. Load config (validated). Emit ConfigLoadedEvent.
+        2. Init event store. Emit SystemStartedEvent.
+        3. Start adapters (market data, user stream).
+        4. Build projections from event log (OMS, positions, PnL).
+        5. Initial reconciliation snapshot.
+        6. Health gates evaluation.
+        7. Issue execution permit (if all gates pass).
+        8. Start services (PortfolioService → RiskChecker → OMS Core →
+           ExecutionRouter → PositionManager).
 
         Per observability.mdc:
         - Emits ServiceStartedEvent for each service
@@ -166,352 +189,34 @@ class SystemSupervisor:
 
         logger.bind(supervisor=SUPERVISOR_TYPE).info("Starting SystemSupervisor")
 
-        services_started = 0
-
         try:
-            # 1. PortfolioService subscribes to SIGNALS (must start first)
-            portfolio_service = self.portfolio_service_factory()
-            self.portfolio_service = portfolio_service
-            await self._start_service(
-                "PortfolioService",
-                portfolio_service,
-                lambda: portfolio_service.start(),
-            )
-            services_started += 1
+            # Boot sequence per flows.mdc §2
+            # 1. Load config (if not already loaded)
+            await self._load_config()
 
-            # 2. RiskChecker subscribes to PROPOSALS (must start before PortfolioService publishes)
-            risk_checker = self.risk_checker_factory()
-            self.risk_checker = risk_checker
-            await self._start_service_task(
-                "RiskChecker",
-                risk_checker,
-                lambda: risk_checker.run(),
-                lambda task: setattr(self, "_risk_checker_task", task),
-            )
-            services_started += 1
+            # 2. Init event store (emit SystemStartedEvent)
+            await self._init_event_store()
 
-            # 3. OMS Core subscribes to APPROVED_PROPOSALS (must start before RiskChecker publishes)
-            oms_core = self.oms_core_factory()
-            self.oms_core = oms_core
+            # 3. Start adapters (market data, user stream)
+            await self._start_adapters()
 
-            # 3a. State reconstruction (Phase 7) - rebuild from event log before starting OMS
-            # Only for live trading (paper trading doesn't need this)
-            if self.position_manager_factory is not None and self.bus._store is not None:
-                logger.info("Starting state reconstruction from event log")
-                try:
-                    # Get OMS store from OMS core for state reconstruction
-                    oms_store = oms_core.get_store()
+            # 4. Build projections from event log
+            await self._reconstruct_state()
 
-                    # Get position manager (create but don't start yet)
-                    position_manager = self.position_manager_factory()
+            # 5. Initial reconciliation snapshot
+            initial_reconciliation_divergences = await self._initial_reconciliation()
 
-                    # Create reconstruction service
-                    reconstruction_service = StateReconstructionService(
-                        event_store=self.bus._store,
-                        oms_store=oms_store,
-                        position_manager=position_manager,
-                    )
+            # 6. Health gates evaluation
+            health_status = await self._evaluate_health_gates(initial_reconciliation_divergences)
 
-                    # Reconstruct state
-                    await reconstruction_service.reconstruct_all()
+            # 7. Issue execution permit (if all gates pass)
+            if health_status is not None and self._health_gates_passed:
+                await self._issue_execution_permit(health_status)
+            elif not self._health_gates_passed:
+                logger.error("Health gates failed, execution permit NOT issued")
 
-                    logger.info("State reconstruction complete")
-                except Exception as e:
-                    logger.exception(
-                        "Error during state reconstruction: {error}",
-                        error=str(e),
-                        error_type=type(e).__name__,
-                    )
-                    # Continue with startup even if reconstruction fails
-                    # (system can still operate, just without historical state)
-
-            # 3b. Initial reconciliation (Phase 7) - run reconciliation snapshot before health gates
-            # Only for live trading (paper trading doesn't need this)
-            initial_reconciliation_divergences: list[Any] = []
-            if (
-                self.reconciliation_service_factory is not None
-                and self.execution_router_factory is not None
-            ):
-                logger.info("Starting initial reconciliation snapshot")
-                try:
-                    # Create execution router early to get venue adapter
-                    # (we'll start it as a service later)
-                    execution_router = self.execution_router_factory()
-                    self.execution_router = execution_router
-
-                    # Get OMS store and venue adapter
-                    oms_store = oms_core.get_store()
-                    venue_adapter = execution_router.get_adapter()
-
-                    # Create reconciliation service for initial reconciliation
-                    from polytrader.oms.reconcile import ReconciliationService
-
-                    reconciliation_service = ReconciliationService(
-                        store=oms_store,
-                        venue_adapter=venue_adapter,
-                        bus=self.bus,
-                    )
-
-                    # Run initial reconciliation
-                    initial_reconciliation_divergences = await reconciliation_service.reconcile()
-
-                    # Check for severe divergences (ERROR severity)
-                    severe_divergences = [
-                        d for d in initial_reconciliation_divergences if d.severity == "ERROR"
-                    ]
-
-                    if severe_divergences:
-                        logger.error(
-                            f"Initial reconciliation detected {len(severe_divergences)} "
-                            "severe divergence(s)",
-                            count=len(severe_divergences),
-                            divergences=[d.model_dump() for d in severe_divergences],
-                        )
-                        # Store for health gates to check later
-                        # (health gates will fail if severe divergences detected)
-                    elif initial_reconciliation_divergences:
-                        count = len(initial_reconciliation_divergences)
-                        logger.warning(
-                            f"Initial reconciliation detected {count} divergence(s) (non-severe)",
-                            count=count,
-                        )
-                    else:
-                        logger.info("Initial reconciliation complete: no divergences detected")
-
-                    # Store reconciliation service for periodic reconciliation later
-                    self._reconciliation_service = reconciliation_service
-
-                except Exception as e:
-                    logger.exception(
-                        "Error during initial reconciliation: {error}",
-                        error=str(e),
-                        error_type=type(e).__name__,
-                    )
-                    # Continue with startup even if reconciliation fails
-                    # (health gates will fail if reconciliation is required)
-                    # Store empty list to indicate reconciliation failed
-                    initial_reconciliation_divergences = []
-
-            # 3c. Health gate evaluation (Phase 7) - evaluate health gates before enabling execution
-            # Only for live trading (paper trading doesn't need this)
-            self._health_gates_passed = True
-            from polytrader.ops.health import HealthStatus
-
-            health_status: HealthStatus | None = None  # Store health status for permit issuance
-            if self.health_service_factory is not None or (
-                self.execution_router_factory is not None
-                and self.user_stream_adapter_factory is not None
-            ):
-                logger.info("Evaluating health gates")
-                try:
-                    # Create user stream adapter early if needed for health check
-                    # (it will be started as a service later)
-                    # Note: User stream adapter may not be connected yet at this point,
-                    # so we create it but don't require connection for initial health gates
-                    user_stream_adapter_for_health = None
-                    if self.user_stream_adapter_factory is not None:
-                        user_stream_adapter_for_health = self.user_stream_adapter_factory()
-                        self._user_stream_adapter = user_stream_adapter_for_health
-
-                    # Create health service if factory provided, otherwise create default
-                    if self.health_service_factory is not None:
-                        health_service = self.health_service_factory()
-                    else:
-                        # Create default health service with available components
-                        # Note: For initial health gates, user stream may not be connected yet,
-                        # so we use thresholds that don't require user stream for initial boot
-                        # (user stream will be checked after it's started)
-                        initial_thresholds = HealthGateThresholds(
-                            max_market_data_staleness_seconds=self.health_gate_thresholds.max_market_data_staleness_seconds,
-                            max_reconciliation_divergences=self.health_gate_thresholds.max_reconciliation_divergences,
-                            max_error_rate=self.health_gate_thresholds.max_error_rate,
-                            require_user_stream=False,  # Don't require user stream for initial boot
-                        )
-                        health_service = HealthService(
-                            store=self.store,
-                            thresholds=initial_thresholds,
-                            user_stream_adapter=user_stream_adapter_for_health,
-                            circuit_breaker=self._circuit_breaker,
-                            execution_control=self._execution_control,
-                            kill_switch_active=False,  # Kill switch not active on boot
-                            error_rate=None,  # Error rate not tracked on boot
-                            recent_reconcile_events=initial_reconciliation_divergences,
-                        )
-
-                    # Evaluate health status
-                    health_status = await health_service.evaluate()
-
-                    # Check all gates
-                    all_passed, failed_gates = health_service.check_gates(health_status)
-
-                    if all_passed:
-                        logger.info(
-                            "All health gates passed",
-                            market_data_fresh=health_status.market_data_fresh,
-                            user_stream_connected=health_status.user_stream_connected,
-                            reconciliation_healthy=health_status.reconciliation_healthy,
-                            error_rate_ok=health_status.error_rate_ok,
-                            circuit_breaker_triggered=health_status.circuit_breaker_triggered,
-                            kill_switch_active=health_status.kill_switch_active,
-                        )
-                        self._health_gates_passed = True
-                    else:
-                        logger.error(
-                            "Health gates failed: {gates}",
-                            gates=", ".join(failed_gates),
-                            market_data_fresh=health_status.market_data_fresh,
-                            market_data_staleness_seconds=health_status.market_data_staleness_seconds,
-                            user_stream_connected=health_status.user_stream_connected,
-                            reconciliation_healthy=health_status.reconciliation_healthy,
-                            reconciliation_divergence_count=health_status.reconciliation_divergence_count,
-                            error_rate_ok=health_status.error_rate_ok,
-                            error_rate=health_status.error_rate,
-                            circuit_breaker_triggered=health_status.circuit_breaker_triggered,
-                            kill_switch_active=health_status.kill_switch_active,
-                        )
-                        self._health_gates_passed = False
-                        # Do NOT enable execution if health gates fail
-                        # (execution permit will be issued in commit 7 only if gates pass)
-
-                except Exception as e:
-                    logger.exception(
-                        "Error during health gate evaluation: {error}",
-                        error=str(e),
-                        error_type=type(e).__name__,
-                    )
-                    # Fail health gates if evaluation fails
-                    self._health_gates_passed = False
-            else:
-                # Paper trading mode - health gates not required
-                logger.debug("Health gates skipped (paper trading mode)")
-                # health_gates_passed will be used in commit 7 for execution permit issuance
-                self._health_gates_passed = True
-
-            # 3d. Execution permit issuance (Phase 7) - issue permit only if health gates pass
-            if self._execution_control is not None and self._health_gates_passed:
-                logger.info("Issuing execution permit (all health gates passed)")
-                try:
-                    # Convert health_status to dict for permit event (if available)
-                    health_status_dict: dict[str, Any] = {}
-                    if health_status is not None:
-                        health_status_dict = {
-                            "market_data_fresh": health_status.market_data_fresh,
-                            "market_data_staleness_seconds": (
-                                health_status.market_data_staleness_seconds
-                            ),
-                            "user_stream_connected": health_status.user_stream_connected,
-                            "reconciliation_healthy": health_status.reconciliation_healthy,
-                            "reconciliation_divergence_count": (
-                                health_status.reconciliation_divergence_count
-                            ),
-                            "error_rate_ok": health_status.error_rate_ok,
-                            "error_rate": health_status.error_rate,
-                            "circuit_breaker_triggered": health_status.circuit_breaker_triggered,
-                            "kill_switch_active": health_status.kill_switch_active,
-                        }
-
-                    # Issue execution permit
-                    await self._execution_control.enable_with_permit(
-                        permit_type="boot",
-                        reason="All health gates passed during boot sequence",
-                        health_status=health_status_dict,
-                        issued_by="system",
-                    )
-                    logger.info("Execution permit issued successfully")
-                except Exception as e:
-                    logger.exception(
-                        "Error issuing execution permit: {error}",
-                        error=str(e),
-                        error_type=type(e).__name__,
-                    )
-                    # Don't fail boot if permit issuance fails, but execution will remain disabled
-            elif self._execution_control is not None and not self._health_gates_passed:
-                logger.error(
-                    "Health gates failed, execution permit NOT issued. "
-                    "Execution will remain disabled."
-                )
-
-            await self._start_service_task(
-                "OMSCore",
-                oms_core,
-                lambda: oms_core.run(),
-                lambda task: setattr(self, "_oms_core_task", task),
-            )
-            services_started += 1
-
-            # 4. ExecutionRouter subscribes to SUBMIT_ORDER_COMMANDS (if enabled)
-            # (Already created above for initial reconciliation, just start it now)
-            if self.execution_router_factory is not None:
-                if self.execution_router is None:
-                    # Create execution router if not already created
-                    # (shouldn't happen in live trading, but handle gracefully)
-                    execution_router = self.execution_router_factory()
-                    self.execution_router = execution_router
-                else:
-                    execution_router = self.execution_router
-
-                await self._start_service_task(
-                    "ExecutionRouter",
-                    execution_router,
-                    lambda: execution_router.run(),
-                    lambda task: setattr(self, "_execution_router_task", task),
-                )
-                services_started += 1
-
-            # 5. PositionManager (background sync)
-            if self.position_manager_factory is not None:
-                position_manager = self.position_manager_factory()
-                self.position_manager = position_manager
-                await self._start_service_task(
-                    "PositionManager",
-                    position_manager,
-                    lambda: position_manager.run(),
-                    lambda task: setattr(self, "_position_manager_task", task),
-                )
-                services_started += 1
-
-            # 6. UserStreamAdapter (for live trading, after OMS Core)
-            # Note: User stream adapter may have been created earlier for health gate evaluation
-            if self.user_stream_adapter_factory is not None:
-                if self._user_stream_adapter is None:
-                    # Create user stream adapter if not already created (for health gates)
-                    user_stream_adapter = self.user_stream_adapter_factory()
-                    self._user_stream_adapter = user_stream_adapter
-                else:
-                    # Use existing adapter (created for health gates)
-                    user_stream_adapter = self._user_stream_adapter
-                await self._start_service_task(
-                    "UserStreamAdapter",
-                    user_stream_adapter,
-                    lambda: user_stream_adapter.run(),
-                    lambda task: setattr(self, "_user_stream_task", task),
-                )
-                services_started += 1
-
-            # 7. ReconciliationService (for live trading, after OMS Core and ExecutionRouter)
-            # (Already created above for initial reconciliation, just start periodic task now)
-            if self._reconciliation_service is not None:
-                reconciliation_service = self._reconciliation_service
-                await self._start_reconciliation_task(reconciliation_service)
-                services_started += 1
-            elif self.reconciliation_service_factory is not None:
-                # Fallback: create reconciliation service if not already created
-                # (shouldn't happen in live trading, but handle gracefully)
-                reconciliation_service = self.reconciliation_service_factory()
-                self._reconciliation_service = reconciliation_service
-                await self._start_reconciliation_task(reconciliation_service)
-                services_started += 1
-
-            # 8. CircuitBreaker (for live trading, monitors reconciliation)
-            if self.circuit_breaker_factory is not None:
-                circuit_breaker = self.circuit_breaker_factory()
-                self._circuit_breaker = circuit_breaker
-                await self._start_service(
-                    "CircuitBreaker",
-                    circuit_breaker,
-                    lambda: asyncio.sleep(0),  # Circuit breaker doesn't need async start
-                )
-                services_started += 1
+            # 8. Start services (existing logic)
+            services_started = await self._start_services()
 
             # Record total startup time
             startup_time_ms = (time.perf_counter() - startup_start) * 1000
@@ -529,6 +234,7 @@ class SystemSupervisor:
             )
 
         except Exception as e:
+            services_started = 0
             # Classify and handle error
             error_class = classify_service_error(e)
             error_type = type(e).__name__
@@ -566,6 +272,456 @@ class SystemSupervisor:
                 raise RetryableSupervisorError(
                     f"Retryable error starting SystemSupervisor: {error_msg}"
                 ) from e
+
+    async def _load_config(self) -> dict[str, Any]:
+        """Load configuration (if not already loaded).
+
+        Per flows.mdc §2: Load config, validate, calculate hash, emit ConfigLoadedEvent.
+
+        Returns:
+            Configuration dictionary (empty dict if no config path provided)
+        """
+        if self.config_path is None:
+            # Paper trading mode - config loading is optional
+            logger.debug("Config loading skipped (no config_path provided)")
+            return {}
+
+        try:
+            logger.info("Loading configuration from {path}", path=self.config_path)
+            config = await load_config(config_path=self.config_path, bus=self.bus)
+            logger.info("Configuration loaded successfully")
+            return config
+        except Exception as e:
+            logger.exception(
+                "Error loading configuration: {error}",
+                error=str(e),
+                error_type=type(e).__name__,
+            )
+            # Continue with startup even if config loading fails
+            # (system can operate with defaults)
+            return {}
+
+    async def _init_event_store(self) -> None:
+        """Initialize event store and emit SystemStartedEvent.
+
+        Per flows.mdc §2: Init EventStore (append-only), emit SystemStartedEvent.
+        """
+        # Event store is already initialized when EventBus is created
+        # Just emit SystemStartedEvent
+        try:
+            run_id = str(uuid.uuid4())
+            started_event = SystemStartedEvent()
+            await self.bus.publish(SYSTEM_LIFECYCLE, started_event)
+            logger.info("SystemStartedEvent emitted (run_id: {run_id})", run_id=run_id)
+        except Exception as e:
+            logger.exception(
+                "Error emitting SystemStartedEvent: {error}",
+                error=str(e),
+                error_type=type(e).__name__,
+            )
+            # Continue with startup even if event emission fails
+
+    async def _start_adapters(self) -> None:
+        """Start adapters (market data, user stream).
+
+        Per flows.mdc §2: Start adapters (market data WS, user stream WS, REST clients).
+
+        Note: Market data adapter is started by MarketSupervisor, not SystemSupervisor.
+        User stream adapter is created here but started later as a service.
+        """
+        # Market data adapter is started by MarketSupervisor
+        # User stream adapter is created here but started later as a service
+        # (it may be created earlier for health gate evaluation)
+        logger.debug("Adapters will be started by MarketSupervisor and as services")
+
+    async def _reconstruct_state(self) -> None:
+        """Build projections from event log.
+
+        Per flows.mdc §2: Build projections from event log (OMS, positions, PnL).
+
+        Note: Only for live trading (paper trading doesn't need this).
+        """
+        # Only for live trading (paper trading doesn't need this)
+        if self.position_manager_factory is None or self.bus._store is None:
+            logger.debug("State reconstruction skipped (paper trading mode)")
+            return
+
+        logger.info("Starting state reconstruction from event log")
+        try:
+            # Create OMS core to get store (but don't start it yet)
+            oms_core = self.oms_core_factory()
+            oms_store = oms_core.get_store()
+
+            # Get position manager (create but don't start yet)
+            position_manager = self.position_manager_factory()
+
+            # Create reconstruction service
+            reconstruction_service = StateReconstructionService(
+                event_store=self.bus._store,
+                oms_store=oms_store,
+                position_manager=position_manager,
+            )
+
+            # Reconstruct state
+            await reconstruction_service.reconstruct_all()
+
+            logger.info("State reconstruction complete")
+        except Exception as e:
+            logger.exception(
+                "Error during state reconstruction: {error}",
+                error=str(e),
+                error_type=type(e).__name__,
+            )
+            # Continue with startup even if reconstruction fails
+            # (system can still operate, just without historical state)
+
+    async def _initial_reconciliation(self) -> list[Any]:
+        """Run initial reconciliation snapshot.
+
+        Per flows.mdc §2: Initial reconciliation snapshot
+        (fetch venue orders, compare to projections).
+
+        Returns:
+            List of reconciliation divergences (empty list if reconciliation skipped or failed)
+        """
+        # Only for live trading (paper trading doesn't need this)
+        if self.reconciliation_service_factory is None or self.execution_router_factory is None:
+            logger.debug("Initial reconciliation skipped (paper trading mode)")
+            return []
+
+        logger.info("Starting initial reconciliation snapshot")
+        try:
+            # Create execution router early to get venue adapter
+            # (we'll start it as a service later)
+            execution_router = self.execution_router_factory()
+            self.execution_router = execution_router
+
+            # Create OMS core to get store (but don't start it yet)
+            oms_core = self.oms_core_factory()
+            oms_store = oms_core.get_store()
+            venue_adapter = execution_router.get_adapter()
+
+            # Create reconciliation service for initial reconciliation
+            from polytrader.oms.reconcile import ReconciliationService
+
+            reconciliation_service = ReconciliationService(
+                store=oms_store,
+                venue_adapter=venue_adapter,
+                bus=self.bus,
+            )
+
+            # Run initial reconciliation
+            divergences = await reconciliation_service.reconcile()
+
+            # Check for severe divergences (ERROR severity)
+            severe_divergences = [d for d in divergences if d.severity == "ERROR"]
+
+            if severe_divergences:
+                logger.error(
+                    "Initial reconciliation detected {count} severe divergence(s)",
+                    count=len(severe_divergences),
+                    divergences=[d.model_dump() for d in severe_divergences],
+                )
+            elif divergences:
+                logger.warning(
+                    "Initial reconciliation detected {count} divergence(s) (non-severe)",
+                    count=len(divergences),
+                )
+            else:
+                logger.info("Initial reconciliation complete: no divergences detected")
+
+            # Store reconciliation service for periodic reconciliation later
+            self._reconciliation_service = reconciliation_service
+
+            return divergences
+
+        except Exception as e:
+            logger.exception(
+                "Error during initial reconciliation: {error}",
+                error=str(e),
+                error_type=type(e).__name__,
+            )
+            # Continue with startup even if reconciliation fails
+            # (health gates will fail if reconciliation is required)
+            return []
+
+    async def _evaluate_health_gates(
+        self, initial_reconciliation_divergences: list[Any]
+    ) -> "HealthStatus | None":
+        """Evaluate health gates.
+
+        Per flows.mdc §2: Health gates (market data freshness, user stream, reconciliation, etc.).
+
+        Args:
+            initial_reconciliation_divergences: Divergences from initial reconciliation
+
+        Returns:
+            HealthStatus if evaluated, None if skipped (paper trading mode)
+        """
+        # Only for live trading (paper trading doesn't need this)
+        if not (
+            self.health_service_factory is not None
+            or (
+                self.execution_router_factory is not None
+                and self.user_stream_adapter_factory is not None
+            )
+        ):
+            # Paper trading mode - health gates not required
+            logger.debug("Health gates skipped (paper trading mode)")
+            self._health_gates_passed = True
+            return None
+
+        logger.info("Evaluating health gates")
+        self._health_gates_passed = True
+
+        try:
+            # Create user stream adapter early if needed for health check
+            # (it will be started as a service later)
+            # Note: User stream adapter may not be connected yet at this point,
+            # so we create it but don't require connection for initial health gates
+            user_stream_adapter_for_health = None
+            if self.user_stream_adapter_factory is not None:
+                user_stream_adapter_for_health = self.user_stream_adapter_factory()
+                self._user_stream_adapter = user_stream_adapter_for_health
+
+            # Create health service if factory provided, otherwise create default
+            if self.health_service_factory is not None:
+                health_service = self.health_service_factory()
+            else:
+                # Create default health service with available components
+                # Note: For initial health gates, user stream may not be connected yet,
+                # so we use thresholds that don't require user stream for initial boot
+                initial_thresholds = HealthGateThresholds(
+                    max_market_data_staleness_seconds=(
+                        self.health_gate_thresholds.max_market_data_staleness_seconds
+                    ),
+                    max_reconciliation_divergences=(
+                        self.health_gate_thresholds.max_reconciliation_divergences
+                    ),
+                    max_error_rate=self.health_gate_thresholds.max_error_rate,
+                    require_user_stream=False,  # Don't require user stream for initial boot
+                )
+                health_service = HealthService(
+                    store=self.store,
+                    thresholds=initial_thresholds,
+                    user_stream_adapter=user_stream_adapter_for_health,
+                    circuit_breaker=self._circuit_breaker,
+                    execution_control=self._execution_control,
+                    kill_switch_active=False,  # Kill switch not active on boot
+                    error_rate=None,  # Error rate not tracked on boot
+                    recent_reconcile_events=initial_reconciliation_divergences,
+                )
+
+            # Evaluate health status
+            health_status = await health_service.evaluate()
+
+            # Check all gates
+            all_passed, failed_gates = health_service.check_gates(health_status)
+
+            if all_passed:
+                logger.info(
+                    "All health gates passed",
+                    market_data_fresh=health_status.market_data_fresh,
+                    user_stream_connected=health_status.user_stream_connected,
+                    reconciliation_healthy=health_status.reconciliation_healthy,
+                    error_rate_ok=health_status.error_rate_ok,
+                    circuit_breaker_triggered=health_status.circuit_breaker_triggered,
+                    kill_switch_active=health_status.kill_switch_active,
+                )
+                self._health_gates_passed = True
+            else:
+                logger.error(
+                    "Health gates failed: {gates}",
+                    gates=", ".join(failed_gates),
+                    market_data_fresh=health_status.market_data_fresh,
+                    market_data_staleness_seconds=health_status.market_data_staleness_seconds,
+                    user_stream_connected=health_status.user_stream_connected,
+                    reconciliation_healthy=health_status.reconciliation_healthy,
+                    reconciliation_divergence_count=(health_status.reconciliation_divergence_count),
+                    error_rate_ok=health_status.error_rate_ok,
+                    error_rate=health_status.error_rate,
+                    circuit_breaker_triggered=health_status.circuit_breaker_triggered,
+                    kill_switch_active=health_status.kill_switch_active,
+                )
+                self._health_gates_passed = False
+
+            return health_status
+
+        except Exception as e:
+            logger.exception(
+                "Error during health gate evaluation: {error}",
+                error=str(e),
+                error_type=type(e).__name__,
+            )
+            # Fail health gates if evaluation fails
+            self._health_gates_passed = False
+            return None
+
+    async def _issue_execution_permit(self, health_status: "HealthStatus | None") -> None:
+        """Issue execution permit.
+
+        Per flows.mdc §2: Issue execution permit only if all health gates pass.
+
+        Args:
+            health_status: Health status from health gate evaluation (None if skipped)
+        """
+        if self._execution_control is None:
+            logger.debug("Execution permit skipped (no execution control)")
+            return
+
+        if not self._health_gates_passed:
+            logger.error("Health gates failed, execution permit NOT issued")
+            return
+
+        logger.info("Issuing execution permit (all health gates passed)")
+        try:
+            # Convert health_status to dict for permit event (if available)
+            health_status_dict: dict[str, Any] = {}
+            if health_status is not None:
+                health_status_dict = {
+                    "market_data_fresh": health_status.market_data_fresh,
+                    "market_data_staleness_seconds": (health_status.market_data_staleness_seconds),
+                    "user_stream_connected": health_status.user_stream_connected,
+                    "reconciliation_healthy": health_status.reconciliation_healthy,
+                    "reconciliation_divergence_count": (
+                        health_status.reconciliation_divergence_count
+                    ),
+                    "error_rate_ok": health_status.error_rate_ok,
+                    "error_rate": health_status.error_rate,
+                    "circuit_breaker_triggered": health_status.circuit_breaker_triggered,
+                    "kill_switch_active": health_status.kill_switch_active,
+                }
+
+            # Issue execution permit
+            await self._execution_control.enable_with_permit(
+                permit_type="boot",
+                reason="All health gates passed during boot sequence",
+                health_status=health_status_dict,
+                issued_by="system",
+            )
+            logger.info("Execution permit issued successfully")
+        except Exception as e:
+            logger.exception(
+                "Error issuing execution permit: {error}",
+                error=str(e),
+                error_type=type(e).__name__,
+            )
+            # Don't fail boot if permit issuance fails, but execution will remain disabled
+
+    async def _start_services(self) -> int:
+        """Start all services in correct order.
+
+        Order: PortfolioService → RiskChecker → OMS Core → ExecutionRouter → PositionManager
+        (Subscribers before publishers)
+
+        Returns:
+            Number of services started
+        """
+        services_started = 0
+
+        # 1. PortfolioService subscribes to SIGNALS (must start first)
+        portfolio_service = self.portfolio_service_factory()
+        self.portfolio_service = portfolio_service
+        await self._start_service(
+            "PortfolioService",
+            portfolio_service,
+            lambda: portfolio_service.start(),
+        )
+        services_started += 1
+
+        # 2. RiskChecker subscribes to PROPOSALS (must start before PortfolioService publishes)
+        risk_checker = self.risk_checker_factory()
+        self.risk_checker = risk_checker
+        await self._start_service_task(
+            "RiskChecker",
+            risk_checker,
+            lambda: risk_checker.run(),
+            lambda task: setattr(self, "_risk_checker_task", task),
+        )
+        services_started += 1
+
+        # 3. OMS Core subscribes to APPROVED_PROPOSALS (must start before RiskChecker publishes)
+        oms_core = self.oms_core_factory()
+        self.oms_core = oms_core
+        await self._start_service_task(
+            "OMSCore",
+            oms_core,
+            lambda: oms_core.run(),
+            lambda task: setattr(self, "_oms_core_task", task),
+        )
+        services_started += 1
+
+        # 4. ExecutionRouter subscribes to SUBMIT_ORDER_COMMANDS (if enabled)
+        # (Already created above for initial reconciliation, just start it now)
+        if self.execution_router_factory is not None:
+            if self.execution_router is None:
+                # Create execution router if not already created
+                execution_router = self.execution_router_factory()
+                self.execution_router = execution_router
+            else:
+                execution_router = self.execution_router
+
+            await self._start_service_task(
+                "ExecutionRouter",
+                execution_router,
+                lambda: execution_router.run(),
+                lambda task: setattr(self, "_execution_router_task", task),
+            )
+            services_started += 1
+
+        # 5. PositionManager (background sync)
+        if self.position_manager_factory is not None:
+            position_manager = self.position_manager_factory()
+            self.position_manager = position_manager
+            await self._start_service_task(
+                "PositionManager",
+                position_manager,
+                lambda: position_manager.run(),
+                lambda task: setattr(self, "_position_manager_task", task),
+            )
+            services_started += 1
+
+        # 6. UserStreamAdapter (for live trading, after OMS Core)
+        # Note: User stream adapter may have been created earlier for health gate evaluation
+        if self.user_stream_adapter_factory is not None:
+            if self._user_stream_adapter is None:
+                user_stream_adapter = self.user_stream_adapter_factory()
+                self._user_stream_adapter = user_stream_adapter
+            else:
+                user_stream_adapter = self._user_stream_adapter
+            await self._start_service_task(
+                "UserStreamAdapter",
+                user_stream_adapter,
+                lambda: user_stream_adapter.run(),
+                lambda task: setattr(self, "_user_stream_task", task),
+            )
+            services_started += 1
+
+        # 7. ReconciliationService (for live trading, after OMS Core and ExecutionRouter)
+        # (Already created above for initial reconciliation, just start periodic task now)
+        if self._reconciliation_service is not None:
+            reconciliation_service = self._reconciliation_service
+            await self._start_reconciliation_task(reconciliation_service)
+            services_started += 1
+        elif self.reconciliation_service_factory is not None:
+            # Fallback: create reconciliation service if not already created
+            reconciliation_service = self.reconciliation_service_factory()
+            self._reconciliation_service = reconciliation_service
+            await self._start_reconciliation_task(reconciliation_service)
+            services_started += 1
+
+        # 8. CircuitBreaker (for live trading, monitors reconciliation)
+        if self.circuit_breaker_factory is not None:
+            circuit_breaker = self.circuit_breaker_factory()
+            self._circuit_breaker = circuit_breaker
+            await self._start_service(
+                "CircuitBreaker",
+                circuit_breaker,
+                lambda: asyncio.sleep(0),  # Circuit breaker doesn't need async start
+            )
+            services_started += 1
+
+        return services_started
 
     async def _start_service(
         self,

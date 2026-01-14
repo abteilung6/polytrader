@@ -42,6 +42,16 @@ class FakeMarketDataStore(IMarketDataStore):
         """Get history (not used in tests)."""
         return [self._latest_event] if self._latest_event else []
 
+    def get_all_markets(self) -> list[tuple[str, Outcome]]:
+        """Get all market/outcome pairs that have data in the store.
+
+        Returns:
+            List of (market_slug, outcome) tuples
+        """
+        if self._latest_event is None:
+            return []
+        return [(self._latest_event.market_slug, self._latest_event.outcome)]
+
 
 class FakeUserStreamAdapter:
     """Fake user stream adapter for testing."""

@@ -365,6 +365,7 @@ class PaperTradingSystemBuilder:
             oms_core_factory=oms_core_factory,
             execution_router_factory=execution_router_factory,
             position_manager_factory=position_manager_factory,
+            config_path=self._config_path,
         )
 
     def build_market_supervisor(
@@ -767,6 +768,7 @@ class LiveTradingSystemBuilder:
             position_manager_factory=position_manager_factory,
             circuit_breaker_factory=circuit_breaker_factory,
             execution_control=execution_control,
+            config_path=self._config_path,
         )
 
     def build_market_supervisor(

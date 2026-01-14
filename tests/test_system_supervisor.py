@@ -1439,3 +1439,362 @@ class TestSystemSupervisor:
         # Execution should still be disabled (kill switch deactivation doesn't re-enable)
         # (execution_control.enable() must be called explicitly)
         assert not execution_control.is_enabled()
+
+    @pytest.mark.asyncio
+    async def test_complete_boot_sequence_for_live_trading(self) -> None:
+        """Test complete boot sequence for live trading.
+
+        Per Commit 8: Verify all boot sequence steps execute in order:
+        1. Load config
+        2. Init event store (SystemStartedEvent)
+        3. Start adapters
+        4. Reconstruct state
+        5. Initial reconciliation
+        6. Health gates
+        7. Execution permit
+        8. Start services
+        """
+        bus = EventBus()
+        store = MemoryMarketDataStore()
+
+        # Add fresh market data
+        import time
+
+        from polytrader.events import SYSTEM_LIFECYCLE
+        from polytrader.events.types import (
+            ExecutionPermitEvent,
+            MarketDataEvent,
+            SystemStartedEvent,
+        )
+
+        fresh_event = MarketDataEvent(
+            market_slug="test-market",
+            outcome="UP",
+            best_bid=0.44,
+            best_ask=0.46,
+            ts_mono=time.monotonic() - 1.0,
+        )
+        store.add(fresh_event)
+
+        # Create fake services
+        portfolio_service = FakePortfolioService(bus=bus, store=store, fixed_size_usd=1.0)
+        risk_checker = FakeRiskChecker(
+            bus=bus, engine=RiskEngine(limits=get_default_limits()), store=store
+        )
+        oms_store = InMemoryOrderStore(bus)
+        oms_core = FakeOMSCore(bus=bus, store=oms_store, idempotency_store=IdempotencyStore())
+
+        # Create fake execution router with venue adapter
+        fake_adapter = MagicMock()
+        fake_adapter.get_open_orders = MagicMock(return_value=[])
+        execution_router = FakeExecutionRouter(bus)
+        execution_router._adapter = fake_adapter
+
+        # Create execution control with bus
+        execution_control = ExecutionControl(bus=bus)
+
+        # Create health service factory that will pass
+        def health_service_factory() -> HealthService:
+            return HealthService(
+                store=store,
+                thresholds=HealthGateThresholds(
+                    max_market_data_staleness_seconds=60.0,
+                    max_reconciliation_divergences=0,
+                    max_error_rate=0.1,
+                    require_user_stream=False,
+                ),
+                user_stream_adapter=None,
+                circuit_breaker=None,
+                execution_control=execution_control,
+                kill_switch_active=False,
+                error_rate=None,
+                recent_reconcile_events=[],
+            )
+
+        def portfolio_factory() -> PortfolioService:
+            return portfolio_service
+
+        def risk_factory() -> RiskChecker:
+            return risk_checker
+
+        def oms_factory() -> OMSCore:
+            return oms_core
+
+        def execution_router_factory() -> ExecutionRouter:
+            return execution_router
+
+        def reconciliation_factory() -> ReconciliationService:
+            return ReconciliationService(store=oms_store, venue_adapter=fake_adapter, bus=bus)
+
+        # Subscribe to boot sequence events
+        lifecycle_queue = bus.subscribe(SYSTEM_LIFECYCLE)
+
+        supervisor = SystemSupervisor(
+            bus=bus,
+            store=store,
+            portfolio_service_factory=portfolio_factory,
+            risk_checker_factory=risk_factory,
+            oms_core_factory=oms_factory,
+            execution_router_factory=execution_router_factory,
+            reconciliation_service_factory=reconciliation_factory,
+            execution_control=execution_control,
+            health_service_factory=health_service_factory,
+        )
+
+        await supervisor.start()
+
+        # Verify all services started
+        assert supervisor.portfolio_service is not None
+        assert supervisor.risk_checker is not None
+        assert supervisor.oms_core is not None
+        assert supervisor.execution_router is not None
+
+        # Verify execution was enabled
+        assert execution_control.is_enabled()
+
+        # Verify boot sequence events were published
+        events_received: list[Any] = []
+        try:
+            # Collect events with timeout
+            while len(events_received) < 3:  # SystemStarted, ConfigLoaded (maybe), ExecutionPermit
+                event = await asyncio.wait_for(lifecycle_queue.get(), timeout=2.0)
+                events_received.append(event)
+        except TimeoutError:
+            pass
+
+        # Verify SystemStartedEvent was published
+        system_started = next(
+            (e for e in events_received if isinstance(e, SystemStartedEvent)), None
+        )
+        assert system_started is not None, "SystemStartedEvent was not published"
+
+        # Verify ExecutionPermitEvent was published
+        execution_permit = next(
+            (e for e in events_received if isinstance(e, ExecutionPermitEvent)), None
+        )
+        assert execution_permit is not None, "ExecutionPermitEvent was not published"
+        assert execution_permit.permit_type == "boot"
+
+        await supervisor.stop()
+
+    @pytest.mark.asyncio
+    async def test_boot_sequence_with_health_gate_failures(self) -> None:
+        """Test boot sequence with health gate failures.
+
+        Per Commit 8: Verify boot completes but execution is NOT enabled when health gates fail.
+        """
+        bus = EventBus()
+        store = MemoryMarketDataStore()
+
+        # Add stale market data (will cause health gate failure)
+        import time
+
+        from polytrader.events.types import MarketDataEvent
+
+        stale_event = MarketDataEvent(
+            market_slug="test-market",
+            outcome="UP",
+            best_bid=0.44,
+            best_ask=0.46,
+            ts_mono=time.monotonic() - 120.0,  # 120 seconds old (stale)
+        )
+        store.add(stale_event)
+
+        # Create fake services
+        portfolio_service = FakePortfolioService(bus=bus, store=store, fixed_size_usd=1.0)
+        risk_checker = FakeRiskChecker(
+            bus=bus, engine=RiskEngine(limits=get_default_limits()), store=store
+        )
+        oms_store = InMemoryOrderStore(bus)
+        oms_core = FakeOMSCore(bus=bus, store=oms_store, idempotency_store=IdempotencyStore())
+
+        # Create fake execution router
+        fake_adapter = MagicMock()
+        fake_adapter.get_open_orders = AsyncMock(return_value=[])
+        execution_router = FakeExecutionRouter(bus)
+        execution_router._adapter = fake_adapter
+
+        # Create execution control
+        execution_control = ExecutionControl(bus=bus)
+
+        # Create health service factory that will fail (stale data)
+        def health_service_factory() -> HealthService:
+            return HealthService(
+                store=store,
+                thresholds=HealthGateThresholds(
+                    max_market_data_staleness_seconds=60.0,  # Stale data will fail
+                    max_reconciliation_divergences=0,
+                    max_error_rate=0.1,
+                    require_user_stream=False,
+                ),
+                user_stream_adapter=None,
+                circuit_breaker=None,
+                execution_control=execution_control,
+                kill_switch_active=False,
+                error_rate=None,
+                recent_reconcile_events=[],
+            )
+
+        def portfolio_factory() -> PortfolioService:
+            return portfolio_service
+
+        def risk_factory() -> RiskChecker:
+            return risk_checker
+
+        def oms_factory() -> OMSCore:
+            return oms_core
+
+        def execution_router_factory() -> ExecutionRouter:
+            return execution_router
+
+        def reconciliation_factory() -> ReconciliationService:
+            return ReconciliationService(store=oms_store, venue_adapter=fake_adapter, bus=bus)
+
+        supervisor = SystemSupervisor(
+            bus=bus,
+            store=store,
+            portfolio_service_factory=portfolio_factory,
+            risk_checker_factory=risk_factory,
+            oms_core_factory=oms_factory,
+            execution_router_factory=execution_router_factory,
+            reconciliation_service_factory=reconciliation_factory,
+            execution_control=execution_control,
+            health_service_factory=health_service_factory,
+        )
+
+        await supervisor.start()
+
+        # Verify services started (boot should complete)
+        assert supervisor.portfolio_service is not None
+        assert supervisor.oms_core is not None
+
+        # Verify execution was NOT enabled (health gates failed)
+        assert not execution_control.is_enabled()
+        assert not supervisor._health_gates_passed
+
+        await supervisor.stop()
+
+    @pytest.mark.asyncio
+    async def test_boot_sequence_for_paper_trading(self) -> None:
+        """Test boot sequence for paper trading (simplified).
+
+        Per Commit 8: Verify paper trading skips boot sequence steps gracefully.
+        """
+        bus = EventBus()
+        store = MemoryMarketDataStore()
+
+        # Create fake services (no execution router, no reconciliation, no health service)
+        portfolio_service = FakePortfolioService(bus=bus, store=store, fixed_size_usd=1.0)
+        risk_checker = FakeRiskChecker(
+            bus=bus, engine=RiskEngine(limits=get_default_limits()), store=store
+        )
+        oms_store = InMemoryOrderStore(bus)
+        oms_core = FakeOMSCore(bus=bus, store=oms_store, idempotency_store=IdempotencyStore())
+
+        def portfolio_factory() -> PortfolioService:
+            return portfolio_service
+
+        def risk_factory() -> RiskChecker:
+            return risk_checker
+
+        def oms_factory() -> OMSCore:
+            return oms_core
+
+        # Paper trading: no execution router, no reconciliation, no health service
+        supervisor = SystemSupervisor(
+            bus=bus,
+            store=store,
+            portfolio_service_factory=portfolio_factory,
+            risk_checker_factory=risk_factory,
+            oms_core_factory=oms_factory,
+            execution_router_factory=None,  # Paper trading
+            reconciliation_service_factory=None,  # Paper trading
+            execution_control=None,  # Paper trading
+            health_service_factory=None,  # Paper trading
+        )
+
+        # Boot should complete successfully (simplified boot sequence)
+        await supervisor.start()
+
+        # Verify services started
+        assert supervisor.portfolio_service is not None
+        assert supervisor.risk_checker is not None
+        assert supervisor.oms_core is not None
+
+        # Verify health gates passed (skipped for paper trading)
+        assert supervisor._health_gates_passed
+
+        await supervisor.stop()
+
+    @pytest.mark.asyncio
+    async def test_boot_sequence_with_missing_components(self) -> None:
+        """Test boot sequence with missing components (graceful degradation).
+
+        Per Commit 8: Verify boot completes gracefully when optional components are missing.
+        """
+        bus = EventBus()
+        store = MemoryMarketDataStore()
+
+        # Create fake services (missing position manager, missing user stream)
+        portfolio_service = FakePortfolioService(bus=bus, store=store, fixed_size_usd=1.0)
+        risk_checker = FakeRiskChecker(
+            bus=bus, engine=RiskEngine(limits=get_default_limits()), store=store
+        )
+        oms_store = InMemoryOrderStore(bus)
+        oms_core = FakeOMSCore(bus=bus, store=oms_store, idempotency_store=IdempotencyStore())
+
+        # Create fake execution router
+        fake_adapter = MagicMock()
+        fake_adapter.get_open_orders = MagicMock(return_value=[])
+        execution_router = FakeExecutionRouter(bus)
+        execution_router._adapter = fake_adapter
+
+        # Create execution control
+        execution_control = ExecutionControl(bus=bus)
+
+        def portfolio_factory() -> PortfolioService:
+            return portfolio_service
+
+        def risk_factory() -> RiskChecker:
+            return risk_checker
+
+        def oms_factory() -> OMSCore:
+            return oms_core
+
+        def execution_router_factory() -> ExecutionRouter:
+            return execution_router
+
+        def reconciliation_factory() -> ReconciliationService:
+            return ReconciliationService(store=oms_store, venue_adapter=fake_adapter, bus=bus)
+
+        # Missing: position_manager_factory, user_stream_adapter_factory
+        supervisor = SystemSupervisor(
+            bus=bus,
+            store=store,
+            portfolio_service_factory=portfolio_factory,
+            risk_checker_factory=risk_factory,
+            oms_core_factory=oms_factory,
+            execution_router_factory=execution_router_factory,
+            position_manager_factory=None,  # Missing component
+            user_stream_adapter_factory=None,  # Missing component
+            reconciliation_service_factory=reconciliation_factory,
+            execution_control=execution_control,
+            health_service_factory=None,  # Will use default
+        )
+
+        # Boot should complete successfully (graceful degradation)
+        await supervisor.start()
+
+        # Verify services started
+        assert supervisor.portfolio_service is not None
+        assert supervisor.oms_core is not None
+        assert supervisor.execution_router is not None
+
+        # Verify position manager is None (missing component)
+        assert supervisor.position_manager is None
+
+        # Verify user stream adapter is None (missing component)
+        assert supervisor._user_stream_adapter is None
+
+        # Boot should still complete
+        await supervisor.stop()

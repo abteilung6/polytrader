@@ -256,19 +256,49 @@ class HealthService:
         """Check market data freshness.
 
         Args:
-            market_slug: Market slug to check (optional)
-            outcome: Market outcome to check (optional)
+            market_slug: Market slug to check (optional, checks all if None)
+            outcome: Market outcome to check (optional, checks all if None)
 
         Returns:
-            Tuple of (is_fresh, staleness_seconds)
+            Tuple of (is_fresh, staleness_seconds). If checking multiple markets,
+            returns False if ANY market is stale, and the maximum staleness_seconds.
         """
-        # If no market specified, we can't check freshness
-        # For now, return True if no market specified (caller should provide market)
+        # If no specific market specified, check all markets in the store
         if market_slug is None or outcome is None:
-            # No specific market to check - assume fresh if we have any data
-            # This is a simplified check - in practice, caller should provide market
-            return (True, None)
+            # Get all markets from store
+            try:
+                all_markets = self._store.get_all_markets()
+            except AttributeError:
+                # Store doesn't implement get_all_markets - can't check
+                # Return False (not fresh) to be safe
+                return (False, None)
 
+            if not all_markets:
+                # No market data available at all
+                return (False, None)
+
+            # Check all markets - fail if ANY is stale
+            current_time = time.monotonic()
+            max_staleness_seconds: float | None = None
+            all_fresh = True
+
+            for ms, oc in all_markets:
+                latest = self._store.latest(ms, oc)
+                if latest is None:
+                    # Missing data for this market - consider stale
+                    all_fresh = False
+                    continue
+
+                staleness = current_time - latest.ts_mono
+                if max_staleness_seconds is None or staleness > max_staleness_seconds:
+                    max_staleness_seconds = staleness
+
+                if staleness > self._thresholds.max_market_data_staleness_seconds:
+                    all_fresh = False
+
+            return (all_fresh, max_staleness_seconds)
+
+        # Check specific market
         latest = self._store.latest(market_slug, outcome)
         if latest is None:
             # No market data available
