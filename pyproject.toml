@@ -42,4 +42,6 @@ ignore_missing_imports = false
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 pythonpath = ["."]
+# Parallel execution is enabled via Makefile targets using pytest-xdist
+# Use: make test (parallel) or pytest tests/ -v (sequential)
 
