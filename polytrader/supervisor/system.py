@@ -305,14 +305,25 @@ class SystemSupervisor:
         """Initialize event store and emit SystemStartedEvent.
 
         Per flows.mdc §2: Init EventStore (append-only), emit SystemStartedEvent.
+        The run_id is explicitly generated and set in the event to ensure all
+        events in this system run share the same run_id for correlation.
         """
         # Event store is already initialized when EventBus is created
-        # Just emit SystemStartedEvent
+        # Generate run_id and emit SystemStartedEvent with explicit run_id
         try:
+            # Generate run_id for this system run
+            # This ensures SystemStartedEvent has the run_id we log
             run_id = str(uuid.uuid4())
-            started_event = SystemStartedEvent()
+
+            # Create SystemStartedEvent with explicit run_id
+            # This allows correlating all events from this system run
+            started_event = SystemStartedEvent(run_id=run_id)
             await self.bus.publish(SYSTEM_LIFECYCLE, started_event)
-            logger.info("SystemStartedEvent emitted (run_id: {run_id})", run_id=run_id)
+
+            logger.info(
+                "SystemStartedEvent emitted (run_id: {run_id})",
+                run_id=run_id,
+            )
         except Exception as e:
             logger.exception(
                 "Error emitting SystemStartedEvent: {error}",

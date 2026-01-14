@@ -1567,6 +1567,9 @@ class TestSystemSupervisor:
             (e for e in events_received if isinstance(e, SystemStartedEvent)), None
         )
         assert system_started is not None, "SystemStartedEvent was not published"
+        # Verify run_id is set (per flows.mdc §2: SystemStartedEvent includes run_id)
+        assert system_started.run_id is not None
+        assert len(system_started.run_id) > 0  # Should be a valid UUID string
 
         # Verify ExecutionPermitEvent was published
         execution_permit = next(

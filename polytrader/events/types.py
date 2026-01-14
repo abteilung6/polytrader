@@ -94,6 +94,14 @@ class SystemStartedEvent(Event):
     This event marks the beginning of a system run and is emitted
     once at process startup. It allows correlating all events from
     a single process execution.
+
+    Per flows.mdc §2: SystemStartedEvent includes run_id for correlation.
+    The run_id should be explicitly set during boot to ensure all events
+    in the same run share the same run_id. If not explicitly set, it uses
+    the default from Event base class (get_run_id()).
+
+    Attributes:
+        run_id: Process run ID (inherited from Event, can be explicitly set)
     """
 
     source: EventSource = Field(default=EventSource.OPS)
