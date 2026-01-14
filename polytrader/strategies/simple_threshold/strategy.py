@@ -1,6 +1,9 @@
 """Simple threshold strategy implementation."""
 
+import time
+
 from polytrader.events.types import MarketDataEvent, SignalEvent
+from polytrader.obs.metrics import record_strategy_eval, record_strategy_eval_latency
 from polytrader.store import IMarketDataStore
 from polytrader.strategies.base import IStrategy
 from polytrader.types import Position
@@ -49,6 +52,7 @@ class SimpleThresholdStrategy(IStrategy):
         """Evaluate market data and produce signal.
 
         Fast, synchronous evaluation (< 1ms).
+        Per observability.mdc §4: Emits strategy metrics for monitoring.
 
         Args:
             market_data: Current market data snapshot
@@ -57,58 +61,71 @@ class SimpleThresholdStrategy(IStrategy):
         Returns:
             SignalEvent if signal generated, None otherwise
         """
-        # Filter by market
-        if market_data.market_slug != self.market_slug:
-            return None
+        # Start timing for latency measurement (monotonic clock)
+        start_time = time.perf_counter()
+        strategy_id = "simple_threshold"
 
-        # Check history requirement
-        history = self.store.history(market_data.market_slug, market_data.outcome)
-        if len(history) < self.min_history:
-            return None
+        try:
+            # Filter by market
+            if market_data.market_slug != self.market_slug:
+                return None
 
-        mid_price = market_data.mid
+            # Check history requirement
+            history = self.store.history(market_data.market_slug, market_data.outcome)
+            if len(history) < self.min_history:
+                return None
 
-        # Generate signal if price is attractive (below threshold)
-        if mid_price < self.buy_threshold:
-            # Calculate probabilities
-            # If price is low, UP is more likely to win
-            # Simple model: p_up = 1 - price, p_down = price
-            p_up = 1.0 - mid_price
-            p_down = mid_price
+            mid_price = market_data.mid
 
-            # Ensure probabilities sum to 1.0 and are in valid range
-            p_up = max(0.0, min(1.0, p_up))
-            p_down = max(0.0, min(1.0, p_down))
-            # Normalize to ensure sum = 1.0
-            total = p_up + p_down
-            if total > 0:
-                p_up = p_up / total
-                p_down = p_down / total
+            # Generate signal if price is attractive (below threshold)
+            if mid_price < self.buy_threshold:
+                # Calculate probabilities
+                # If price is low, UP is more likely to win
+                # Simple model: p_up = 1 - price, p_down = price
+                p_up = 1.0 - mid_price
+                p_down = mid_price
 
-            # Calculate edge (how far below threshold)
-            edge = self.buy_threshold - mid_price
+                # Ensure probabilities sum to 1.0 and are in valid range
+                p_up = max(0.0, min(1.0, p_up))
+                p_down = max(0.0, min(1.0, p_down))
+                # Normalize to ensure sum = 1.0
+                total = p_up + p_down
+                if total > 0:
+                    p_up = p_up / total
+                    p_down = p_down / total
 
-            # Calculate confidence (normalized edge, clamped to [0, 1])
-            # Confidence = edge / threshold (how much below threshold as fraction)
-            confidence = min(edge / self.buy_threshold, 1.0) if self.buy_threshold > 0 else 0.0
+                # Calculate edge (how far below threshold)
+                edge = self.buy_threshold - mid_price
 
-            return SignalEvent(
-                market_slug=market_data.market_slug,
-                outcome="UP",  # Always UP for BUY signals
-                p_up=p_up,
-                p_down=p_down,
-                edge=edge,
-                confidence=confidence,
-                model_id="simple_threshold",
-                model_version="1.0.0",
-                rationale=(
-                    f"Price {mid_price:.4f} below buy threshold {self.buy_threshold:.4f} "
-                    f"(edge: {edge:.4f}, confidence: {confidence:.4f})"
-                ),
-                correlation_id=market_data.correlation_id,
-            )
+                # Calculate confidence (normalized edge, clamped to [0, 1])
+                # Confidence = edge / threshold (how much below threshold as fraction)
+                confidence = min(edge / self.buy_threshold, 1.0) if self.buy_threshold > 0 else 0.0
 
-        return None  # No signal
+                signal = SignalEvent(
+                    market_slug=market_data.market_slug,
+                    outcome="UP",  # Always UP for BUY signals
+                    p_up=p_up,
+                    p_down=p_down,
+                    edge=edge,
+                    confidence=confidence,
+                    model_id="simple_threshold",
+                    model_version="1.0.0",
+                    rationale=(
+                        f"Price {mid_price:.4f} below buy threshold {self.buy_threshold:.4f} "
+                        f"(edge: {edge:.4f}, confidence: {confidence:.4f})"
+                    ),
+                    correlation_id=market_data.correlation_id,
+                )
+
+                return signal
+
+            return None  # No signal
+        finally:
+            # Always emit strategy metrics per observability.mdc §4
+            # This ensures metrics are recorded even for early returns
+            latency_ms = (time.perf_counter() - start_time) * 1000.0  # Convert to milliseconds
+            record_strategy_eval(strategy_id=strategy_id)
+            record_strategy_eval_latency(strategy_id=strategy_id, latency_ms=latency_ms)
 
     async def run(self) -> None:
         """Optional background tasks (not needed for stateless strategy)."""

@@ -1,6 +1,7 @@
 """Convert targets to order intents per flows.mdc §5."""
 
 from polytrader.events.types import MarketDataEvent, OrderIntentEvent, SignalEvent
+from polytrader.obs.metrics import record_order_intent
 from polytrader.portfolio.models import Target
 
 
@@ -51,7 +52,7 @@ def convert_target_to_intent(
 
     reason = f"{target.rationale}. Order size: {size:.2f} USD, limit_price: {limit_price:.4f}"
 
-    return OrderIntentEvent(
+    intent = OrderIntentEvent(
         market_slug=target.market_slug,
         outcome=target.outcome,
         side=side,
@@ -62,3 +63,13 @@ def convert_target_to_intent(
         correlation_id=signal.correlation_id,  # Propagate from signal
         ttl_s=60.0,  # Default TTL
     )
+
+    # Emit order intent metric per observability.mdc §4
+    record_order_intent(
+        strategy_id=signal.model_id,  # Use model_id from signal as strategy_id
+        market_slug=target.market_slug,
+        outcome=target.outcome,
+        side=side,
+    )
+
+    return intent
