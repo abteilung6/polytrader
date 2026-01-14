@@ -422,3 +422,48 @@ class TestOrderStoreReplay:
 
         # New order should exist
         assert order_store.get_order_by_client_id("client-2") is not None
+
+    async def test_rebuild_from_events_clears_venue_order_ids(
+        self, order_store: InMemoryOrderStore
+    ) -> None:
+        """Test that rebuild_from_events clears stale venue_order_id mappings.
+
+        Per review fix: Verify that _venue_order_ids is cleared during
+        state reconstruction to prevent stale mappings from previous state.
+        """
+        from polytrader.events.types import OrderAckEvent, OrderSubmittedEvent
+
+        # Create an order with venue_order_id (simulating previous state)
+        intent1 = create_test_intent()
+        order1 = await order_store.create_order(intent1, "client-1")
+        # Simulate submit and ack with venue_order_id
+        submitted_event1 = OrderSubmittedEvent(order_id=order1.order_id, client_order_id="client-1")
+        order_store.handle_order_submitted(submitted_event1)
+        ack_event1 = OrderAckEvent(order_id=order1.order_id, venue_order_id="venue-old-123")
+        order_store.handle_order_ack(ack_event1)
+
+        # Verify venue_order_id mapping exists
+        assert order_store.get_order_by_venue_id("venue-old-123") is not None
+
+        # Rebuild from events with a different order
+        # Must include SUBMITTED event before ACK (FSM requirement)
+        intent2 = create_test_intent(market_slug="different-market")
+        created_event2 = OrderCreatedEvent(
+            order_id="order-2",
+            client_order_id="client-2",
+            intent=intent2,
+            correlation_id=intent2.correlation_id,
+        )
+        submitted_event2 = OrderSubmittedEvent(order_id="order-2", client_order_id="client-2")
+        ack_event2 = OrderAckEvent(order_id="order-2", venue_order_id="venue-new-456")
+
+        order_store.rebuild_from_events([created_event2, submitted_event2, ack_event2])
+
+        # Old venue_order_id mapping should be cleared
+        assert order_store.get_order_by_venue_id("venue-old-123") is None
+
+        # New venue_order_id mapping should exist
+        assert order_store.get_order_by_venue_id("venue-new-456") is not None
+        order2 = order_store.get_order_by_venue_id("venue-new-456")
+        assert order2 is not None
+        assert order2.order_id == "order-2"

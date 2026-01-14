@@ -379,8 +379,11 @@ class InMemoryOrderStore(IEventHandlingOrderStore):
         )
 
         # Clear existing state
+        # Per review fix: Must clear all mappings including venue_order_ids
+        # to prevent stale mappings from previous state
         self._orders.clear()
         self._client_order_ids.clear()
+        self._venue_order_ids.clear()
         self._order_events.clear()
 
         # Replay events in order
