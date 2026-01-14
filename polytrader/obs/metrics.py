@@ -419,3 +419,50 @@ def set_md_spread(spread: float, market_slug: str, outcome: str) -> None:
     collector.set_gauge(
         "md_spread", spread, labels={"market_slug": market_slug, "outcome": outcome}
     )
+
+
+# Strategy metrics functions per observability.mdc §4
+
+
+def record_strategy_eval(strategy_id: str) -> None:
+    """Record a strategy evaluation per observability.mdc §4.
+
+    Args:
+        strategy_id: Strategy identifier (e.g., "simple_threshold")
+    """
+    collector = get_metrics_collector()
+    collector.increment_counter("strategy_eval_total", labels={"strategy_id": strategy_id})
+
+
+def record_strategy_eval_latency(strategy_id: str, latency_ms: float) -> None:
+    """Record strategy evaluation latency per observability.mdc §4.
+
+    Args:
+        strategy_id: Strategy identifier (e.g., "simple_threshold")
+        latency_ms: Evaluation latency in milliseconds
+    """
+    collector = get_metrics_collector()
+    collector.record_histogram(
+        "strategy_eval_latency_ms", latency_ms, labels={"strategy_id": strategy_id}
+    )
+
+
+def record_order_intent(strategy_id: str, market_slug: str, outcome: str, side: str) -> None:
+    """Record an order intent per observability.mdc §4.
+
+    Args:
+        strategy_id: Strategy identifier (e.g., "simple_threshold")
+        market_slug: Market slug label
+        outcome: Outcome label (UP/DOWN)
+        side: Trade side label (BUY/SELL)
+    """
+    collector = get_metrics_collector()
+    collector.increment_counter(
+        "order_intents_total",
+        labels={
+            "strategy_id": strategy_id,
+            "market_slug": market_slug,
+            "outcome": outcome,
+            "side": side,
+        },
+    )
