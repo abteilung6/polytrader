@@ -332,3 +332,90 @@ def record_projected_exposure(exposure: float) -> None:
     """
     collector = get_metrics_collector()
     collector.set_gauge("risk_projected_exposure", exposure)
+
+
+# Market Data metrics functions per observability.mdc §4
+
+
+def record_md_update(market_slug: str | None = None, outcome: str | None = None) -> None:
+    """Record a market data update per observability.mdc §4.
+
+    Args:
+        market_slug: Optional market slug label
+        outcome: Optional outcome label (UP/DOWN)
+    """
+    collector = get_metrics_collector()
+    labels: dict[str, str] = {}
+    if market_slug:
+        labels["market_slug"] = market_slug
+    if outcome:
+        labels["outcome"] = outcome
+    collector.increment_counter("md_updates_total", labels=labels if labels else None)
+
+
+def record_md_staleness(staleness_seconds: float, market_slug: str | None = None) -> None:
+    """Record market data staleness per observability.mdc §4.
+
+    Args:
+        staleness_seconds: Staleness in seconds (time since last update)
+        market_slug: Optional market slug label
+    """
+    collector = get_metrics_collector()
+    labels: dict[str, str] = {}
+    if market_slug:
+        labels["market_slug"] = market_slug
+    collector.set_gauge(
+        "md_staleness_seconds", staleness_seconds, labels=labels if labels else None
+    )
+
+
+def record_md_gap(market_slug: str | None = None) -> None:
+    """Record a market data gap per observability.mdc §4.
+
+    Args:
+        market_slug: Optional market slug label
+    """
+    collector = get_metrics_collector()
+    labels: dict[str, str] = {}
+    if market_slug:
+        labels["market_slug"] = market_slug
+    collector.increment_counter("md_gap_total", labels=labels if labels else None)
+
+
+def record_md_reconnect(market_slug: str | None = None) -> None:
+    """Record a market data reconnect per observability.mdc §4.
+
+    Args:
+        market_slug: Optional market slug label
+    """
+    collector = get_metrics_collector()
+    labels: dict[str, str] = {}
+    if market_slug:
+        labels["market_slug"] = market_slug
+    collector.increment_counter("md_reconnect_total", labels=labels if labels else None)
+
+
+def set_md_book_mid(mid: float, market_slug: str, outcome: str) -> None:
+    """Set market data book mid price per observability.mdc §4.
+
+    Args:
+        mid: Mid price (average of bid and ask)
+        market_slug: Market slug label
+        outcome: Outcome label (UP/DOWN)
+    """
+    collector = get_metrics_collector()
+    collector.set_gauge("md_book_mid", mid, labels={"market_slug": market_slug, "outcome": outcome})
+
+
+def set_md_spread(spread: float, market_slug: str, outcome: str) -> None:
+    """Set market data spread per observability.mdc §4.
+
+    Args:
+        spread: Spread (ask - bid)
+        market_slug: Market slug label
+        outcome: Outcome label (UP/DOWN)
+    """
+    collector = get_metrics_collector()
+    collector.set_gauge(
+        "md_spread", spread, labels={"market_slug": market_slug, "outcome": outcome}
+    )
