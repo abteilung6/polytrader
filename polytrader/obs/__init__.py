@@ -3,6 +3,11 @@
 Per observability.mdc: Institutional systems are debuggable by design.
 """
 
+from polytrader.obs.logging import (
+    bind_correlation_context,
+    bind_order_context,
+    bind_strategy_context,
+)
 from polytrader.obs.metrics import (
     get_metrics_collector,
     record_md_gap,
@@ -21,6 +26,9 @@ from polytrader.obs.metrics import (
 )
 
 __all__ = [
+    "bind_correlation_context",
+    "bind_order_context",
+    "bind_strategy_context",
     "get_metrics_collector",
     "record_md_gap",
     "record_md_reconnect",
