@@ -28,8 +28,11 @@ from polytrader.supervisor import MarketSupervisor, SystemSupervisor
 
 if TYPE_CHECKING:
     from polytrader.adapters import IMarketDataAdapter
+    from polytrader.adapters.polymarket.user_stream import UserStreamAdapter
     from polytrader.clob import IClobClientFactory
     from polytrader.observer import IObserver
+    from polytrader.oms.reconcile import ReconciliationService
+    from polytrader.ops.control import CircuitBreaker, ExecutionControl
     from polytrader.strategies import IStrategy
 
 
@@ -243,8 +246,13 @@ class PaperTradingSystemBuilder:
             )
         return self._strategy_factory
 
-    def _create_execution_router_factory(self) -> Callable[[], ExecutionRouter]:
+    def _create_execution_router_factory(
+        self, execution_control: "ExecutionControl | None" = None
+    ) -> Callable[[], ExecutionRouter]:
         """Create execution router factory.
+
+        Args:
+            execution_control: Execution control instance (optional)
 
         Returns:
             Factory function for ExecutionRouter
@@ -259,7 +267,9 @@ class PaperTradingSystemBuilder:
                 rejection_probability=self._rejection_probability,
                 latency_ms=self._latency_ms,
             )
-            return ExecutionRouter(bus=self._bus, adapter=adapter)
+            return ExecutionRouter(
+                bus=self._bus, adapter=adapter, execution_control=execution_control
+            )
 
         return factory
 
@@ -342,7 +352,10 @@ class PaperTradingSystemBuilder:
         portfolio_service_factory = self._create_portfolio_service_factory(position_manager_factory)
         risk_checker_factory = self._create_risk_checker_factory()
         oms_core_factory = self._create_oms_core_factory()
-        execution_router_factory = self._create_execution_router_factory()
+
+        # Get execution_control from circuit breaker factory (if available)
+        # Paper trading doesn't need circuit breaker, so pass None
+        execution_router_factory = self._create_execution_router_factory(None)
 
         return SystemSupervisor(
             bus=self._bus,
@@ -576,14 +589,21 @@ class LiveTradingSystemBuilder:
             self._clob_client_factory = create_clob_client_factory(self._secrets)
         return self._clob_client_factory
 
-    def _create_execution_router_factory(self) -> Callable[[], ExecutionRouter]:
+    def _create_execution_router_factory(
+        self, execution_control: "ExecutionControl | None" = None
+    ) -> Callable[[], ExecutionRouter]:
         """Create execution router factory.
+
+        Args:
+            execution_control: Execution control instance (optional)
 
         Returns:
             Factory function for ExecutionRouter
         """
         clob_client_factory = self._get_clob_client_factory()
-        return create_execution_router_factory(self._bus, clob_client_factory)
+        return create_execution_router_factory(
+            self._bus, clob_client_factory, execution_control=execution_control
+        )
 
     def _create_position_manager_factory(self) -> Callable[[], IPositionManager]:
         """Create position manager factory.
@@ -596,7 +616,9 @@ class LiveTradingSystemBuilder:
             self._bus, clob_client_factory, sync_interval=self._sync_interval
         )
 
-    def _create_user_stream_adapter_factory(self) -> Callable[[], Any] | None:
+    def _create_user_stream_adapter_factory(
+        self,
+    ) -> Callable[[], "UserStreamAdapter"] | None:
         """Create user stream adapter factory.
 
         Returns:
@@ -612,7 +634,9 @@ class LiveTradingSystemBuilder:
 
         return factory
 
-    def _create_reconciliation_service_factory(self) -> Callable[[], Any] | None:
+    def _create_reconciliation_service_factory(
+        self,
+    ) -> Callable[[], "ReconciliationService"] | None:
         """Create reconciliation service factory.
 
         Returns:
@@ -629,7 +653,9 @@ class LiveTradingSystemBuilder:
 
         # We need the venue adapter from ExecutionRouter
         # Since we can't easily access it, we'll create it from the factory
-        execution_router_factory = self._create_execution_router_factory()
+        # Get execution_control from circuit breaker factory
+        circuit_breaker_factory, execution_control = self._create_circuit_breaker_factory()
+        execution_router_factory = self._create_execution_router_factory(execution_control)
 
         def factory() -> ReconciliationService:
             execution_router = execution_router_factory()
@@ -642,7 +668,7 @@ class LiveTradingSystemBuilder:
 
     def _create_circuit_breaker_factory(
         self,
-    ) -> tuple[Callable[[], Any] | None, Any | None]:
+    ) -> tuple[Callable[[], "CircuitBreaker"] | None, "ExecutionControl" | None]:
         """Create circuit breaker factory and execution control.
 
         Returns:
@@ -650,7 +676,7 @@ class LiveTradingSystemBuilder:
         """
         from polytrader.ops import CircuitBreaker, CircuitBreakerThresholds, ExecutionControl
 
-        execution_control = ExecutionControl()
+        execution_control = ExecutionControl(bus=self._bus)
 
         def factory() -> CircuitBreaker:
             thresholds = CircuitBreakerThresholds()  # Use defaults
@@ -726,7 +752,10 @@ class LiveTradingSystemBuilder:
         portfolio_service_factory = self._create_portfolio_service_factory(position_manager_factory)
         risk_checker_factory = self._create_risk_checker_factory()
         oms_core_factory = self._create_oms_core_factory()
-        execution_router_factory = self._create_execution_router_factory()
+
+        # Get execution_control from circuit breaker factory
+        circuit_breaker_factory, execution_control = self._create_circuit_breaker_factory()
+        execution_router_factory = self._create_execution_router_factory(execution_control)
 
         return SystemSupervisor(
             bus=self._bus,
@@ -736,6 +765,8 @@ class LiveTradingSystemBuilder:
             oms_core_factory=oms_core_factory,
             execution_router_factory=execution_router_factory,
             position_manager_factory=position_manager_factory,
+            circuit_breaker_factory=circuit_breaker_factory,
+            execution_control=execution_control,
         )
 
     def build_market_supervisor(

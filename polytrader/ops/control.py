@@ -9,11 +9,18 @@ This module provides:
 - CircuitBreakerThresholds: Configuration for circuit breaker thresholds
 """
 
+from typing import Any, Literal
+
 from pydantic import BaseModel, Field
 
-from polytrader.events import CIRCUIT_BREAKER
+from polytrader.events import CIRCUIT_BREAKER, SYSTEM_LIFECYCLE
 from polytrader.events.bus import EventBus
-from polytrader.events.types import CircuitBreakerEvent, ReconcileEvent
+from polytrader.events.types import (
+    CircuitBreakerEvent,
+    ExecutionPermitEvent,
+    KillSwitchEvent,
+    ReconcileEvent,
+)
 from polytrader.logging_config import logger
 
 
@@ -59,29 +66,114 @@ class ExecutionControl:
 
     Attributes:
         execution_enabled: Whether execution is enabled (default: False)
+        kill_switch_active: Whether kill switch is active (default: False)
+        bus: Event bus for publishing ExecutionPermitEvent and KillSwitchEvent (optional)
     """
 
-    def __init__(self) -> None:
-        """Initialize execution control."""
+    def __init__(self, bus: EventBus | None = None) -> None:
+        """Initialize execution control.
+
+        Args:
+            bus: Event bus for publishing events (optional)
+        """
         self.execution_enabled: bool = False
+        self.kill_switch_active: bool = False
+        self._bus = bus
 
     def enable(self) -> None:
-        """Enable execution."""
+        """Enable execution (simple enable without permit event)."""
         self.execution_enabled = True
         logger.info("Execution enabled")
+
+    async def enable_with_permit(
+        self,
+        permit_type: Literal["boot", "manual", "health_reset"],
+        reason: str,
+        health_status: dict[str, Any],
+        issued_by: Literal["system", "operator"] = "system",
+    ) -> None:
+        """Enable execution with permit event.
+
+        Per Phase 7: Emits ExecutionPermitEvent when execution is enabled.
+
+        Args:
+            permit_type: Type of permit ("boot", "manual", "health_reset")
+            reason: Human-readable reason for enabling execution
+            health_status: Snapshot of health status at permit time
+            issued_by: Who issued the permit ("system" | "operator")
+        """
+        self.execution_enabled = True
+        logger.info(
+            "Execution enabled with permit: {permit_type} - {reason}",
+            permit_type=permit_type,
+            reason=reason,
+        )
+
+        # Emit ExecutionPermitEvent if bus is available
+        if self._bus is not None:
+            permit_event = ExecutionPermitEvent(
+                permit_type=permit_type,
+                reason=reason,
+                health_status=health_status,
+                issued_by=issued_by,
+            )
+            await self._bus.publish(SYSTEM_LIFECYCLE, permit_event)
 
     def disable(self) -> None:
         """Disable execution."""
         self.execution_enabled = False
         logger.warning("Execution disabled")
 
+    async def set_kill_switch(
+        self,
+        active: bool,
+        reason: str,
+        cancel_open_orders: bool = True,
+        triggered_by: Literal["system", "operator", "circuit_breaker"] = "operator",
+    ) -> None:
+        """Set kill switch state.
+
+        Per flows.mdc §13: Kill switch provides immediate stop-trading policy.
+
+        Args:
+            active: True to activate kill switch, False to deactivate
+            reason: Human-readable reason for trigger/reset
+            cancel_open_orders: Whether to cancel open orders when triggered (default: True)
+            triggered_by: Who triggered the kill switch ("system" | "operator" | "circuit_breaker")
+        """
+        self.kill_switch_active = active
+
+        if active:
+            # Disable execution when kill switch is activated
+            self.execution_enabled = False
+            logger.error(
+                "Kill switch activated: {reason}",
+                reason=reason,
+                triggered_by=triggered_by,
+                cancel_open_orders=cancel_open_orders,
+            )
+        else:
+            logger.info("Kill switch deactivated: {reason}", reason=reason)
+
+        # Emit KillSwitchEvent if bus is available
+        if self._bus is not None:
+            kill_switch_event = KillSwitchEvent(
+                triggered=active,
+                reason=reason,
+                cancel_open_orders=cancel_open_orders,
+                triggered_by=triggered_by,
+            )
+            await self._bus.publish(SYSTEM_LIFECYCLE, kill_switch_event)
+
     def is_enabled(self) -> bool:
         """Check if execution is enabled.
 
+        Per flows.mdc §2: Execution is disabled if kill switch is active.
+
         Returns:
-            True if execution is enabled, False otherwise
+            True if execution is enabled and kill switch is not active, False otherwise
         """
-        return self.execution_enabled
+        return self.execution_enabled and not self.kill_switch_active
 
 
 class CircuitBreaker:

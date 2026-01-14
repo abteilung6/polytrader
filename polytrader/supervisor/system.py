@@ -295,6 +295,9 @@ class SystemSupervisor:
             # 3c. Health gate evaluation (Phase 7) - evaluate health gates before enabling execution
             # Only for live trading (paper trading doesn't need this)
             self._health_gates_passed = True
+            from polytrader.ops.health import HealthStatus
+
+            health_status: HealthStatus | None = None  # Store health status for permit issuance
             if self.health_service_factory is not None or (
                 self.execution_router_factory is not None
                 and self.user_stream_adapter_factory is not None
@@ -383,6 +386,50 @@ class SystemSupervisor:
                 logger.debug("Health gates skipped (paper trading mode)")
                 # health_gates_passed will be used in commit 7 for execution permit issuance
                 self._health_gates_passed = True
+
+            # 3d. Execution permit issuance (Phase 7) - issue permit only if health gates pass
+            if self._execution_control is not None and self._health_gates_passed:
+                logger.info("Issuing execution permit (all health gates passed)")
+                try:
+                    # Convert health_status to dict for permit event (if available)
+                    health_status_dict: dict[str, Any] = {}
+                    if health_status is not None:
+                        health_status_dict = {
+                            "market_data_fresh": health_status.market_data_fresh,
+                            "market_data_staleness_seconds": (
+                                health_status.market_data_staleness_seconds
+                            ),
+                            "user_stream_connected": health_status.user_stream_connected,
+                            "reconciliation_healthy": health_status.reconciliation_healthy,
+                            "reconciliation_divergence_count": (
+                                health_status.reconciliation_divergence_count
+                            ),
+                            "error_rate_ok": health_status.error_rate_ok,
+                            "error_rate": health_status.error_rate,
+                            "circuit_breaker_triggered": health_status.circuit_breaker_triggered,
+                            "kill_switch_active": health_status.kill_switch_active,
+                        }
+
+                    # Issue execution permit
+                    await self._execution_control.enable_with_permit(
+                        permit_type="boot",
+                        reason="All health gates passed during boot sequence",
+                        health_status=health_status_dict,
+                        issued_by="system",
+                    )
+                    logger.info("Execution permit issued successfully")
+                except Exception as e:
+                    logger.exception(
+                        "Error issuing execution permit: {error}",
+                        error=str(e),
+                        error_type=type(e).__name__,
+                    )
+                    # Don't fail boot if permit issuance fails, but execution will remain disabled
+            elif self._execution_control is not None and not self._health_gates_passed:
+                logger.error(
+                    "Health gates failed, execution permit NOT issued. "
+                    "Execution will remain disabled."
+                )
 
             await self._start_service_task(
                 "OMSCore",

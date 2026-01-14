@@ -1148,3 +1148,294 @@ class TestSystemSupervisor:
         await supervisor2.start()
         assert supervisor2.oms_core is not None
         await supervisor2.stop()
+
+    @pytest.mark.asyncio
+    async def test_execution_permit_issuance_on_boot(self) -> None:
+        """Test execution permit issuance on boot when health gates pass."""
+        bus = EventBus()
+        store = MemoryMarketDataStore()
+
+        # Add fresh market data
+        import time
+
+        from polytrader.events import SYSTEM_LIFECYCLE
+        from polytrader.events.types import ExecutionPermitEvent, MarketDataEvent
+
+        fresh_event = MarketDataEvent(
+            market_slug="test-market",
+            outcome="UP",
+            best_bid=0.44,
+            best_ask=0.46,
+            ts_mono=time.monotonic() - 1.0,
+        )
+        store.add(fresh_event)
+
+        # Create fake services
+        portfolio_service = FakePortfolioService(bus=bus, store=store, fixed_size_usd=1.0)
+        risk_checker = FakeRiskChecker(
+            bus=bus, engine=RiskEngine(limits=get_default_limits()), store=store
+        )
+        oms_store = InMemoryOrderStore(bus)
+        oms_core = FakeOMSCore(bus=bus, store=oms_store, idempotency_store=IdempotencyStore())
+
+        # Create fake execution router with venue adapter
+        fake_adapter = MagicMock()
+        fake_adapter.get_open_orders = MagicMock(return_value=[])
+        execution_router = FakeExecutionRouter(bus)
+        execution_router._adapter = fake_adapter
+
+        # Create execution control with bus
+        execution_control = ExecutionControl(bus=bus)
+
+        # Create health service factory that will pass
+        def health_service_factory() -> HealthService:
+            return HealthService(
+                store=store,
+                thresholds=HealthGateThresholds(
+                    max_market_data_staleness_seconds=60.0,
+                    max_reconciliation_divergences=0,
+                    max_error_rate=0.1,
+                    require_user_stream=False,
+                ),
+                user_stream_adapter=None,
+                circuit_breaker=None,
+                execution_control=execution_control,
+                kill_switch_active=False,
+                error_rate=None,
+                recent_reconcile_events=[],
+            )
+
+        def portfolio_factory() -> PortfolioService:
+            return portfolio_service
+
+        def risk_factory() -> RiskChecker:
+            return risk_checker
+
+        def oms_factory() -> OMSCore:
+            return oms_core
+
+        def execution_router_factory() -> ExecutionRouter:
+            return execution_router
+
+        def reconciliation_factory() -> ReconciliationService:
+            return ReconciliationService(store=oms_store, venue_adapter=fake_adapter, bus=bus)
+
+        # Subscribe to execution permit events
+        permit_queue = bus.subscribe(SYSTEM_LIFECYCLE)
+
+        supervisor = SystemSupervisor(
+            bus=bus,
+            store=store,
+            portfolio_service_factory=portfolio_factory,
+            risk_checker_factory=risk_factory,
+            oms_core_factory=oms_factory,
+            execution_router_factory=execution_router_factory,
+            reconciliation_service_factory=reconciliation_factory,
+            execution_control=execution_control,
+            health_service_factory=health_service_factory,
+        )
+
+        await supervisor.start()
+
+        # Verify execution was enabled
+        assert execution_control.is_enabled()
+
+        # Verify ExecutionPermitEvent was published
+        try:
+            permit_event = await asyncio.wait_for(permit_queue.get(), timeout=1.0)
+            # Filter for ExecutionPermitEvent
+            while not isinstance(permit_event, ExecutionPermitEvent):
+                permit_event = await asyncio.wait_for(permit_queue.get(), timeout=1.0)
+            assert isinstance(permit_event, ExecutionPermitEvent)
+            assert permit_event.permit_type == "boot"
+            assert permit_event.issued_by == "system"
+            assert "All health gates passed" in permit_event.reason
+        except TimeoutError:
+            pytest.fail("ExecutionPermitEvent was not published")
+
+        await supervisor.stop()
+
+    @pytest.mark.asyncio
+    async def test_execution_router_rejects_orders_when_disabled(self) -> None:
+        """Test execution router rejects orders when execution is disabled."""
+        bus = EventBus()
+        fake_adapter = MagicMock()
+        execution_control = ExecutionControl()
+        execution_router = ExecutionRouter(
+            bus=bus, adapter=fake_adapter, execution_control=execution_control
+        )
+
+        # Ensure execution is disabled
+        execution_control.disable()
+        assert not execution_control.is_enabled()
+
+        # Create SubmitOrderCommand
+        from polytrader.events import ORDER_REJECTS, SUBMIT_ORDER_COMMANDS
+        from polytrader.events.types import OrderIntentEvent
+        from polytrader.oms.commands import SubmitOrderCommand
+
+        intent = OrderIntentEvent(
+            market_slug="test-market",
+            outcome="UP",
+            side="BUY",
+            size=1.0,
+            target_price=0.55,
+            limit_price=0.55,
+            reason="Test",
+            ttl_s=60.0,
+        )
+
+        command = SubmitOrderCommand(
+            order_id="order-123",
+            client_order_id="client-123",
+            intent=intent,
+            correlation_id="corr-123",
+        )
+
+        # Subscribe to reject events
+        reject_queue = bus.subscribe(ORDER_REJECTS)
+
+        # Start execution router
+        router_task = asyncio.create_task(execution_router.run())
+        await asyncio.sleep(0.05)
+
+        try:
+            # Publish command
+            await bus.publish(SUBMIT_ORDER_COMMANDS, command)
+
+            # Wait for processing
+            await asyncio.sleep(0.5)
+
+            # Verify adapter was NOT called
+            fake_adapter.submit_order.assert_not_called()
+
+            # Verify OrderRejectedEvent was published
+            try:
+                reject_event = await asyncio.wait_for(reject_queue.get(), timeout=1.0)
+                assert reject_event.order_id == command.order_id
+                assert reject_event.reason == "Execution disabled"
+            except TimeoutError:
+                pytest.fail("OrderRejectedEvent was not published")
+
+        finally:
+            execution_router.stop()
+            router_task.cancel()
+            try:
+                await router_task
+            except asyncio.CancelledError:
+                pass
+
+    @pytest.mark.asyncio
+    async def test_execution_router_allows_orders_when_enabled(self) -> None:
+        """Test execution router allows orders when execution is enabled."""
+        bus = EventBus()
+        fake_adapter = MagicMock()
+        fake_adapter.submit_order = AsyncMock(
+            return_value=MagicMock(
+                venue_order_id="venue-123",
+                status="acknowledged",
+                raw_response={"status": "acknowledged"},
+            )
+        )
+        execution_control = ExecutionControl()
+        execution_router = ExecutionRouter(
+            bus=bus, adapter=fake_adapter, execution_control=execution_control
+        )
+
+        # Enable execution
+        execution_control.enable()
+        assert execution_control.is_enabled()
+
+        # Create SubmitOrderCommand
+        from polytrader.events import SUBMIT_ORDER_COMMANDS
+        from polytrader.events.types import OrderIntentEvent
+        from polytrader.oms.commands import SubmitOrderCommand
+
+        intent = OrderIntentEvent(
+            market_slug="test-market",
+            outcome="UP",
+            side="BUY",
+            size=1.0,
+            target_price=0.55,
+            limit_price=0.55,
+            reason="Test",
+            ttl_s=60.0,
+        )
+
+        command = SubmitOrderCommand(
+            order_id="order-123",
+            client_order_id="client-123",
+            intent=intent,
+            correlation_id="corr-123",
+        )
+
+        # Start execution router
+        router_task = asyncio.create_task(execution_router.run())
+        await asyncio.sleep(0.05)
+
+        try:
+            # Publish command
+            await bus.publish(SUBMIT_ORDER_COMMANDS, command)
+
+            # Wait for processing
+            await asyncio.sleep(0.5)
+
+            # Verify adapter WAS called
+            fake_adapter.submit_order.assert_called_once()
+            called_client_id, called_intent = fake_adapter.submit_order.call_args[0]
+            assert called_client_id == command.client_order_id
+            assert called_intent == intent
+
+        finally:
+            execution_router.stop()
+            router_task.cancel()
+            try:
+                await router_task
+            except asyncio.CancelledError:
+                pass
+
+    @pytest.mark.asyncio
+    async def test_kill_switch_disables_execution(self) -> None:
+        """Test kill switch disables execution."""
+        bus = EventBus()
+        execution_control = ExecutionControl(bus=bus)
+
+        # Enable execution first
+        execution_control.enable()
+        assert execution_control.is_enabled()
+
+        # Subscribe to kill switch events
+        from polytrader.events import SYSTEM_LIFECYCLE
+        from polytrader.events.types import KillSwitchEvent
+
+        kill_switch_queue = bus.subscribe(SYSTEM_LIFECYCLE)
+
+        # Activate kill switch
+        await execution_control.set_kill_switch(
+            active=True, reason="Test kill switch", triggered_by="operator"
+        )
+
+        # Verify execution is disabled
+        assert not execution_control.is_enabled()
+
+        # Verify KillSwitchEvent was published
+        try:
+            kill_switch_event = await asyncio.wait_for(kill_switch_queue.get(), timeout=1.0)
+            # Filter for KillSwitchEvent
+            while not isinstance(kill_switch_event, KillSwitchEvent):
+                kill_switch_event = await asyncio.wait_for(kill_switch_queue.get(), timeout=1.0)
+            assert isinstance(kill_switch_event, KillSwitchEvent)
+            assert kill_switch_event.triggered is True
+            assert kill_switch_event.triggered_by == "operator"
+            assert "Test kill switch" in kill_switch_event.reason
+        except TimeoutError:
+            pytest.fail("KillSwitchEvent was not published")
+
+        # Deactivate kill switch
+        await execution_control.set_kill_switch(
+            active=False, reason="Test reset", triggered_by="operator"
+        )
+
+        # Execution should still be disabled (kill switch deactivation doesn't re-enable)
+        # (execution_control.enable() must be called explicitly)
+        assert not execution_control.is_enabled()
