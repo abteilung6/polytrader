@@ -491,6 +491,7 @@ class LiveTradingSystemBuilder:
         self._clob_client_factory: IClobClientFactory | None = None
         self._config: dict[str, Any] | None = None
         self._config_path: str | None = None
+        self._shared_oms_store: InMemoryOrderStore | None = None
 
     def strategy_config(
         self,
@@ -640,17 +641,16 @@ class LiveTradingSystemBuilder:
     ) -> Callable[[], "ReconciliationService"] | None:
         """Create reconciliation service factory.
 
+        Per review: Uses shared OMS store to ensure reconciliation operates on
+        the same store instance as OMS Core.
+
         Returns:
             Factory function for ReconciliationService, or None if not available
         """
         from polytrader.oms.reconcile import ReconciliationService
-        from polytrader.oms.store import InMemoryOrderStore
 
-        # We need to get the OMS store from the OMS core factory
-        # Since we can't easily access it, we'll create a new store instance
-        # In practice, this should be the same store instance used by OMS Core
-        # TODO: Refactor to share store instance between OMS Core and ReconciliationService
-        oms_store = InMemoryOrderStore(self._bus)
+        # Use shared OMS store (same instance as OMS Core)
+        shared_store = self._get_shared_oms_store()
 
         # We need the venue adapter from ExecutionRouter
         # Since we can't easily access it, we'll create it from the factory
@@ -662,7 +662,7 @@ class LiveTradingSystemBuilder:
             execution_router = execution_router_factory()
             venue_adapter = execution_router.get_adapter()
             return ReconciliationService(
-                store=oms_store, venue_adapter=venue_adapter, bus=self._bus
+                store=shared_store, venue_adapter=venue_adapter, bus=self._bus
             )
 
         return factory
@@ -726,17 +726,35 @@ class LiveTradingSystemBuilder:
 
         return factory
 
+    def _get_shared_oms_store(self) -> InMemoryOrderStore:
+        """Get or create shared OMS store.
+
+        Per review: Live trading must use a shared OMS store instance across
+        all factory calls to ensure state reconstruction persists.
+
+        Returns:
+            Shared OMS store instance
+        """
+        if self._shared_oms_store is None:
+            from polytrader.oms.store import InMemoryOrderStore
+
+            self._shared_oms_store = InMemoryOrderStore(self._bus)
+        return self._shared_oms_store
+
     def _create_oms_core_factory(self) -> Callable[[], OMSCore]:
         """Create OMS core factory.
+
+        Per review: Uses shared OMS store to ensure all OMS core instances
+        use the same store, so state reconstruction persists.
 
         Returns:
             Factory function for OMSCore
         """
+        shared_store = self._get_shared_oms_store()
 
         def factory() -> OMSCore:
-            oms_store = InMemoryOrderStore(self._bus)
             idempotency_store = IdempotencyStore()
-            return OMSCore(bus=self._bus, store=oms_store, idempotency_store=idempotency_store)
+            return OMSCore(bus=self._bus, store=shared_store, idempotency_store=idempotency_store)
 
         return factory
 
@@ -758,6 +776,10 @@ class LiveTradingSystemBuilder:
         circuit_breaker_factory, execution_control = self._create_circuit_breaker_factory()
         execution_router_factory = self._create_execution_router_factory(execution_control)
 
+        # Create factories for live trading components
+        user_stream_adapter_factory = self._create_user_stream_adapter_factory()
+        reconciliation_service_factory = self._create_reconciliation_service_factory()
+
         return SystemSupervisor(
             bus=self._bus,
             store=self._store,
@@ -766,6 +788,8 @@ class LiveTradingSystemBuilder:
             oms_core_factory=oms_core_factory,
             execution_router_factory=execution_router_factory,
             position_manager_factory=position_manager_factory,
+            user_stream_adapter_factory=user_stream_adapter_factory,
+            reconciliation_service_factory=reconciliation_service_factory,
             circuit_breaker_factory=circuit_breaker_factory,
             execution_control=execution_control,
             config_path=self._config_path,

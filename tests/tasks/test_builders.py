@@ -381,6 +381,19 @@ class TestLiveTradingSystemBuilder:
         assert supervisor.bus is builder._bus
         assert supervisor.store is builder._store
 
+    def test_build_system_supervisor_passes_live_trading_factories(
+        self, builder: LiveTradingSystemBuilder
+    ) -> None:
+        """Test that LiveTradingSystemBuilder passes live trading factories.
+
+        Per review fix: Verify that user_stream_adapter_factory and
+        reconciliation_service_factory are passed to SystemSupervisor.
+        """
+        supervisor = builder.build_system_supervisor()
+        # Verify factories are passed (not None for live trading)
+        assert supervisor.user_stream_adapter_factory is not None
+        assert supervisor.reconciliation_service_factory is not None
+
     def test_build_market_supervisor(self, builder: LiveTradingSystemBuilder) -> None:
         """Test building MarketSupervisor."""
         supervisor = builder.build_market_supervisor()

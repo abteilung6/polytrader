@@ -197,6 +197,16 @@ class SystemSupervisor:
             # 2. Init event store (emit SystemStartedEvent)
             await self._init_event_store()
 
+            # Create core components ONCE early (before boot steps that need them)
+            # Per review: OMS core and position manager must be created once and reused
+            # to ensure state reconstruction persists across boot sequence steps
+            if self.oms_core_factory is not None:
+                self.oms_core = self.oms_core_factory()
+            if self.position_manager_factory is not None:
+                self.position_manager = self.position_manager_factory()
+            if self.execution_router_factory is not None:
+                self.execution_router = self.execution_router_factory()
+
             # 3. Start adapters (market data, user stream)
             await self._start_adapters()
 
@@ -359,18 +369,22 @@ class SystemSupervisor:
 
         logger.info("Starting state reconstruction from event log")
         try:
-            # Create OMS core to get store (but don't start it yet)
-            oms_core = self.oms_core_factory()
-            oms_store = oms_core.get_store()
+            # Use OMS core and position manager created early in boot sequence
+            # Per review: Must reuse same instances to ensure reconstructed state persists
+            if self.oms_core is None:
+                logger.error("OMS core not initialized - cannot reconstruct state")
+                return
+            if self.position_manager is None:
+                logger.error("Position manager not initialized - cannot reconstruct state")
+                return
 
-            # Get position manager (create but don't start yet)
-            position_manager = self.position_manager_factory()
+            oms_store = self.oms_core.get_store()
 
             # Create reconstruction service
             reconstruction_service = StateReconstructionService(
                 event_store=self.bus._store,
                 oms_store=oms_store,
-                position_manager=position_manager,
+                position_manager=self.position_manager,
             )
 
             # Reconstruct state
@@ -402,15 +416,18 @@ class SystemSupervisor:
 
         logger.info("Starting initial reconciliation snapshot")
         try:
-            # Create execution router early to get venue adapter
-            # (we'll start it as a service later)
-            execution_router = self.execution_router_factory()
-            self.execution_router = execution_router
+            # Use execution router and OMS core created early in boot sequence
+            # Per review: Must reuse same instances to ensure reconciliation operates
+            # on the same store that was used for state reconstruction
+            if self.execution_router is None:
+                logger.error("Execution router not initialized - cannot perform reconciliation")
+                return []
+            if self.oms_core is None:
+                logger.error("OMS core not initialized - cannot perform reconciliation")
+                return []
 
-            # Create OMS core to get store (but don't start it yet)
-            oms_core = self.oms_core_factory()
-            oms_store = oms_core.get_store()
-            venue_adapter = execution_router.get_adapter()
+            oms_store = self.oms_core.get_store()
+            venue_adapter = self.execution_router.get_adapter()
 
             # Create reconciliation service for initial reconciliation
             from polytrader.oms.reconcile import ReconciliationService
@@ -652,45 +669,48 @@ class SystemSupervisor:
         services_started += 1
 
         # 3. OMS Core subscribes to APPROVED_PROPOSALS (must start before RiskChecker publishes)
-        oms_core = self.oms_core_factory()
-        self.oms_core = oms_core
-        await self._start_service_task(
-            "OMSCore",
-            oms_core,
-            lambda: oms_core.run(),
-            lambda task: setattr(self, "_oms_core_task", task),
-        )
-        services_started += 1
+        # Per review: OMS core already created early in boot sequence, reuse it
+        if self.oms_core is None:
+            logger.error("OMS core not initialized - cannot start service")
+        else:
+            oms_core = self.oms_core
+            await self._start_service_task(
+                "OMSCore",
+                oms_core,
+                lambda: oms_core.run(),
+                lambda task: setattr(self, "_oms_core_task", task),
+            )
+            services_started += 1
 
         # 4. ExecutionRouter subscribes to SUBMIT_ORDER_COMMANDS (if enabled)
-        # (Already created above for initial reconciliation, just start it now)
+        # Per review: Execution router already created early in boot sequence, reuse it
         if self.execution_router_factory is not None:
             if self.execution_router is None:
-                # Create execution router if not already created
-                execution_router = self.execution_router_factory()
-                self.execution_router = execution_router
+                logger.error("Execution router not initialized - cannot start service")
             else:
                 execution_router = self.execution_router
-
-            await self._start_service_task(
-                "ExecutionRouter",
-                execution_router,
-                lambda: execution_router.run(),
-                lambda task: setattr(self, "_execution_router_task", task),
-            )
-            services_started += 1
+                await self._start_service_task(
+                    "ExecutionRouter",
+                    execution_router,
+                    lambda: execution_router.run(),
+                    lambda task: setattr(self, "_execution_router_task", task),
+                )
+                services_started += 1
 
         # 5. PositionManager (background sync)
+        # Per review: Position manager already created early in boot sequence, reuse it
         if self.position_manager_factory is not None:
-            position_manager = self.position_manager_factory()
-            self.position_manager = position_manager
-            await self._start_service_task(
-                "PositionManager",
-                position_manager,
-                lambda: position_manager.run(),
-                lambda task: setattr(self, "_position_manager_task", task),
-            )
-            services_started += 1
+            if self.position_manager is None:
+                logger.error("Position manager not initialized - cannot start service")
+            else:
+                position_manager = self.position_manager
+                await self._start_service_task(
+                    "PositionManager",
+                    position_manager,
+                    lambda: position_manager.run(),
+                    lambda task: setattr(self, "_position_manager_task", task),
+                )
+                services_started += 1
 
         # 6. UserStreamAdapter (for live trading, after OMS Core)
         # Note: User stream adapter may have been created earlier for health gate evaluation

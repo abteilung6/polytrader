@@ -11,10 +11,19 @@ import pytest
 
 from polytrader.events import CIRCUIT_BREAKER, RECONCILE
 from polytrader.events.bus import EventBus
-from polytrader.events.types import ReconcileEvent
+from polytrader.events.types import (
+    FillEvent,
+    MarketDataEvent,
+    OrderAckEvent,
+    OrderCreatedEvent,
+    OrderIntentEvent,
+    OrderSubmittedEvent,
+    ReconcileEvent,
+)
 from polytrader.execution import ExecutionRouter
 from polytrader.oms import InMemoryOrderStore, OMSCore
 from polytrader.oms.idempotency import IdempotencyStore
+from polytrader.oms.models import OrderState
 from polytrader.oms.reconcile import ReconciliationService
 from polytrader.ops import (
     CircuitBreaker,
@@ -1800,4 +1809,280 @@ class TestSystemSupervisor:
         assert supervisor._user_stream_adapter is None
 
         # Boot should still complete
+        await supervisor.stop()
+
+    @pytest.mark.asyncio
+    async def test_state_reconstruction_persists_to_running_oms_core(self) -> None:
+        """Test that state reconstruction persists to the running OMS core.
+
+        Per review fix: Verify that orders reconstructed from event log
+        persist in the same OMS core instance used for actual operation.
+        """
+        import time
+        import uuid
+
+        bus = EventBus()
+        # Initialize event store for bus
+        from polytrader.events.store import MemoryEventStore
+
+        bus._store = MemoryEventStore()
+        store = MemoryMarketDataStore()
+
+        # Create an order intent
+        intent = OrderIntentEvent(
+            market_slug="test-market",
+            outcome="UP",
+            side="BUY",
+            target_price=0.5,
+            limit_price=0.45,
+            size=10.0,
+            reason="Test reconstruction",
+        )
+
+        # Add order events to event store (simulating previous run)
+        order_id = str(uuid.uuid4())
+        client_order_id = "client-123"
+        venue_order_id = "venue-456"
+
+        created_event = OrderCreatedEvent(
+            order_id=order_id,
+            client_order_id=client_order_id,
+            intent=intent,
+            correlation_id=intent.correlation_id,
+        )
+        await bus._store.append(created_event)
+
+        submitted_event = OrderSubmittedEvent(order_id=order_id, client_order_id=client_order_id)
+        await bus._store.append(submitted_event)
+
+        ack_event = OrderAckEvent(order_id=order_id, venue_order_id=venue_order_id)
+        await bus._store.append(ack_event)
+
+        fill_event = FillEvent(
+            order_id=order_id,
+            fill_id="fill-1",
+            size=10.0,
+            price=0.45,
+            fee=0.01,
+        )
+        await bus._store.append(fill_event)
+
+        # Create OMS store (will be shared via factory)
+        oms_store = InMemoryOrderStore(bus)
+        oms_core = OMSCore(bus=bus, store=oms_store, idempotency_store=IdempotencyStore())
+
+        # Create fake position manager with _handle_fill support
+        from polytrader.position_manager import IPositionManager
+
+        class FakePositionManagerWithReplay(IPositionManager):
+            def __init__(self) -> None:
+                self._fills_replayed: list[FillEvent] = []
+                self._running = False
+
+            async def _handle_fill(self, fill_event: FillEvent) -> None:
+                """Handle fill event (for replay)."""
+                self._fills_replayed.append(fill_event)
+
+            async def run(self) -> None:
+                self._running = True
+
+            def stop(self) -> None:
+                self._running = False
+
+            def get_positions(self) -> dict | None:
+                return None
+
+            def get_position(self, market_slug: str, outcome: str) -> None:
+                return None
+
+        position_manager = FakePositionManagerWithReplay()
+
+        # Create factories that return the same instances
+        def oms_factory() -> OMSCore:
+            return oms_core
+
+        def position_manager_factory() -> IPositionManager:
+            return position_manager
+
+        # Create fake execution router
+        fake_adapter = MagicMock()
+        fake_adapter.get_open_orders = AsyncMock(return_value=[])
+        execution_router = FakeExecutionRouter(bus)
+        execution_router._adapter = fake_adapter
+
+        execution_control = ExecutionControl(bus=bus)
+
+        def health_service_factory() -> HealthService:
+            return HealthService(
+                store=store,
+                thresholds=HealthGateThresholds(
+                    max_market_data_staleness_seconds=60.0,
+                    max_reconciliation_divergences=0,
+                    max_error_rate=0.1,
+                    require_user_stream=False,
+                ),
+                user_stream_adapter=None,
+                circuit_breaker=None,
+                execution_control=execution_control,
+                kill_switch_active=False,
+                error_rate=None,
+                recent_reconcile_events=[],
+            )
+
+        def portfolio_factory() -> PortfolioService:
+            return FakePortfolioService(bus=bus, store=store, fixed_size_usd=1.0)
+
+        def risk_factory() -> RiskChecker:
+            return FakeRiskChecker(
+                bus=bus, engine=RiskEngine(limits=get_default_limits()), store=store
+            )
+
+        def execution_router_factory() -> ExecutionRouter:
+            return execution_router
+
+        def reconciliation_factory() -> ReconciliationService:
+            return ReconciliationService(store=oms_store, venue_adapter=fake_adapter, bus=bus)
+
+        # Add fresh market data
+        fresh_event = MarketDataEvent(
+            market_slug="test-market",
+            outcome="UP",
+            best_bid=0.44,
+            best_ask=0.46,
+            ts_mono=time.monotonic() - 1.0,
+        )
+        store.add(fresh_event)
+
+        supervisor = SystemSupervisor(
+            bus=bus,
+            store=store,
+            portfolio_service_factory=portfolio_factory,
+            risk_checker_factory=risk_factory,
+            oms_core_factory=oms_factory,
+            execution_router_factory=execution_router_factory,
+            position_manager_factory=position_manager_factory,
+            reconciliation_service_factory=reconciliation_factory,
+            execution_control=execution_control,
+            health_service_factory=health_service_factory,
+        )
+
+        # Boot the system (this will reconstruct state)
+        await supervisor.start()
+
+        # Verify OMS core is the same instance
+        assert supervisor.oms_core is oms_core
+
+        # Verify order was reconstructed in the OMS store
+        reconstructed_order = oms_store.get_order(order_id)
+        assert reconstructed_order is not None, "Order should be reconstructed from event log"
+        assert reconstructed_order.order_id == order_id
+        assert reconstructed_order.state == OrderState.FILLED
+        assert reconstructed_order.venue_order_id == venue_order_id
+        assert reconstructed_order.filled_size == 10.0
+
+        # Verify position manager is the same instance
+        assert supervisor.position_manager is position_manager
+
+        # Verify fill was replayed to position manager
+        assert len(position_manager._fills_replayed) == 1
+        assert position_manager._fills_replayed[0].order_id == order_id
+
+        await supervisor.stop()
+
+    @pytest.mark.asyncio
+    async def test_oms_core_instance_reused_throughout_boot(self) -> None:
+        """Test that OMS core instance is reused throughout boot sequence.
+
+        Per review fix: Verify that the same OMS core instance created early
+        in boot is used for state reconstruction, reconciliation, and service startup.
+        """
+        bus = EventBus()
+        store = MemoryMarketDataStore()
+
+        # Track OMS core creation
+        oms_cores_created: list[OMSCore] = []
+
+        oms_store = InMemoryOrderStore(bus)
+
+        def oms_factory() -> OMSCore:
+            oms_core = OMSCore(bus=bus, store=oms_store, idempotency_store=IdempotencyStore())
+            oms_cores_created.append(oms_core)
+            return oms_core
+
+        # Create other required services
+        portfolio_service = FakePortfolioService(bus=bus, store=store, fixed_size_usd=1.0)
+        risk_checker = FakeRiskChecker(
+            bus=bus, engine=RiskEngine(limits=get_default_limits()), store=store
+        )
+
+        fake_adapter = MagicMock()
+        fake_adapter.get_open_orders = AsyncMock(return_value=[])
+        execution_router = FakeExecutionRouter(bus)
+        execution_router._adapter = fake_adapter
+
+        execution_control = ExecutionControl(bus=bus)
+
+        def health_service_factory() -> HealthService:
+            return HealthService(
+                store=store,
+                thresholds=HealthGateThresholds(
+                    max_market_data_staleness_seconds=60.0,
+                    max_reconciliation_divergences=0,
+                    max_error_rate=0.1,
+                    require_user_stream=False,
+                ),
+                user_stream_adapter=None,
+                circuit_breaker=None,
+                execution_control=execution_control,
+                kill_switch_active=False,
+                error_rate=None,
+                recent_reconcile_events=[],
+            )
+
+        def portfolio_factory() -> PortfolioService:
+            return portfolio_service
+
+        def risk_factory() -> RiskChecker:
+            return risk_checker
+
+        def execution_router_factory() -> ExecutionRouter:
+            return execution_router
+
+        def reconciliation_factory() -> ReconciliationService:
+            return ReconciliationService(store=oms_store, venue_adapter=fake_adapter, bus=bus)
+
+        # Add fresh market data
+        import time
+
+        fresh_event = MarketDataEvent(
+            market_slug="test-market",
+            outcome="UP",
+            best_bid=0.44,
+            best_ask=0.46,
+            ts_mono=time.monotonic() - 1.0,
+        )
+        store.add(fresh_event)
+
+        supervisor = SystemSupervisor(
+            bus=bus,
+            store=store,
+            portfolio_service_factory=portfolio_factory,
+            risk_checker_factory=risk_factory,
+            oms_core_factory=oms_factory,
+            execution_router_factory=execution_router_factory,
+            reconciliation_service_factory=reconciliation_factory,
+            execution_control=execution_control,
+            health_service_factory=health_service_factory,
+        )
+
+        # Boot the system
+        await supervisor.start()
+
+        # Verify OMS core was created only ONCE
+        assert len(oms_cores_created) == 1, "OMS core should be created only once"
+
+        # Verify the same instance is used throughout
+        assert supervisor.oms_core is oms_cores_created[0]
+        assert supervisor.oms_core.get_store() is oms_store
+
         await supervisor.stop()
