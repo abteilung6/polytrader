@@ -6,15 +6,17 @@ Per observability.mdc §3: Structured logging with mandatory fields.
 These helper functions reduce boilerplate and ensure consistency across modules.
 """
 
+from __future__ import annotations
+
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from loguru import Logger
 
-from polytrader.oms.models import Order
+    from polytrader.oms.models import Order
 
 
-def bind_correlation_context(logger: "Logger", correlation_id: str, **kwargs: Any) -> "Logger":
+def bind_correlation_context(logger: Logger, correlation_id: str, **kwargs: Any) -> Logger:
     """Bind correlation_id and common fields to logger context.
 
     Per observability.mdc §2: Every log line must include correlation_id when applicable.
@@ -46,7 +48,7 @@ def bind_correlation_context(logger: "Logger", correlation_id: str, **kwargs: An
     return logger.bind(**context)
 
 
-def bind_order_context(logger: "Logger", order: Order, **kwargs: Any) -> "Logger":
+def bind_order_context(logger: Logger, order: Order, **kwargs: Any) -> Logger:
     """Bind order-related fields to logger context.
 
     Per observability.mdc §2: Orders have order_id, client_order_id, venue_order_id.
@@ -88,8 +90,8 @@ def bind_order_context(logger: "Logger", order: Order, **kwargs: Any) -> "Logger
 
 
 def bind_strategy_context(
-    logger: "Logger", strategy_id: str, correlation_id: str | None = None, **kwargs: Any
-) -> "Logger":
+    logger: Logger, strategy_id: str, correlation_id: str | None = None, **kwargs: Any
+) -> Logger:
     """Bind strategy-related fields to logger context.
 
     Per observability.mdc §2: Strategy logs should include strategy_id and correlation_id.
