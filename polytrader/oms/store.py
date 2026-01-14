@@ -159,6 +159,24 @@ class IEventHandlingOrderStore(IOrderStore):
         """
         ...
 
+    def rebuild_from_events(self, events: list[Event]) -> None:
+        """Rebuild order state from event log.
+
+        Per flows.mdc §7: Used on restart to reconstruct order state.
+
+        Args:
+            events: List of events to replay (should be sorted by ts_mono)
+        """
+        ...
+
+    def get_all_orders(self) -> list[Order]:  # type: ignore[empty-body]
+        """Get all orders (open and closed).
+
+        Returns:
+            List of all orders in the store
+        """
+        ...  # Protocol method - must be implemented by concrete classes
+
 
 class InMemoryOrderStore(IEventHandlingOrderStore):
     """In-memory order store with event-sourced projections.
@@ -279,6 +297,14 @@ class InMemoryOrderStore(IEventHandlingOrderStore):
         """
         return [order for order in self._orders.values() if not order.is_terminal]
 
+    def get_all_orders(self) -> list[Order]:
+        """Get all orders (open and closed).
+
+        Returns:
+            List of all orders in the store
+        """
+        return list(self._orders.values())
+
     def get_order_history(self, order_id: str) -> list[Event]:
         """Get event history for an order (for debugging).
 
@@ -353,8 +379,11 @@ class InMemoryOrderStore(IEventHandlingOrderStore):
         )
 
         # Clear existing state
+        # Per review fix: Must clear all mappings including venue_order_ids
+        # to prevent stale mappings from previous state
         self._orders.clear()
         self._client_order_ids.clear()
+        self._venue_order_ids.clear()
         self._order_events.clear()
 
         # Replay events in order

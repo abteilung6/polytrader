@@ -20,6 +20,14 @@ class IMarketDataStore(Protocol):
         """Get history of market data events for a market/outcome."""
         ...
 
+    def get_all_markets(self) -> list[tuple[str, Outcome]]:
+        """Get all market/outcome pairs that have data in the store.
+
+        Returns:
+            List of (market_slug, outcome) tuples
+        """
+        ...
+
 
 class MemoryMarketDataStore(IMarketDataStore):
     """In-memory store for market data events.
@@ -72,3 +80,11 @@ class MemoryMarketDataStore(IMarketDataStore):
         """
         key = (market_slug, outcome)
         return list(self._events.get(key, []))
+
+    def get_all_markets(self) -> list[tuple[str, Outcome]]:
+        """Get all market/outcome pairs that have data in the store.
+
+        Returns:
+            List of (market_slug, outcome) tuples
+        """
+        return list(self._events.keys())

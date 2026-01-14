@@ -94,6 +94,14 @@ class SystemStartedEvent(Event):
     This event marks the beginning of a system run and is emitted
     once at process startup. It allows correlating all events from
     a single process execution.
+
+    Per flows.mdc §2: SystemStartedEvent includes run_id for correlation.
+    The run_id should be explicitly set during boot to ensure all events
+    in the same run share the same run_id. If not explicitly set, it uses
+    the default from Event base class (get_run_id()).
+
+    Attributes:
+        run_id: Process run ID (inherited from Event, can be explicitly set)
     """
 
     source: EventSource = Field(default=EventSource.OPS)
@@ -769,4 +777,72 @@ class CircuitBreakerEvent(Event):
     details: dict[str, Any] = Field(
         default_factory=dict,
         description="Dictionary with additional context (thresholds, counts, etc.)",
+    )
+
+
+class ExecutionPermitEvent(Event):
+    """Event emitted when execution is enabled.
+
+    Per flows.mdc §2: Execution is only enabled after all health gates pass.
+    This event records when and why execution was enabled, providing an audit trail.
+
+    Attributes:
+        permit_type: Type of permit ("boot", "manual", "health_reset")
+        reason: Human-readable reason for enabling execution
+        health_status: Snapshot of health status at permit time (dict with health metrics)
+        issued_by: Who issued the permit ("system" | "operator")
+
+    Note:
+        - Timestamps come from Event base class (ts_wall, ts_mono)
+        - Source is automatically set to EventSource.OPS
+        - All Event base class fields are inherited (event_id, correlation_id, run_id, etc.)
+    """
+
+    source: EventSource = Field(default=EventSource.OPS)
+
+    permit_type: Literal["boot", "manual", "health_reset"] = Field(
+        description="Type of execution permit"
+    )
+    reason: str = Field(description="Human-readable reason for enabling execution")
+    health_status: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Snapshot of health status at permit time (health metrics)",
+    )
+    issued_by: Literal["system", "operator"] = Field(
+        default="system", description="Who issued the permit"
+    )
+
+
+class KillSwitchEvent(Event):
+    """Event emitted when kill switch is triggered or reset.
+
+    Per flows.mdc §13: Kill switch provides immediate stop-trading + cancel-open-orders policy.
+    This event records when and why the kill switch was triggered.
+
+    Attributes:
+        triggered: True if kill switch triggered, False if reset
+        reason: Human-readable reason for trigger/reset
+        cancel_open_orders: Whether to cancel open orders when triggered
+        triggered_by: Who triggered the kill switch ("system" | "operator" | "circuit_breaker")
+        details: Dictionary with additional context (order counts, etc.)
+
+    Note:
+        - Timestamps come from Event base class (ts_wall, ts_mono)
+        - Source is automatically set to EventSource.OPS
+        - All Event base class fields are inherited (event_id, correlation_id, run_id, etc.)
+    """
+
+    source: EventSource = Field(default=EventSource.OPS)
+
+    triggered: bool = Field(description="True if triggered, False if reset")
+    reason: str = Field(description="Human-readable reason for trigger/reset")
+    cancel_open_orders: bool = Field(
+        default=True, description="Whether to cancel open orders when triggered"
+    )
+    triggered_by: Literal["system", "operator", "circuit_breaker"] = Field(
+        description="Who triggered the kill switch"
+    )
+    details: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Dictionary with additional context (order counts, etc.)",
     )

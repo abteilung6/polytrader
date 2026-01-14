@@ -381,6 +381,19 @@ class TestLiveTradingSystemBuilder:
         assert supervisor.bus is builder._bus
         assert supervisor.store is builder._store
 
+    def test_build_system_supervisor_passes_live_trading_factories(
+        self, builder: LiveTradingSystemBuilder
+    ) -> None:
+        """Test that LiveTradingSystemBuilder passes live trading factories.
+
+        Per review fix: Verify that user_stream_adapter_factory and
+        reconciliation_service_factory are passed to SystemSupervisor.
+        """
+        supervisor = builder.build_system_supervisor()
+        # Verify factories are passed (not None for live trading)
+        assert supervisor.user_stream_adapter_factory is not None
+        assert supervisor.reconciliation_service_factory is not None
+
     def test_build_market_supervisor(self, builder: LiveTradingSystemBuilder) -> None:
         """Test building MarketSupervisor."""
         supervisor = builder.build_market_supervisor()
@@ -451,7 +464,42 @@ class TestLiveTradingSystemBuilder:
         self, builder: LiveTradingSystemBuilder
     ) -> None:
         """Test that system supervisor uses PositionManager (not PaperPositionManager)."""
-        supervisor = builder.build_system_supervisor()
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from polytrader.execution import ExecutionRouter
+
+        # Mock the CLOB client factory to avoid real API calls during build
+        mock_clob_client = MagicMock()
+        mock_clob_client.create_or_derive_api_creds = MagicMock(
+            return_value=MagicMock(apiKey="test-key", secret="test-secret", passphrase="test-pass")
+        )
+
+        def mock_clob_client_factory():
+            return mock_clob_client
+
+        # Mock the execution router factory to avoid real API calls
+        mock_adapter = MagicMock()
+        mock_adapter.get_open_orders = AsyncMock(return_value=[])
+
+        mock_execution_router = MagicMock(spec=ExecutionRouter)
+        mock_execution_router.run = AsyncMock()
+        mock_execution_router.get_adapter = MagicMock(return_value=mock_adapter)
+
+        def mock_execution_router_factory() -> ExecutionRouter:
+            return mock_execution_router
+
+        # Patch the CLOB client factory creation to use our mock
+        with patch.object(
+            builder, "_get_clob_client_factory", return_value=mock_clob_client_factory
+        ):
+            supervisor = builder.build_system_supervisor()
+
+        # Replace the execution router factory with a mock to avoid API calls
+        supervisor.execution_router_factory = mock_execution_router_factory
+        # Disable user stream and reconciliation for this test (not needed)
+        supervisor.user_stream_adapter_factory = None
+        supervisor.reconciliation_service_factory = None
+        supervisor.circuit_breaker_factory = None
         await supervisor.start()
 
         # Get the position manager

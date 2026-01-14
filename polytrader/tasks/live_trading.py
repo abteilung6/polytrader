@@ -163,6 +163,9 @@ async def live_trading_task(
         .execution_config(size=size, sync_interval=sync_interval)
     )
 
+    # Load configuration (Phase 7)
+    await builder.load_config(config_path=None)  # Load from environment for now
+
     # Build supervisors
     system_supervisor = builder.build_system_supervisor()
 

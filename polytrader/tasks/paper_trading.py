@@ -210,6 +210,9 @@ async def paper_trading_task(
         .position_config(starting_equity=starting_equity)
     )
 
+    # Load configuration (Phase 7, optional for paper trading)
+    await builder.load_config(config_path=None)  # Load from environment for now
+
     # Build supervisors
     system_supervisor = builder.build_system_supervisor()
 

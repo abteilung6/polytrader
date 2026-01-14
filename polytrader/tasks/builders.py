@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from polytrader.adapters import create_adapter_factory
 from polytrader.clob import create_clob_client_factory
-from polytrader.config import PolymarketSecrets
+from polytrader.config import PolymarketSecrets, load_config
 from polytrader.events import EventBus
 from polytrader.execution import ExecutionRouter, create_execution_router_factory
 from polytrader.execution.fill_models import FillModel
@@ -28,8 +28,11 @@ from polytrader.supervisor import MarketSupervisor, SystemSupervisor
 
 if TYPE_CHECKING:
     from polytrader.adapters import IMarketDataAdapter
+    from polytrader.adapters.polymarket.user_stream import UserStreamAdapter
     from polytrader.clob import IClobClientFactory
     from polytrader.observer import IObserver
+    from polytrader.oms.reconcile import ReconciliationService
+    from polytrader.ops.control import CircuitBreaker, ExecutionControl
     from polytrader.strategies import IStrategy
 
 
@@ -90,6 +93,8 @@ class PaperTradingSystemBuilder:
         # Shared dependencies (created on first access)
         self._shared_oms_store: InMemoryOrderStore | None = None
         self._secrets: PolymarketSecrets | None = None
+        self._config: dict[str, Any] | None = None
+        self._config_path: str | None = None
         self._adapter_factory: Callable[[str], IMarketDataAdapter] | None = None
         self._observer_factory: Callable[[IMarketDataAdapter], IObserver] | None = None
         self._strategy_factory: Callable[[str], IStrategy] | None = None
@@ -241,8 +246,13 @@ class PaperTradingSystemBuilder:
             )
         return self._strategy_factory
 
-    def _create_execution_router_factory(self) -> Callable[[], ExecutionRouter]:
+    def _create_execution_router_factory(
+        self, execution_control: "ExecutionControl | None" = None
+    ) -> Callable[[], ExecutionRouter]:
         """Create execution router factory.
+
+        Args:
+            execution_control: Execution control instance (optional)
 
         Returns:
             Factory function for ExecutionRouter
@@ -257,7 +267,9 @@ class PaperTradingSystemBuilder:
                 rejection_probability=self._rejection_probability,
                 latency_ms=self._latency_ms,
             )
-            return ExecutionRouter(bus=self._bus, adapter=adapter)
+            return ExecutionRouter(
+                bus=self._bus, adapter=adapter, execution_control=execution_control
+            )
 
         return factory
 
@@ -340,7 +352,10 @@ class PaperTradingSystemBuilder:
         portfolio_service_factory = self._create_portfolio_service_factory(position_manager_factory)
         risk_checker_factory = self._create_risk_checker_factory()
         oms_core_factory = self._create_oms_core_factory()
-        execution_router_factory = self._create_execution_router_factory()
+
+        # Get execution_control from circuit breaker factory (if available)
+        # Paper trading doesn't need circuit breaker, so pass None
+        execution_router_factory = self._create_execution_router_factory(None)
 
         return SystemSupervisor(
             bus=self._bus,
@@ -350,6 +365,7 @@ class PaperTradingSystemBuilder:
             oms_core_factory=oms_core_factory,
             execution_router_factory=execution_router_factory,
             position_manager_factory=position_manager_factory,
+            config_path=self._config_path,
         )
 
     def build_market_supervisor(
@@ -395,6 +411,23 @@ class PaperTradingSystemBuilder:
         # For now, pass None - caller must get it from system_supervisor after start()
         market_supervisor = self.build_market_supervisor(position_manager=None)
         return system_supervisor, market_supervisor
+
+    async def load_config(self, config_path: str | None = None) -> None:
+        """Load configuration from file or environment (optional for paper trading).
+
+        Per Phase 7: Load and validate configuration on boot.
+        This method loads config, validates it, calculates hash, and emits ConfigLoadedEvent.
+
+        Args:
+            config_path: Path to config file (JSON). If None, loads from environment.
+
+        Raises:
+            FileNotFoundError: If config_path is provided but file doesn't exist
+            ValueError: If configuration is invalid
+            json.JSONDecodeError: If config file is not valid JSON
+        """
+        self._config_path = config_path
+        self._config = await load_config(config_path=config_path, bus=self._bus)
 
 
 class LiveTradingSystemBuilder:
@@ -456,6 +489,9 @@ class LiveTradingSystemBuilder:
         self._observer_factory: Callable[[IMarketDataAdapter], IObserver] | None = None
         self._strategy_factory: Callable[[str], IStrategy] | None = None
         self._clob_client_factory: IClobClientFactory | None = None
+        self._config: dict[str, Any] | None = None
+        self._config_path: str | None = None
+        self._shared_oms_store: InMemoryOrderStore | None = None
 
     def strategy_config(
         self,
@@ -555,14 +591,21 @@ class LiveTradingSystemBuilder:
             self._clob_client_factory = create_clob_client_factory(self._secrets)
         return self._clob_client_factory
 
-    def _create_execution_router_factory(self) -> Callable[[], ExecutionRouter]:
+    def _create_execution_router_factory(
+        self, execution_control: "ExecutionControl | None" = None
+    ) -> Callable[[], ExecutionRouter]:
         """Create execution router factory.
+
+        Args:
+            execution_control: Execution control instance (optional)
 
         Returns:
             Factory function for ExecutionRouter
         """
         clob_client_factory = self._get_clob_client_factory()
-        return create_execution_router_factory(self._bus, clob_client_factory)
+        return create_execution_router_factory(
+            self._bus, clob_client_factory, execution_control=execution_control
+        )
 
     def _create_position_manager_factory(self) -> Callable[[], IPositionManager]:
         """Create position manager factory.
@@ -575,7 +618,9 @@ class LiveTradingSystemBuilder:
             self._bus, clob_client_factory, sync_interval=self._sync_interval
         )
 
-    def _create_user_stream_adapter_factory(self) -> Callable[[], Any] | None:
+    def _create_user_stream_adapter_factory(
+        self,
+    ) -> Callable[[], "UserStreamAdapter"] | None:
         """Create user stream adapter factory.
 
         Returns:
@@ -591,37 +636,40 @@ class LiveTradingSystemBuilder:
 
         return factory
 
-    def _create_reconciliation_service_factory(self) -> Callable[[], Any] | None:
+    def _create_reconciliation_service_factory(
+        self,
+    ) -> Callable[[], "ReconciliationService"] | None:
         """Create reconciliation service factory.
+
+        Per review: Uses shared OMS store to ensure reconciliation operates on
+        the same store instance as OMS Core.
 
         Returns:
             Factory function for ReconciliationService, or None if not available
         """
         from polytrader.oms.reconcile import ReconciliationService
-        from polytrader.oms.store import InMemoryOrderStore
 
-        # We need to get the OMS store from the OMS core factory
-        # Since we can't easily access it, we'll create a new store instance
-        # In practice, this should be the same store instance used by OMS Core
-        # TODO: Refactor to share store instance between OMS Core and ReconciliationService
-        oms_store = InMemoryOrderStore(self._bus)
+        # Use shared OMS store (same instance as OMS Core)
+        shared_store = self._get_shared_oms_store()
 
         # We need the venue adapter from ExecutionRouter
         # Since we can't easily access it, we'll create it from the factory
-        execution_router_factory = self._create_execution_router_factory()
+        # Get execution_control from circuit breaker factory
+        circuit_breaker_factory, execution_control = self._create_circuit_breaker_factory()
+        execution_router_factory = self._create_execution_router_factory(execution_control)
 
         def factory() -> ReconciliationService:
             execution_router = execution_router_factory()
             venue_adapter = execution_router.get_adapter()
             return ReconciliationService(
-                store=oms_store, venue_adapter=venue_adapter, bus=self._bus
+                store=shared_store, venue_adapter=venue_adapter, bus=self._bus
             )
 
         return factory
 
     def _create_circuit_breaker_factory(
         self,
-    ) -> tuple[Callable[[], Any] | None, Any | None]:
+    ) -> tuple[Callable[[], "CircuitBreaker"] | None, "ExecutionControl" | None]:
         """Create circuit breaker factory and execution control.
 
         Returns:
@@ -629,7 +677,7 @@ class LiveTradingSystemBuilder:
         """
         from polytrader.ops import CircuitBreaker, CircuitBreakerThresholds, ExecutionControl
 
-        execution_control = ExecutionControl()
+        execution_control = ExecutionControl(bus=self._bus)
 
         def factory() -> CircuitBreaker:
             thresholds = CircuitBreakerThresholds()  # Use defaults
@@ -678,17 +726,35 @@ class LiveTradingSystemBuilder:
 
         return factory
 
+    def _get_shared_oms_store(self) -> InMemoryOrderStore:
+        """Get or create shared OMS store.
+
+        Per review: Live trading must use a shared OMS store instance across
+        all factory calls to ensure state reconstruction persists.
+
+        Returns:
+            Shared OMS store instance
+        """
+        if self._shared_oms_store is None:
+            from polytrader.oms.store import InMemoryOrderStore
+
+            self._shared_oms_store = InMemoryOrderStore(self._bus)
+        return self._shared_oms_store
+
     def _create_oms_core_factory(self) -> Callable[[], OMSCore]:
         """Create OMS core factory.
+
+        Per review: Uses shared OMS store to ensure all OMS core instances
+        use the same store, so state reconstruction persists.
 
         Returns:
             Factory function for OMSCore
         """
+        shared_store = self._get_shared_oms_store()
 
         def factory() -> OMSCore:
-            oms_store = InMemoryOrderStore(self._bus)
             idempotency_store = IdempotencyStore()
-            return OMSCore(bus=self._bus, store=oms_store, idempotency_store=idempotency_store)
+            return OMSCore(bus=self._bus, store=shared_store, idempotency_store=idempotency_store)
 
         return factory
 
@@ -705,7 +771,14 @@ class LiveTradingSystemBuilder:
         portfolio_service_factory = self._create_portfolio_service_factory(position_manager_factory)
         risk_checker_factory = self._create_risk_checker_factory()
         oms_core_factory = self._create_oms_core_factory()
-        execution_router_factory = self._create_execution_router_factory()
+
+        # Get execution_control from circuit breaker factory
+        circuit_breaker_factory, execution_control = self._create_circuit_breaker_factory()
+        execution_router_factory = self._create_execution_router_factory(execution_control)
+
+        # Create factories for live trading components
+        user_stream_adapter_factory = self._create_user_stream_adapter_factory()
+        reconciliation_service_factory = self._create_reconciliation_service_factory()
 
         return SystemSupervisor(
             bus=self._bus,
@@ -715,6 +788,11 @@ class LiveTradingSystemBuilder:
             oms_core_factory=oms_core_factory,
             execution_router_factory=execution_router_factory,
             position_manager_factory=position_manager_factory,
+            user_stream_adapter_factory=user_stream_adapter_factory,
+            reconciliation_service_factory=reconciliation_service_factory,
+            circuit_breaker_factory=circuit_breaker_factory,
+            execution_control=execution_control,
+            config_path=self._config_path,
         )
 
     def build_market_supervisor(
@@ -760,3 +838,20 @@ class LiveTradingSystemBuilder:
         # For now, pass None - caller must get it from system_supervisor after start()
         market_supervisor = self.build_market_supervisor(position_manager=None)
         return system_supervisor, market_supervisor
+
+    async def load_config(self, config_path: str | None = None) -> None:
+        """Load configuration from file or environment.
+
+        Per Phase 7: Load and validate configuration on boot.
+        This method loads config, validates it, calculates hash, and emits ConfigLoadedEvent.
+
+        Args:
+            config_path: Path to config file (JSON). If None, loads from environment.
+
+        Raises:
+            FileNotFoundError: If config_path is provided but file doesn't exist
+            ValueError: If configuration is invalid
+            json.JSONDecodeError: If config file is not valid JSON
+        """
+        self._config_path = config_path
+        self._config = await load_config(config_path=config_path, bus=self._bus)

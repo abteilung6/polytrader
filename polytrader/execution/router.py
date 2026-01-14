@@ -26,6 +26,7 @@ from polytrader.execution.tactics import ExecutionTactics
 
 if TYPE_CHECKING:
     from polytrader.oms.commands import CancelOrderCommand, SubmitOrderCommand
+    from polytrader.ops.control import ExecutionControl
 
 
 class ExecutionRouter:
@@ -49,6 +50,7 @@ class ExecutionRouter:
         bus: EventBus,
         adapter: IVenueAdapter,
         tactics: ExecutionTactics | None = None,
+        execution_control: "ExecutionControl | None" = None,
     ) -> None:
         """Initialize execution router.
 
@@ -56,12 +58,14 @@ class ExecutionRouter:
             bus: Event bus for publishing events
             adapter: Venue adapter for order submission (implements IVenueAdapter)
             tactics: Execution tactics engine (defaults to new instance)
+            execution_control: Execution control for checking execution_enabled (optional)
         """
         from polytrader.execution.tactics import ExecutionTactics
 
         self._bus = bus
         self._adapter = adapter
         self._tactics = tactics or ExecutionTactics()
+        self._execution_control = execution_control
         self._running = False
 
     def get_adapter(self) -> IVenueAdapter:
@@ -137,6 +141,28 @@ class ExecutionRouter:
         from polytrader.logging_config import logger
 
         start_time = time.monotonic()
+
+        # Check if execution is enabled (Phase 7: execution gating)
+        if self._execution_control is not None and not self._execution_control.is_enabled():
+            logger.warning(
+                "Order submission rejected: execution is disabled",
+                order_id=command.order_id,
+                client_order_id=command.client_order_id,
+                correlation_id=command.correlation_id,
+            )
+
+            # Emit OrderRejectedEvent
+            from polytrader.events import ORDER_REJECTS
+            from polytrader.events.types import OrderRejectedEvent
+
+            reject_event = OrderRejectedEvent(
+                order_id=command.order_id,
+                venue_order_id=None,
+                reason="Execution disabled",
+                correlation_id=command.correlation_id,
+            )
+            await self._bus.publish(ORDER_REJECTS, reject_event)
+            return
 
         try:
             # Emit ExecutionRequestEvent

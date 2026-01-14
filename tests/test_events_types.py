@@ -11,6 +11,8 @@ from polytrader.events.types import (
     CircuitBreakerEvent,
     Event,
     EventSource,
+    ExecutionPermitEvent,
+    KillSwitchEvent,
     ReconcileEvent,
 )
 
@@ -932,3 +934,190 @@ class TestCircuitBreakerEvent:
 
         with pytest.raises(ValidationError):
             event.triggered = False  # type: ignore[misc]
+
+
+class TestExecutionPermitEvent:
+    """Tests for ExecutionPermitEvent per flows.mdc §2."""
+
+    def test_execution_permit_event_creation(self) -> None:
+        """Test that ExecutionPermitEvent can be created."""
+        event = ExecutionPermitEvent(
+            permit_type="boot",
+            reason="All health gates passed",
+            health_status={"market_data_fresh": True, "user_stream_connected": True},
+            issued_by="system",
+        )
+
+        assert event.permit_type == "boot"
+        assert event.reason == "All health gates passed"
+        assert event.health_status == {"market_data_fresh": True, "user_stream_connected": True}
+        assert event.issued_by == "system"
+        assert event.source == EventSource.OPS
+
+    def test_execution_permit_event_has_base_fields(self) -> None:
+        """Test that ExecutionPermitEvent has all base Event fields."""
+        event = ExecutionPermitEvent(
+            permit_type="manual",
+            reason="Operator enabled execution",
+            issued_by="operator",
+        )
+
+        assert event.event_id
+        assert event.ts_wall
+        assert event.ts_mono
+        assert event.correlation_id
+        assert event.run_id
+        assert event.schema_version == "1.0"
+
+    def test_execution_permit_event_defaults(self) -> None:
+        """Test that ExecutionPermitEvent has correct defaults."""
+        event = ExecutionPermitEvent(
+            permit_type="health_reset",
+            reason="Health gates passed after reset",
+        )
+
+        assert event.issued_by == "system"
+        assert event.health_status == {}
+
+    def test_execution_permit_event_serialization(self) -> None:
+        """Test that ExecutionPermitEvent can be serialized."""
+        event = ExecutionPermitEvent(
+            permit_type="boot",
+            reason="All health gates passed",
+            health_status={"market_data_fresh": True},
+        )
+
+        # Pydantic model can be serialized
+        event_dict = event.model_dump()
+        assert event_dict["permit_type"] == "boot"
+        assert event_dict["reason"] == "All health gates passed"
+        assert event_dict["health_status"]["market_data_fresh"] is True
+
+        # JSON serialization
+        event_json = event.model_dump_json()
+        assert isinstance(event_json, str)
+        assert "boot" in event_json
+
+    def test_execution_permit_event_is_immutable(self) -> None:
+        """Test that ExecutionPermitEvent is immutable (frozen model)."""
+        event = ExecutionPermitEvent(
+            permit_type="boot",
+            reason="All health gates passed",
+        )
+
+        with pytest.raises(ValidationError):
+            event.permit_type = "manual"  # type: ignore[misc]
+
+    def test_execution_permit_event_requires_permit_type(self) -> None:
+        """Test that ExecutionPermitEvent requires permit_type."""
+        with pytest.raises(ValidationError):
+            ExecutionPermitEvent(reason="Test")  # type: ignore[call-arg]
+
+    def test_execution_permit_event_requires_reason(self) -> None:
+        """Test that ExecutionPermitEvent requires reason."""
+        with pytest.raises(ValidationError):
+            ExecutionPermitEvent(permit_type="boot")  # type: ignore[call-arg]
+
+
+class TestKillSwitchEvent:
+    """Tests for KillSwitchEvent per flows.mdc §13."""
+
+    def test_kill_switch_event_creation(self) -> None:
+        """Test that KillSwitchEvent can be created."""
+        event = KillSwitchEvent(
+            triggered=True,
+            reason="Manual kill switch activation",
+            cancel_open_orders=True,
+            triggered_by="operator",
+            details={"open_orders_count": 5},
+        )
+
+        assert event.triggered is True
+        assert event.reason == "Manual kill switch activation"
+        assert event.cancel_open_orders is True
+        assert event.triggered_by == "operator"
+        assert event.details == {"open_orders_count": 5}
+        assert event.source == EventSource.OPS
+
+    def test_kill_switch_event_has_base_fields(self) -> None:
+        """Test that KillSwitchEvent has all base Event fields."""
+        event = KillSwitchEvent(
+            triggered=False,
+            reason="Kill switch reset",
+            triggered_by="operator",
+        )
+
+        assert event.event_id
+        assert event.ts_wall
+        assert event.ts_mono
+        assert event.correlation_id
+        assert event.run_id
+        assert event.schema_version == "1.0"
+
+    def test_kill_switch_event_defaults(self) -> None:
+        """Test that KillSwitchEvent has correct defaults."""
+        event = KillSwitchEvent(
+            triggered=True,
+            reason="Kill switch triggered",
+            triggered_by="system",
+        )
+
+        assert event.cancel_open_orders is True
+        assert event.details == {}
+
+    def test_kill_switch_event_reset(self) -> None:
+        """Test that KillSwitchEvent can represent reset."""
+        event = KillSwitchEvent(
+            triggered=False,
+            reason="Kill switch reset by operator",
+            triggered_by="operator",
+        )
+
+        assert event.triggered is False
+        assert event.reason == "Kill switch reset by operator"
+
+    def test_kill_switch_event_serialization(self) -> None:
+        """Test that KillSwitchEvent can be serialized."""
+        event = KillSwitchEvent(
+            triggered=True,
+            reason="Circuit breaker triggered kill switch",
+            triggered_by="circuit_breaker",
+            details={"circuit_breaker_type": "reconcile_divergence"},
+        )
+
+        # Pydantic model can be serialized
+        event_dict = event.model_dump()
+        assert event_dict["triggered"] is True
+        assert event_dict["reason"] == "Circuit breaker triggered kill switch"
+        assert event_dict["triggered_by"] == "circuit_breaker"
+
+        # JSON serialization
+        event_json = event.model_dump_json()
+        assert isinstance(event_json, str)
+        assert "circuit_breaker" in event_json
+
+    def test_kill_switch_event_is_immutable(self) -> None:
+        """Test that KillSwitchEvent is immutable (frozen model)."""
+        event = KillSwitchEvent(
+            triggered=True,
+            reason="Kill switch triggered",
+            triggered_by="system",
+        )
+
+        with pytest.raises(ValidationError):
+            event.triggered = False  # type: ignore[misc]
+
+    def test_kill_switch_event_requires_triggered(self) -> None:
+        """Test that KillSwitchEvent requires triggered."""
+        with pytest.raises(ValidationError):
+            KillSwitchEvent(reason="Test", triggered_by="system")  # type: ignore[call-arg]
+
+    def test_kill_switch_event_requires_reason(self) -> None:
+        """Test that KillSwitchEvent requires reason."""
+        with pytest.raises(ValidationError):
+            KillSwitchEvent(triggered=True, triggered_by="system")  # type: ignore[call-arg]
+
+    def test_kill_switch_event_requires_triggered_by(self) -> None:
+        """Test that KillSwitchEvent requires triggered_by."""
+        with pytest.raises(ValidationError):
+            KillSwitchEvent(triggered=True, reason="Test")  # type: ignore[call-arg]

@@ -55,6 +55,19 @@ class TestSystemStartedEvent:
 
         assert event1.run_id == event2.run_id
 
+    def test_system_started_event_with_explicit_run_id(self) -> None:
+        """Test that SystemStartedEvent can be created with explicit run_id.
+
+        Per flows.mdc §2: SystemStartedEvent should include run_id for correlation.
+        This test verifies that run_id can be explicitly set during boot.
+        """
+        explicit_run_id = "test-run-id-12345"
+        event = SystemStartedEvent(run_id=explicit_run_id)
+
+        assert event.run_id == explicit_run_id
+        assert event.source == EventSource.OPS
+        assert event.event_id  # Should still have unique event_id
+
 
 class TestConfigLoadedEvent:
     """Tests for ConfigLoadedEvent."""
