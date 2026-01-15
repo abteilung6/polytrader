@@ -500,3 +500,14 @@ def record_circuit_breaker(circuit_type: str) -> None:
     """
     collector = get_metrics_collector()
     collector.increment_counter("circuit_breaker_total", labels={"type": circuit_type})
+
+
+def record_adapter_error(error_class: str) -> None:
+    """Record an adapter error per observability.mdc §4.
+
+    Args:
+        error_class: Error classification (e.g., "fatal", "retryable",
+            "network", "timeout")
+    """
+    collector = get_metrics_collector()
+    collector.increment_counter("adapter_errors_total", labels={"class": error_class})

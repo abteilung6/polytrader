@@ -10,6 +10,7 @@ from polytrader.obs.logging import (
 )
 from polytrader.obs.metrics import (
     get_metrics_collector,
+    record_adapter_error,
     record_circuit_breaker,
     record_md_gap,
     record_md_reconnect,
@@ -33,6 +34,7 @@ __all__ = [
     "bind_order_context",
     "bind_strategy_context",
     "get_metrics_collector",
+    "record_adapter_error",
     "record_circuit_breaker",
     "record_md_gap",
     "record_md_reconnect",

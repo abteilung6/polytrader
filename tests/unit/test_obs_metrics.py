@@ -5,6 +5,7 @@ Per Commit 1: Add market data metrics infrastructure.
 
 from polytrader.obs.metrics import (
     MemoryMetricsCollector,
+    record_adapter_error,
     record_circuit_breaker,
     record_md_gap,
     record_md_reconnect,
@@ -611,6 +612,52 @@ class TestSafetyMetrics:
         # Verify all metrics are recorded independently
         assert collector.get_gauge("execution_enabled") == 1.0
         assert collector.get_gauge("kill_switch") == 0.0
+        assert (
+            collector.get_counter("circuit_breaker_total", labels={"type": "reconcile_divergence"})
+            == 1
+        )
+
+
+class TestAdapterErrorMetrics:
+    """Tests for adapter error metrics functions per observability.mdc §4."""
+
+    def test_record_adapter_error(self) -> None:
+        """Test that record_adapter_error increments counter with class label."""
+        collector = MemoryMetricsCollector()
+        set_metrics_collector(collector)
+
+        record_adapter_error(error_class="fatal")
+        record_adapter_error(error_class="fatal")
+        record_adapter_error(error_class="retryable")
+
+        assert collector.get_counter("adapter_errors_total", labels={"class": "fatal"}) == 2
+        assert collector.get_counter("adapter_errors_total", labels={"class": "retryable"}) == 1
+
+    def test_record_adapter_error_multiple_classes(self) -> None:
+        """Test that record_adapter_error tracks different error classes separately."""
+        collector = MemoryMetricsCollector()
+        set_metrics_collector(collector)
+
+        record_adapter_error(error_class="fatal")
+        record_adapter_error(error_class="retryable")
+        record_adapter_error(error_class="network")
+        record_adapter_error(error_class="timeout")
+        record_adapter_error(error_class="fatal")
+
+        assert collector.get_counter("adapter_errors_total", labels={"class": "fatal"}) == 2
+        assert collector.get_counter("adapter_errors_total", labels={"class": "retryable"}) == 1
+        assert collector.get_counter("adapter_errors_total", labels={"class": "network"}) == 1
+        assert collector.get_counter("adapter_errors_total", labels={"class": "timeout"}) == 1
+
+    def test_record_adapter_error_isolation(self) -> None:
+        """Test that adapter error metrics are isolated from other metrics."""
+        collector = MemoryMetricsCollector()
+        set_metrics_collector(collector)
+
+        record_adapter_error(error_class="fatal")
+        record_circuit_breaker(circuit_type="reconcile_divergence")
+
+        assert collector.get_counter("adapter_errors_total", labels={"class": "fatal"}) == 1
         assert (
             collector.get_counter("circuit_breaker_total", labels={"type": "reconcile_divergence"})
             == 1
