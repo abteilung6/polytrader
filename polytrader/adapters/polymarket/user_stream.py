@@ -35,10 +35,11 @@ from polytrader.adapters.polymarket.models import (
 )
 from polytrader.clob import IClobClient
 from polytrader.events.bus import EventBus
+from polytrader.logging_config import logger
+from polytrader.obs.logging import bind_correlation_context
 
 # Note: User stream adapter publishes canonical events, not OMS events
 # OMS will subscribe and convert canonical events to OMS events
-from polytrader.logging_config import logger
 
 # Polymarket WebSocket endpoint
 # Per Polymarket CLOB WebSocket API:
@@ -99,10 +100,17 @@ class UserStreamAdapter:
             try:
                 await self._connect_and_listen()
             except asyncio.CancelledError:
-                logger.info("User stream adapter cancelled")
+                bind_correlation_context(
+                    logger, correlation_id="", event_type="UserStreamCancelled"
+                ).info("User stream adapter cancelled")
                 break
             except Exception as e:
-                logger.exception(
+                bind_correlation_context(
+                    logger,
+                    correlation_id="",
+                    event_type="UserStreamError",
+                    error_class="system",
+                ).exception(
                     "User stream adapter error, reconnecting",
                     error_type=type(e).__name__,
                     error=str(e),
@@ -119,7 +127,9 @@ class UserStreamAdapter:
             except Exception:
                 pass
         self._running = False
-        logger.info("User stream adapter stopped")
+        bind_correlation_context(logger, correlation_id="", event_type="UserStreamStopped").info(
+            "User stream adapter stopped"
+        )
 
     def stop(self) -> None:
         """Stop user stream adapter async loop."""
@@ -176,7 +186,9 @@ class UserStreamAdapter:
             raise ValueError("API credentials not available from clob_client")
 
         # Connect to WebSocket
-        logger.info("Connecting to Polymarket user stream WebSocket", url=WS_USER_URL)
+        bind_correlation_context(
+            logger, correlation_id="", event_type="UserStreamConnecting", url=WS_USER_URL
+        ).info("Connecting to Polymarket user stream WebSocket", url=WS_USER_URL)
         async with websockets.connect(WS_USER_URL) as ws:
             self._ws = ws
             self._reconnect_delay = INITIAL_RECONNECT_DELAY  # Reset on successful connect
@@ -193,7 +205,9 @@ class UserStreamAdapter:
                 },
             }
             await ws.send(json.dumps(subscribe_message))
-            logger.info("Subscribed to user channel with authentication")
+            bind_correlation_context(
+                logger, correlation_id="", event_type="UserStreamSubscribed"
+            ).info("Subscribed to user channel with authentication")
 
             # Start ping task to keep connection alive (every 10 seconds)
             ping_task = asyncio.create_task(self._ping_loop(ws))
@@ -210,7 +224,12 @@ class UserStreamAdapter:
                         )
                         await self._handle_message(message_str)
                     except Exception as e:
-                        logger.exception(
+                        bind_correlation_context(
+                            logger,
+                            correlation_id="",
+                            event_type="UserStreamMessageError",
+                            error_class="system",
+                        ).exception(
                             "Error handling user stream message",
                             error_type=type(e).__name__,
                             error=str(e),
@@ -239,17 +258,26 @@ class UserStreamAdapter:
             # Respond to ping with pong (plain text, not JSON)
             if self._ws:
                 await self._ws.send(WS_PONG)
-            logger.debug("Received PING, sent PONG")
+            bind_correlation_context(logger, correlation_id="", event_type="UserStreamPing").debug(
+                "Received PING, sent PONG"
+            )
             return
         elif message_stripped == WS_PONG:
             # Server response to our PING - just acknowledge
-            logger.debug("Received PONG (response to our PING)")
+            bind_correlation_context(logger, correlation_id="", event_type="UserStreamPong").debug(
+                "Received PONG (response to our PING)"
+            )
             return
 
         try:
             data = json.loads(raw_message)
         except json.JSONDecodeError as e:
-            logger.warning(
+            bind_correlation_context(
+                logger,
+                correlation_id="",
+                event_type="UserStreamParseError",
+                error_class="system",
+            ).warning(
                 "Failed to parse user stream message as JSON",
                 error=str(e),
                 message_preview=raw_message[:200],
@@ -260,7 +288,11 @@ class UserStreamAdapter:
         # Parse using Pydantic models
         parsed_message = parse_websocket_message(data)
         if parsed_message is None:
-            logger.debug(
+            bind_correlation_context(
+                logger,
+                correlation_id="",
+                event_type="UserStreamUnknownMessage",
+            ).debug(
                 "Unknown or unparseable message type",
                 event_type=data.get("event_type"),
                 data=data,
@@ -273,7 +305,11 @@ class UserStreamAdapter:
         elif isinstance(parsed_message, TradeMessage):
             await self._handle_trade_message(parsed_message)
         else:
-            logger.debug(
+            bind_correlation_context(
+                logger,
+                correlation_id="",
+                event_type="UserStreamUnhandledMessage",
+            ).debug(
                 "Unhandled message type in user channel",
                 message_type=type(parsed_message).__name__,
                 event_type=data.get("event_type"),
@@ -318,7 +354,15 @@ class UserStreamAdapter:
             from polytrader.events import USER_STREAM_ACKS
 
             await self.bus.publish(USER_STREAM_ACKS, canonical_ack)
-            logger.info(
+            bind_correlation_context(
+                logger,
+                correlation_id="",  # Not available from Polymarket
+                venue_order_id=venue_order_id,
+                event_type="UserStreamOrderAck",
+                market=order_msg.market,
+                side=order_msg.side,
+                price=order_msg.price,
+            ).info(
                 "Published order acknowledgment (PLACEMENT)",
                 venue_order_id=venue_order_id,
                 market=order_msg.market,
@@ -338,7 +382,13 @@ class UserStreamAdapter:
             from polytrader.events import USER_STREAM_CANCELS
 
             await self.bus.publish(USER_STREAM_CANCELS, canonical_cancel)
-            logger.info(
+            bind_correlation_context(
+                logger,
+                correlation_id="",  # Not available from Polymarket
+                venue_order_id=venue_order_id,
+                event_type="UserStreamOrderCancel",
+                market=order_msg.market,
+            ).info(
                 "Published order cancellation",
                 venue_order_id=venue_order_id,
                 market=order_msg.market,
@@ -347,14 +397,24 @@ class UserStreamAdapter:
         elif order_msg.type == "UPDATE":
             # Order update (partial fill) - we don't emit a separate event for this
             # The actual fill will come via TradeMessage
-            logger.debug(
+            bind_correlation_context(
+                logger,
+                correlation_id="",  # Not available from Polymarket
+                venue_order_id=venue_order_id,
+                event_type="UserStreamOrderUpdate",
+            ).debug(
                 "Order update (partial fill)",
                 venue_order_id=venue_order_id,
                 size_matched=order_msg.size_matched,
                 original_size=order_msg.original_size,
             )
         else:
-            logger.warning(
+            bind_correlation_context(
+                logger,
+                correlation_id="",  # Not available from Polymarket
+                venue_order_id=venue_order_id,
+                event_type="UserStreamUnknownOrderType",
+            ).warning(
                 "Unknown order message type",
                 type=order_msg.type,
                 venue_order_id=venue_order_id,
@@ -378,7 +438,12 @@ class UserStreamAdapter:
         """
         # Only process MATCHED trades as fills
         if trade_msg.status != "MATCHED":
-            logger.debug(
+            bind_correlation_context(
+                logger,
+                correlation_id="",  # Not available from Polymarket
+                event_type="UserStreamTradeNonMatched",
+                trade_id=trade_msg.id,
+            ).debug(
                 "Trade message with non-MATCHED status",
                 trade_id=trade_msg.id,
                 status=trade_msg.status,
@@ -397,7 +462,13 @@ class UserStreamAdapter:
             fill_size = float(trade_msg.size)
             fill_price = float(trade_msg.price)
         except (ValueError, TypeError) as e:
-            logger.warning(
+            bind_correlation_context(
+                logger,
+                correlation_id="",  # Not available from Polymarket
+                event_type="UserStreamTradeParseError",
+                error_class="system",
+                trade_id=trade_msg.id,
+            ).warning(
                 "Failed to parse trade size/price",
                 trade_id=trade_msg.id,
                 size=trade_msg.size,
@@ -408,7 +479,13 @@ class UserStreamAdapter:
 
         # Validate price range (0-1 for Polymarket)
         if fill_price <= 0 or fill_price > 1:
-            logger.warning(
+            bind_correlation_context(
+                logger,
+                correlation_id="",  # Not available from Polymarket
+                event_type="UserStreamInvalidFillPrice",
+                error_class="system",
+                trade_id=trade_msg.id,
+            ).warning(
                 "Invalid fill price",
                 trade_id=trade_msg.id,
                 price=fill_price,
@@ -483,7 +560,15 @@ class UserStreamAdapter:
         from polytrader.events import USER_STREAM_FILLS
 
         await self.bus.publish(USER_STREAM_FILLS, canonical_fill)
-        logger.info(
+        bind_correlation_context(
+            logger,
+            correlation_id="",  # Not available from Polymarket
+            venue_order_id=canonical_fill.venue_order_id,
+            fill_id=canonical_fill.fill_id,
+            event_type="UserStreamFill",
+            side=side,
+            market=market,
+        ).info(
             "Published fill event (trade MATCHED)",
             fill_id=canonical_fill.fill_id,
             venue_order_id=canonical_fill.venue_order_id,
@@ -506,16 +591,28 @@ class UserStreamAdapter:
                 await asyncio.sleep(10.0)  # Send ping every 10 seconds
                 if self._running and ws:
                     await ws.send(WS_PING)
-                    logger.debug("Sent PING to keep connection alive")
+                    bind_correlation_context(
+                        logger, correlation_id="", event_type="UserStreamPingSent"
+                    ).debug("Sent PING to keep connection alive")
         except asyncio.CancelledError:
             pass
         except Exception as e:
-            logger.warning("Error in ping loop", error=str(e))
+            bind_correlation_context(
+                logger,
+                correlation_id="",
+                event_type="UserStreamPingError",
+                error_class="system",
+            ).warning("Error in ping loop", error=str(e))
 
     async def _wait_before_reconnect(self) -> None:
         """Wait before attempting reconnection (exponential backoff)."""
         delay = min(self._reconnect_delay, MAX_RECONNECT_DELAY)
-        logger.info(
+        bind_correlation_context(
+            logger,
+            correlation_id="",
+            event_type="UserStreamReconnectWait",
+            delay_seconds=delay,
+        ).info(
             "Waiting before reconnection",
             delay_seconds=delay,
             max_delay=MAX_RECONNECT_DELAY,

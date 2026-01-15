@@ -21,6 +21,7 @@ from polytrader.clob import IClobClient
 from polytrader.events.types import OrderIntentEvent
 from polytrader.execution.adapter import IVenueAdapter
 from polytrader.logging_config import logger
+from polytrader.obs.logging import bind_correlation_context
 
 
 class ClobVenueAdapter(IVenueAdapter):
@@ -74,13 +75,17 @@ class ClobVenueAdapter(IVenueAdapter):
         Raises:
             VenueError: If order submission fails
         """
+        import time
+
+        start_time = time.monotonic()
+
         # Get market info from Gamma
         market = await asyncio.to_thread(self.gamma_client.get_market_by_slug, intent.market_slug)
         token_id = market.get_token_id(intent.outcome)
 
         # Verify balance for BUY orders
         if intent.side == "BUY":
-            await self._verify_balance(intent.size)
+            await self._verify_balance(intent.size, correlation_id=intent.correlation_id)
 
         # Place market order
         try:
@@ -89,6 +94,10 @@ class ClobVenueAdapter(IVenueAdapter):
                 token_id=token_id,
                 amount=intent.size,
                 side=intent.side,
+                client_order_id=client_order_id,
+                correlation_id=intent.correlation_id,
+                market_slug=intent.market_slug,
+                outcome=intent.outcome,
             )
         except Exception as e:
             # Classify error
@@ -97,6 +106,21 @@ class ClobVenueAdapter(IVenueAdapter):
             error_type: Literal["retryable", "fatal"] = (
                 "retryable" if error_type_str == "retryable" else "fatal"
             )
+
+            # Structured logging for error
+            latency_ms = (time.monotonic() - start_time) * 1000.0
+            bind_correlation_context(
+                logger,
+                correlation_id=intent.correlation_id,
+                client_order_id=client_order_id,
+                market_slug=intent.market_slug,
+                outcome=intent.outcome,
+                side=intent.side,
+                event_type="AdapterSubmitError",
+                error_class=error_type,
+                latency_ms=latency_ms,
+            ).exception("Order submission failed")
+
             raise VenueError(
                 error_type=error_type,
                 message=str(e),
@@ -106,6 +130,23 @@ class ClobVenueAdapter(IVenueAdapter):
         # Normalize response
         venue_order_id = response.get("order_id") or response.get("id", "unknown")
         status = response.get("status") or response.get("state", "unknown")
+
+        # Structured logging for success
+        latency_ms = (time.monotonic() - start_time) * 1000.0
+        bind_correlation_context(
+            logger,
+            correlation_id=intent.correlation_id,
+            client_order_id=client_order_id,
+            venue_order_id=str(venue_order_id),
+            market_slug=intent.market_slug,
+            outcome=intent.outcome,
+            side=intent.side,
+            event_type="AdapterSubmitSuccess",
+            latency_ms=latency_ms,
+        ).info(
+            "Order submitted successfully: {venue_order_id}",
+            venue_order_id=venue_order_id,
+        )
 
         return VenueResponse(
             venue_order_id=str(venue_order_id),
@@ -154,7 +195,9 @@ class ClobVenueAdapter(IVenueAdapter):
         )
         return await asyncio.to_thread(self.clob_client.get_orders, params)
 
-    async def _verify_balance(self, required_amount: float) -> float:
+    async def _verify_balance(
+        self, required_amount: float, correlation_id: str | None = None
+    ) -> float:
         """Verify USDC balance is sufficient for the order.
 
         Args:
@@ -171,18 +214,27 @@ class ClobVenueAdapter(IVenueAdapter):
             self.clob_client.get_balance_allowance, balance_params
         )
 
-        logger.debug("Raw balance info from API: {info}", info=balance_info)
-
         balance_str = balance_info.get("balance", "0") or "0"
         balance = float(balance_str)
 
-        logger.info(
+        # Structured logging for balance check
+        log_context = bind_correlation_context(
+            logger,
+            correlation_id=correlation_id or "",
+            event_type="AdapterBalanceCheck",
+            required_amount=required_amount,
+            balance=balance,
+        )
+        log_context.debug("Raw balance info from API: {info}", info=balance_info)
+        log_context.info(
             "USDC Balance: {balance} (required: {required})",
             balance=balance,
             required=required_amount,
         )
-        logger.debug("Allowance info: {allowance}", allowance=balance_info.get("allowance", "N/A"))
-        logger.info("Allowance: Auto-managed (Magic wallet)")
+        log_context.debug(
+            "Allowance info: {allowance}", allowance=balance_info.get("allowance", "N/A")
+        )
+        log_context.info("Allowance: Auto-managed (Magic wallet)")
 
         if balance < required_amount:
             raise ValueError(
@@ -197,6 +249,10 @@ class ClobVenueAdapter(IVenueAdapter):
         token_id: str,
         amount: float,
         side: str,
+        client_order_id: str | None = None,
+        correlation_id: str | None = None,
+        market_slug: str | None = None,
+        outcome: str | None = None,
     ) -> dict[str, Any]:
         """Place a market order on Polymarket (synchronous).
 
@@ -208,7 +264,18 @@ class ClobVenueAdapter(IVenueAdapter):
         Returns:
             Order response from the API
         """
-        logger.bind(side=side, amount=amount).info(
+        # Structured logging for order placement
+        log_context = bind_correlation_context(
+            logger,
+            correlation_id=correlation_id or "",
+            client_order_id=client_order_id or "",
+            market_slug=market_slug,
+            outcome=outcome,
+            side=side,
+            amount=amount,
+            event_type="AdapterPlaceOrder",
+        )
+        log_context.info(
             "Placing market order: {amount} USDC, side={side}, token_id={token_id}...",
             amount=amount,
             side=side,
@@ -224,19 +291,32 @@ class ClobVenueAdapter(IVenueAdapter):
         order_hash = (
             signed_order.get("hash", "N/A")[:20] if isinstance(signed_order, dict) else "N/A"
         )
-        logger.debug("Created signed order (hash: {hash}...)", hash=order_hash)
+        log_context.debug("Created signed order (hash: {hash}...)", hash=order_hash)
         response: dict[str, Any] = self.clob_client.post_order(signed_order, OrderType.FOK)
 
         order_id = response.get("order_id") or response.get("id", "unknown")
         status = response.get("status") or response.get("state", "unknown")
-        logger.bind(order_id=order_id, status=status, side=side, amount=amount).info(
+        # Update log context with venue_order_id
+        log_context = bind_correlation_context(
+            logger,
+            correlation_id=correlation_id or "",
+            client_order_id=client_order_id or "",
+            venue_order_id=order_id,
+            market_slug=market_slug,
+            outcome=outcome,
+            side=side,
+            amount=amount,
+            status=status,
+            event_type="AdapterPlaceOrder",
+        )
+        log_context.info(
             "Order submitted: ID={order_id}, status={status}, side={side}, amount={amount} USDC",
             order_id=order_id,
             status=status,
             side=side,
             amount=amount,
         )
-        logger.debug("Full order response: {response}", response=response)
+        log_context.debug("Full order response: {response}", response=response)
         return response
 
     def _classify_error(self, error: Exception) -> str:
