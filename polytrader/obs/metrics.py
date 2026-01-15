@@ -466,3 +466,37 @@ def record_order_intent(strategy_id: str, market_slug: str, outcome: str, side: 
             "side": side,
         },
     )
+
+
+# Safety metrics functions per observability.mdc §4
+
+
+def set_execution_enabled(enabled: bool) -> None:
+    """Set execution enabled gauge per observability.mdc §4.
+
+    Args:
+        enabled: Whether execution is enabled (True = 1, False = 0)
+    """
+    collector = get_metrics_collector()
+    collector.set_gauge("execution_enabled", 1.0 if enabled else 0.0)
+
+
+def set_kill_switch(active: bool) -> None:
+    """Set kill switch gauge per observability.mdc §4.
+
+    Args:
+        active: Whether kill switch is active (True = 1, False = 0)
+    """
+    collector = get_metrics_collector()
+    collector.set_gauge("kill_switch", 1.0 if active else 0.0)
+
+
+def record_circuit_breaker(circuit_type: str) -> None:
+    """Record a circuit breaker trigger per observability.mdc §4.
+
+    Args:
+        circuit_type: Circuit breaker type (e.g., "reconcile_divergence",
+            "data_stale", "error_rate")
+    """
+    collector = get_metrics_collector()
+    collector.increment_counter("circuit_breaker_total", labels={"type": circuit_type})

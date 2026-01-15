@@ -5,6 +5,7 @@ Per Commit 1: Add market data metrics infrastructure.
 
 from polytrader.obs.metrics import (
     MemoryMetricsCollector,
+    record_circuit_breaker,
     record_md_gap,
     record_md_reconnect,
     record_md_staleness,
@@ -12,6 +13,8 @@ from polytrader.obs.metrics import (
     record_order_intent,
     record_strategy_eval,
     record_strategy_eval_latency,
+    set_execution_enabled,
+    set_kill_switch,
     set_md_book_mid,
     set_md_spread,
     set_metrics_collector,
@@ -494,3 +497,121 @@ class TestStrategyMetrics:
         )
         assert simple_percentiles[0.5] == 10.0
         assert winner_percentiles[0.5] == 20.0
+
+
+class TestSafetyMetrics:
+    """Tests for safety metrics functions per observability.mdc §4."""
+
+    def test_set_execution_enabled(self) -> None:
+        """Test that set_execution_enabled sets gauge to 1 when enabled."""
+        collector = MemoryMetricsCollector()
+        set_metrics_collector(collector)
+
+        set_execution_enabled(enabled=True)
+
+        assert collector.get_gauge("execution_enabled") == 1.0
+
+    def test_set_execution_enabled_disabled(self) -> None:
+        """Test that set_execution_enabled sets gauge to 0 when disabled."""
+        collector = MemoryMetricsCollector()
+        set_metrics_collector(collector)
+
+        set_execution_enabled(enabled=False)
+
+        assert collector.get_gauge("execution_enabled") == 0.0
+
+    def test_set_execution_enabled_updates(self) -> None:
+        """Test that set_execution_enabled updates gauge value."""
+        collector = MemoryMetricsCollector()
+        set_metrics_collector(collector)
+
+        set_execution_enabled(enabled=True)
+        assert collector.get_gauge("execution_enabled") == 1.0
+
+        set_execution_enabled(enabled=False)
+        assert collector.get_gauge("execution_enabled") == 0.0
+
+        set_execution_enabled(enabled=True)
+        assert collector.get_gauge("execution_enabled") == 1.0
+
+    def test_set_kill_switch(self) -> None:
+        """Test that set_kill_switch sets gauge to 1 when active."""
+        collector = MemoryMetricsCollector()
+        set_metrics_collector(collector)
+
+        set_kill_switch(active=True)
+
+        assert collector.get_gauge("kill_switch") == 1.0
+
+    def test_set_kill_switch_inactive(self) -> None:
+        """Test that set_kill_switch sets gauge to 0 when inactive."""
+        collector = MemoryMetricsCollector()
+        set_metrics_collector(collector)
+
+        set_kill_switch(active=False)
+
+        assert collector.get_gauge("kill_switch") == 0.0
+
+    def test_set_kill_switch_updates(self) -> None:
+        """Test that set_kill_switch updates gauge value."""
+        collector = MemoryMetricsCollector()
+        set_metrics_collector(collector)
+
+        set_kill_switch(active=True)
+        assert collector.get_gauge("kill_switch") == 1.0
+
+        set_kill_switch(active=False)
+        assert collector.get_gauge("kill_switch") == 0.0
+
+        set_kill_switch(active=True)
+        assert collector.get_gauge("kill_switch") == 1.0
+
+    def test_record_circuit_breaker(self) -> None:
+        """Test that record_circuit_breaker increments counter with type label."""
+        collector = MemoryMetricsCollector()
+        set_metrics_collector(collector)
+
+        record_circuit_breaker(circuit_type="reconcile_divergence")
+        record_circuit_breaker(circuit_type="reconcile_divergence")
+        record_circuit_breaker(circuit_type="data_stale")
+
+        assert (
+            collector.get_counter("circuit_breaker_total", labels={"type": "reconcile_divergence"})
+            == 2
+        )
+        assert collector.get_counter("circuit_breaker_total", labels={"type": "data_stale"}) == 1
+
+    def test_record_circuit_breaker_multiple_types(self) -> None:
+        """Test that record_circuit_breaker tracks different types separately."""
+        collector = MemoryMetricsCollector()
+        set_metrics_collector(collector)
+
+        record_circuit_breaker(circuit_type="reconcile_divergence")
+        record_circuit_breaker(circuit_type="data_stale")
+        record_circuit_breaker(circuit_type="error_rate")
+        record_circuit_breaker(circuit_type="reconcile_divergence")
+
+        assert (
+            collector.get_counter("circuit_breaker_total", labels={"type": "reconcile_divergence"})
+            == 2
+        )
+        assert collector.get_counter("circuit_breaker_total", labels={"type": "data_stale"}) == 1
+        assert collector.get_counter("circuit_breaker_total", labels={"type": "error_rate"}) == 1
+
+    def test_safety_metrics_isolation(self) -> None:
+        """Test that different safety metrics are isolated."""
+        collector = MemoryMetricsCollector()
+        set_metrics_collector(collector)
+
+        # Set different metrics
+        set_execution_enabled(enabled=True)
+        set_kill_switch(active=False)
+        record_circuit_breaker(circuit_type="reconcile_divergence")
+
+        # Verify all metrics are recorded independently
+        assert collector.get_gauge("execution_enabled") == 1.0
+        assert collector.get_gauge("kill_switch") == 0.0
+        assert (
+            collector.get_counter("circuit_breaker_total", labels={"type": "reconcile_divergence"})
+            == 1
+        )

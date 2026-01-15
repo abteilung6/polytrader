@@ -121,7 +121,9 @@ class TestAdapterStructuredLogging:
         mock_logger.bind.return_value = mock_bound_logger
 
         # Make post_order raise an error
-        adapter.clob_client.post_order = MagicMock(side_effect=RuntimeError("API error"))
+        adapter.clob_client.post_order = MagicMock(  # type: ignore[method-assign]
+            side_effect=RuntimeError("API error")
+        )
 
         from polytrader.adapters.polymarket.models import VenueError
 

@@ -10,6 +10,7 @@ from polytrader.obs.logging import (
 )
 from polytrader.obs.metrics import (
     get_metrics_collector,
+    record_circuit_breaker,
     record_md_gap,
     record_md_reconnect,
     record_md_staleness,
@@ -20,6 +21,8 @@ from polytrader.obs.metrics import (
     record_risk_denial,
     record_strategy_eval,
     record_strategy_eval_latency,
+    set_execution_enabled,
+    set_kill_switch,
     set_md_book_mid,
     set_md_spread,
     set_metrics_collector,
@@ -30,6 +33,7 @@ __all__ = [
     "bind_order_context",
     "bind_strategy_context",
     "get_metrics_collector",
+    "record_circuit_breaker",
     "record_md_gap",
     "record_md_reconnect",
     "record_md_staleness",
@@ -40,6 +44,8 @@ __all__ = [
     "record_risk_denial",
     "record_strategy_eval",
     "record_strategy_eval_latency",
+    "set_execution_enabled",
+    "set_kill_switch",
     "set_md_book_mid",
     "set_md_spread",
     "set_metrics_collector",
