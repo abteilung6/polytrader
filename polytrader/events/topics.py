@@ -32,6 +32,7 @@ _reconcile_topic: Topic | None = None
 _circuit_breaker_topic: Topic | None = None
 _position_updates_topic: Topic | None = None
 _pnl_updates_topic: Topic | None = None
+_cancel_requested_topic: Topic | None = None
 
 
 def _create_market_data_topic() -> Topic:
@@ -473,6 +474,21 @@ def get_pnl_updates_topic() -> Topic:
     return _pnl_updates_topic
 
 
+def _create_cancel_requested_topic() -> Topic:
+    """Create the CANCEL_REQUESTED topic."""
+    from polytrader.events.types import CancelRequestedEvent
+
+    return Topic[CancelRequestedEvent]("cancel_requested")
+
+
+def get_cancel_requested_topic() -> Topic:
+    """Get the CANCEL_REQUESTED topic (singleton)."""
+    global _cancel_requested_topic
+    if _cancel_requested_topic is None:
+        _cancel_requested_topic = _create_cancel_requested_topic()
+    return _cancel_requested_topic
+
+
 def __getattr__(name: str) -> Topic:
     """Lazily initialize topic constants on first access.
 
@@ -546,5 +562,7 @@ def __getattr__(name: str) -> Topic:
         return get_position_updates_topic()
     elif name == "PNL_UPDATES":
         return get_pnl_updates_topic()
+    elif name == "CANCEL_REQUESTED":
+        return get_cancel_requested_topic()
     else:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

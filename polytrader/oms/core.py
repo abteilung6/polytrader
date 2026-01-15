@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 from polytrader.events import (
     APPROVED_PROPOSALS,
     CANCEL_ORDER_COMMANDS,
+    CANCEL_REQUESTED,
     FILLS,
     ORDER_ACKS,
     ORDER_CANCELS,
@@ -25,6 +26,7 @@ from polytrader.events import (
 )
 from polytrader.events.bus import EventBus
 from polytrader.events.types import (
+    CancelRequestedEvent,
     FillEvent,
     OrderAckEvent,
     OrderCanceledEvent,
@@ -730,6 +732,16 @@ class OMSCore:
                 # For now, record with current state
                 record_order_lifetime(order, lifetime_ms)
             del self._order_timestamps[order.order_id]
+
+        # Emit CancelRequestedEvent per observability.mdc §1
+        cancel_requested_event = CancelRequestedEvent(
+            order_id=order.order_id,
+            client_order_id=client_order_id,
+            reason=reason,
+            requested_by="system",
+            correlation_id=order.correlation_id,
+        )
+        await self._bus.publish(CANCEL_REQUESTED, cancel_requested_event)
 
         # Send CancelOrderCommand to Execution
         from polytrader.oms.commands import CancelOrderCommand

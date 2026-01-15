@@ -237,6 +237,10 @@ def __getattr__(name: str):
         from polytrader.events.topics import get_pnl_updates_topic
 
         return get_pnl_updates_topic()
+    elif name == "CANCEL_REQUESTED":
+        from polytrader.events.topics import get_cancel_requested_topic
+
+        return get_cancel_requested_topic()
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
