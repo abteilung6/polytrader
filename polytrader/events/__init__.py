@@ -5,6 +5,7 @@ from polytrader.events.store import IEventStore, MemoryEventStore
 
 # Import event types first
 from polytrader.events.types import (
+    CancelRequestedEvent,
     CircuitBreakerEvent,
     ConfigLoadedEvent,
     Event,
@@ -25,6 +26,8 @@ from polytrader.events.types import (
     OrderIntentEvent,
     OrderRejectedEvent,
     OrderSubmittedEvent,
+    PnLEvent,
+    PositionUpdatedEvent,
     ReconcileEvent,
     RiskCheckEvent,
     ServiceErrorEvent,
@@ -39,6 +42,7 @@ from polytrader.events.types import (
 __all__ = [
     "APPROVED_PROPOSALS",
     "CANCEL_ORDER_COMMANDS",
+    "CancelRequestedEvent",
     "CircuitBreakerEvent",
     "ConfigLoadedEvent",
     "Event",
@@ -76,6 +80,8 @@ __all__ = [
     "OrderSubmittedEvent",
     "ORDERS",
     "CIRCUIT_BREAKER",
+    "PnLEvent",
+    "PositionUpdatedEvent",
     "PROPOSALS",
     "RECONCILE",
     "ReconcileEvent",
