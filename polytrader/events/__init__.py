@@ -99,6 +99,10 @@ __all__ = [
     "TARGETS",
     "TargetEvent",
     "Topic",
+    "VenueConnectedEvent",
+    "VenueDisconnectedEvent",
+    "VENUE_CONNECTED",
+    "VENUE_DISCONNECTED",
     "USER_STREAM_ACKS",
     "USER_STREAM_CANCELS",
     "USER_STREAM_FILLS",
@@ -241,6 +245,14 @@ def __getattr__(name: str):
         from polytrader.events.topics import get_cancel_requested_topic
 
         return get_cancel_requested_topic()
+    elif name == "VENUE_CONNECTED":
+        from polytrader.events.topics import get_venue_connected_topic
+
+        return get_venue_connected_topic()
+    elif name == "VENUE_DISCONNECTED":
+        from polytrader.events.topics import get_venue_disconnected_topic
+
+        return get_venue_disconnected_topic()
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 

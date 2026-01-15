@@ -33,6 +33,8 @@ _circuit_breaker_topic: Topic | None = None
 _position_updates_topic: Topic | None = None
 _pnl_updates_topic: Topic | None = None
 _cancel_requested_topic: Topic | None = None
+_venue_connected_topic: Topic | None = None
+_venue_disconnected_topic: Topic | None = None
 
 
 def _create_market_data_topic() -> Topic:
@@ -489,6 +491,36 @@ def get_cancel_requested_topic() -> Topic:
     return _cancel_requested_topic
 
 
+def _create_venue_connected_topic() -> Topic:
+    """Create the VENUE_CONNECTED topic."""
+    from polytrader.events.types import VenueConnectedEvent
+
+    return Topic[VenueConnectedEvent]("venue_connected")
+
+
+def get_venue_connected_topic() -> Topic:
+    """Get the VENUE_CONNECTED topic (singleton)."""
+    global _venue_connected_topic
+    if _venue_connected_topic is None:
+        _venue_connected_topic = _create_venue_connected_topic()
+    return _venue_connected_topic
+
+
+def _create_venue_disconnected_topic() -> Topic:
+    """Create the VENUE_DISCONNECTED topic."""
+    from polytrader.events.types import VenueDisconnectedEvent
+
+    return Topic[VenueDisconnectedEvent]("venue_disconnected")
+
+
+def get_venue_disconnected_topic() -> Topic:
+    """Get the VENUE_DISCONNECTED topic (singleton)."""
+    global _venue_disconnected_topic
+    if _venue_disconnected_topic is None:
+        _venue_disconnected_topic = _create_venue_disconnected_topic()
+    return _venue_disconnected_topic
+
+
 def __getattr__(name: str) -> Topic:
     """Lazily initialize topic constants on first access.
 
@@ -564,5 +596,9 @@ def __getattr__(name: str) -> Topic:
         return get_pnl_updates_topic()
     elif name == "CANCEL_REQUESTED":
         return get_cancel_requested_topic()
+    elif name == "VENUE_CONNECTED":
+        return get_venue_connected_topic()
+    elif name == "VENUE_DISCONNECTED":
+        return get_venue_disconnected_topic()
     else:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

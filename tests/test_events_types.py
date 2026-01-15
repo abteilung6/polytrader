@@ -1456,6 +1456,88 @@ class TestPnLEvent:
             event.total_pnl = 200.0  # type: ignore[misc]
 
 
+class TestVenueConnectedEvent:
+    """Tests for VenueConnectedEvent."""
+
+    def test_venue_connected_event_creation(self) -> None:
+        """Test that VenueConnectedEvent can be created with required fields."""
+        from polytrader.events.types import VenueConnectedEvent
+
+        event = VenueConnectedEvent(
+            venue="polymarket",
+            connection_type="websocket",
+            url="wss://ws.example.com",
+        )
+        assert event.venue == "polymarket"
+        assert event.connection_type == "websocket"
+        assert event.url == "wss://ws.example.com"
+        assert event.source.value == "adapter"
+
+    def test_venue_connected_event_without_url(self) -> None:
+        """Test that VenueConnectedEvent can be created without URL."""
+        from polytrader.events.types import VenueConnectedEvent
+
+        event = VenueConnectedEvent(
+            venue="polymarket",
+            connection_type="rest",
+        )
+        assert event.venue == "polymarket"
+        assert event.connection_type == "rest"
+        assert event.url is None
+
+    def test_venue_connected_event_immutable(self) -> None:
+        """Test that VenueConnectedEvent is immutable."""
+        from polytrader.events.types import VenueConnectedEvent
+
+        event = VenueConnectedEvent(
+            venue="polymarket",
+            connection_type="websocket",
+        )
+        with pytest.raises(ValidationError):  # Pydantic frozen model raises on assignment
+            event.venue = "other"  # type: ignore[misc]
+
+
+class TestVenueDisconnectedEvent:
+    """Tests for VenueDisconnectedEvent."""
+
+    def test_venue_disconnected_event_creation(self) -> None:
+        """Test that VenueDisconnectedEvent can be created with required fields."""
+        from polytrader.events.types import VenueDisconnectedEvent
+
+        event = VenueDisconnectedEvent(
+            venue="polymarket",
+            connection_type="websocket",
+            reason="Connection closed",
+        )
+        assert event.venue == "polymarket"
+        assert event.connection_type == "websocket"
+        assert event.reason == "Connection closed"
+        assert event.source.value == "adapter"
+
+    def test_venue_disconnected_event_without_reason(self) -> None:
+        """Test that VenueDisconnectedEvent can be created without reason."""
+        from polytrader.events.types import VenueDisconnectedEvent
+
+        event = VenueDisconnectedEvent(
+            venue="polymarket",
+            connection_type="rest",
+        )
+        assert event.venue == "polymarket"
+        assert event.connection_type == "rest"
+        assert event.reason is None
+
+    def test_venue_disconnected_event_immutable(self) -> None:
+        """Test that VenueDisconnectedEvent is immutable."""
+        from polytrader.events.types import VenueDisconnectedEvent
+
+        event = VenueDisconnectedEvent(
+            venue="polymarket",
+            connection_type="websocket",
+        )
+        with pytest.raises(ValidationError):  # Pydantic frozen model raises on assignment
+            event.venue = "other"  # type: ignore[misc]
+
+
 class TestCancelRequestedEvent:
     """Tests for CancelRequestedEvent per observability.mdc §1."""
 

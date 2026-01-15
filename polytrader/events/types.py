@@ -34,6 +34,7 @@ class EventSource(str, Enum):
     EXEC = "exec"  # Execution
     POSTTRADE = "posttrade"  # Post-Trade
     OPS = "ops"  # Operations/Control
+    ADAPTER = "adapter"  # Adapters (venue connectivity)
 
 
 class Event(BaseModel):
@@ -136,6 +137,46 @@ class SystemStoppedEvent(Event):
 
     source: EventSource = Field(default=EventSource.OPS)
     reason: str | None = Field(default=None, description="Optional reason for shutdown")
+
+
+class VenueConnectedEvent(Event):
+    """Emitted when a venue connection is established.
+
+    Per observability.mdc §6: VenueConnectedEvent enables replayability checks.
+    This event is emitted when a WebSocket connection to a venue is successfully
+    established, allowing the system to track connection state for replay.
+
+    Attributes:
+        venue: Venue identifier (e.g., "polymarket")
+        connection_type: Type of connection (e.g., "websocket", "rest")
+        url: Connection URL (if applicable)
+    """
+
+    source: EventSource = Field(default=EventSource.ADAPTER)
+
+    venue: str = Field(description="Venue identifier (e.g., 'polymarket')")
+    connection_type: str = Field(description="Type of connection (e.g., 'websocket', 'rest')")
+    url: str | None = Field(default=None, description="Connection URL (if applicable)")
+
+
+class VenueDisconnectedEvent(Event):
+    """Emitted when a venue connection is lost.
+
+    Per observability.mdc §6: VenueDisconnectedEvent enables replayability checks.
+    This event is emitted when a WebSocket connection to a venue is lost or closed,
+    allowing the system to track connection state for replay.
+
+    Attributes:
+        venue: Venue identifier (e.g., "polymarket")
+        connection_type: Type of connection (e.g., "websocket", "rest")
+        reason: Optional reason for disconnection
+    """
+
+    source: EventSource = Field(default=EventSource.ADAPTER)
+
+    venue: str = Field(description="Venue identifier (e.g., 'polymarket')")
+    connection_type: str = Field(description="Type of connection (e.g., 'websocket', 'rest')")
+    reason: str | None = Field(default=None, description="Optional reason for disconnection")
 
 
 class ServiceStartedEvent(Event):

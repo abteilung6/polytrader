@@ -34,7 +34,9 @@ from polytrader.adapters.polymarket.models import (
     parse_websocket_message,
 )
 from polytrader.clob import IClobClient
+from polytrader.events import VENUE_CONNECTED, VENUE_DISCONNECTED
 from polytrader.events.bus import EventBus
+from polytrader.events.types import VenueConnectedEvent, VenueDisconnectedEvent
 from polytrader.logging_config import logger
 from polytrader.obs.logging import bind_correlation_context
 
@@ -105,6 +107,14 @@ class UserStreamAdapter:
                 ).info("User stream adapter cancelled")
                 break
             except Exception as e:
+                # Emit VenueDisconnectedEvent on error per observability.mdc §6
+                disconnected_event = VenueDisconnectedEvent(
+                    venue="polymarket",
+                    connection_type="websocket",
+                    reason=f"Error: {type(e).__name__}: {str(e)}",
+                )
+                await self.bus.publish(VENUE_DISCONNECTED, disconnected_event)
+
                 bind_correlation_context(
                     logger,
                     correlation_id="",
@@ -193,6 +203,14 @@ class UserStreamAdapter:
             self._ws = ws
             self._reconnect_delay = INITIAL_RECONNECT_DELAY  # Reset on successful connect
 
+            # Emit VenueConnectedEvent per observability.mdc §6
+            connected_event = VenueConnectedEvent(
+                venue="polymarket",
+                connection_type="websocket",
+                url=WS_USER_URL,
+            )
+            await self.bus.publish(VENUE_CONNECTED, connected_event)
+
             # Subscribe to user channel with authentication
             # Per Polymarket API: send subscription message with auth on connection
             subscribe_message = {
@@ -242,6 +260,14 @@ class UserStreamAdapter:
                     await ping_task
                 except asyncio.CancelledError:
                     pass
+
+                # Emit VenueDisconnectedEvent per observability.mdc §6
+                disconnected_event = VenueDisconnectedEvent(
+                    venue="polymarket",
+                    connection_type="websocket",
+                    reason="Connection closed",
+                )
+                await self.bus.publish(VENUE_DISCONNECTED, disconnected_event)
 
     async def _handle_message(self, raw_message: str) -> None:
         """Handle incoming WebSocket message.
