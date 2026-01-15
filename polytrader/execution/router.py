@@ -24,6 +24,7 @@ from polytrader.events.types import (
 from polytrader.execution.adapter import IVenueAdapter
 from polytrader.execution.tactics import ExecutionTactics
 from polytrader.obs.logging import bind_correlation_context
+from polytrader.obs.metrics import record_adapter_error
 
 if TYPE_CHECKING:
     from polytrader.oms.commands import CancelOrderCommand, SubmitOrderCommand
@@ -214,6 +215,9 @@ class ExecutionRouter:
                 )
                 await self._bus.publish(EXECUTION_ERRORS, error_event)
 
+                # Emit adapter error metric per observability.mdc §4
+                record_adapter_error(error_class="fatal")
+
                 # Structured logging for tactic failure
                 bind_correlation_context(
                     logger,
@@ -342,6 +346,11 @@ class ExecutionRouter:
                 )
                 await self._bus.publish(ORDER_REJECTS, reject_event)
 
+            # Emit adapter error metric per observability.mdc §4
+            # Map error_type to error_class (retryable/fatal)
+            error_class = "retryable" if error_type == "retryable" else "fatal"
+            record_adapter_error(error_class=error_class)
+
             bind_correlation_context(
                 logger,
                 correlation_id=command.correlation_id,
@@ -439,6 +448,11 @@ class ExecutionRouter:
                 correlation_id=command.correlation_id,
             )
             await self._bus.publish(EXECUTION_ERRORS, error_event)
+
+            # Emit adapter error metric per observability.mdc §4
+            # Map error_type to error_class (retryable/fatal)
+            error_class = "retryable" if error_type == "retryable" else "fatal"
+            record_adapter_error(error_class=error_class)
 
             bind_correlation_context(
                 logger,

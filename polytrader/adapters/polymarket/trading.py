@@ -22,6 +22,7 @@ from polytrader.events.types import OrderIntentEvent
 from polytrader.execution.adapter import IVenueAdapter
 from polytrader.logging_config import logger
 from polytrader.obs.logging import bind_correlation_context
+from polytrader.obs.metrics import record_adapter_error
 
 
 class ClobVenueAdapter(IVenueAdapter):
@@ -120,6 +121,9 @@ class ClobVenueAdapter(IVenueAdapter):
                 error_class=error_type,
                 latency_ms=latency_ms,
             ).exception("Order submission failed")
+
+            # Emit adapter error metric per observability.mdc §4
+            record_adapter_error(error_class=error_type)
 
             raise VenueError(
                 error_type=error_type,
@@ -237,6 +241,8 @@ class ClobVenueAdapter(IVenueAdapter):
         log_context.info("Allowance: Auto-managed (Magic wallet)")
 
         if balance < required_amount:
+            # Emit adapter error metric per observability.mdc §4
+            record_adapter_error(error_class="fatal")
             raise ValueError(
                 f"Insufficient balance: {balance} USDC < {required_amount} USDC required. "
                 "Please deposit USDC to your wallet."
