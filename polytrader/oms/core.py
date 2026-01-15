@@ -358,6 +358,9 @@ class OMSCore:
         # Store handler will update state if needed (idempotent)
         self._store.handle_order_submitted(submitted_event)
 
+        # Update orders_live gauge immediately after order creation
+        update_orders_live_gauge(self._store)
+
         # Structured logging
         total_latency_ms = (time.monotonic() - start_time) * 1000
         bind_order_context(
@@ -534,6 +537,9 @@ class OMSCore:
             reason=reason,
         )
 
+        # Update orders_live gauge immediately after state change
+        update_orders_live_gauge(self._store)
+
     async def handle_fill(
         self,
         client_order_id: str,
@@ -638,6 +644,8 @@ class OMSCore:
                     ) * 1000
                     record_order_lifetime(updated_order, lifetime_ms)
                 del self._order_timestamps[updated_order.order_id]
+                # Update orders_live gauge immediately when order becomes terminal
+                update_orders_live_gauge(self._store)
 
         # Structured logging
         latency_ms = (time.monotonic() - start_time) * 1000
@@ -744,6 +752,9 @@ class OMSCore:
         await self._bus.publish(ORDER_CANCELS, cancel_event)
         # Store handler will handle state transition
         self._store.handle_order_canceled(cancel_event)
+
+        # Update orders_live gauge immediately after state change (CANCELLED is terminal)
+        update_orders_live_gauge(self._store)
 
         # Structured logging
         latency_ms = (time.monotonic() - start_time) * 1000

@@ -511,3 +511,32 @@ def record_adapter_error(error_class: str) -> None:
     """
     collector = get_metrics_collector()
     collector.increment_counter("adapter_errors_total", labels={"class": error_class})
+
+
+# Posttrade metrics functions per observability.mdc §4
+
+
+def set_position_net(market_slug: str, outcome: str, net_position: float) -> None:
+    """Set position net gauge per observability.mdc §4.
+
+    Args:
+        market_slug: Market identifier
+        outcome: Market outcome (UP/DOWN)
+        net_position: Net position size (positive for long, negative for short)
+    """
+    collector = get_metrics_collector()
+    collector.set_gauge(
+        "position_net",
+        net_position,
+        labels={"market": market_slug, "outcome": outcome},
+    )
+
+
+def set_pnl_unrealized(unrealized_pnl: float) -> None:
+    """Set unrealized PnL gauge per observability.mdc §4.
+
+    Args:
+        unrealized_pnl: Total unrealized profit/loss across all open positions
+    """
+    collector = get_metrics_collector()
+    collector.set_gauge("pnl_unrealized", unrealized_pnl)

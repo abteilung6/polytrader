@@ -194,6 +194,8 @@ class TestExecutionRouterAdapterErrorMetrics:
             side="BUY",
             size=100.0,
             limit_price=0.5,
+            target_price=0.5,
+            reason="Test order",
             correlation_id="corr-123",
         )
         command = SubmitOrderCommand(
@@ -296,10 +298,19 @@ class TestAdapterErrorMetrics:
         clob_client = MagicMock()
         gamma_client = MagicMock()
 
-        # Configure gamma_client to raise an error
-        gamma_client.get_market_by_slug = MagicMock(side_effect=Exception("Network error"))
+        # Configure market lookup to succeed
+        market_mock = MagicMock()
+        market_mock.get_token_id = MagicMock(return_value="token-123")
+        gamma_client.get_market_by_slug = MagicMock(return_value=market_mock)
+
+        # Configure balance check to succeed
+        clob_client.get_balance_allowance = MagicMock(return_value={"balance": "1000.0"})
 
         adapter = ClobVenueAdapter(clob_client=clob_client, gamma_client=gamma_client)
+
+        # Mock the _place_market_order method to raise a timeout error
+        # This will be caught by the try/except in submit_order
+        adapter._place_market_order = MagicMock(side_effect=TimeoutError("Connection timeout"))  # type: ignore[method-assign]
 
         # Create intent
         intent = OrderIntentEvent(
@@ -356,6 +367,8 @@ class TestAdapterErrorMetrics:
             side="BUY",
             size=100.0,  # More than balance of 50.0
             limit_price=0.5,
+            target_price=0.5,
+            reason="Test order",
             correlation_id="corr-123",
         )
 

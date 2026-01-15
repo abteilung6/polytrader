@@ -27,6 +27,8 @@ from polytrader.obs.metrics import (
     set_md_book_mid,
     set_md_spread,
     set_metrics_collector,
+    set_pnl_unrealized,
+    set_position_net,
 )
 
 __all__ = [
@@ -51,4 +53,6 @@ __all__ = [
     "set_md_book_mid",
     "set_md_spread",
     "set_metrics_collector",
+    "set_pnl_unrealized",
+    "set_position_net",
 ]

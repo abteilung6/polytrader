@@ -266,6 +266,11 @@ class PaperPositionManager(IPositionManager):
             )
             self._positions[key] = position
 
+        # Emit position metric per observability.mdc §4
+        from polytrader.obs.metrics import set_position_net
+
+        set_position_net(market_slug=market_slug, outcome=outcome, net_position=total_size)
+
         logger.bind(
             market_slug=market_slug,
             outcome=outcome,
@@ -322,6 +327,11 @@ class PaperPositionManager(IPositionManager):
         # Reduce position size
         position.size -= fill_event.size
 
+        # Emit position metric per observability.mdc §4
+        from polytrader.obs.metrics import set_position_net
+
+        set_position_net(market_slug=market_slug, outcome=outcome, net_position=position.size)
+
         # Calculate P&L for this fill
         pnl = (fill_event.price - position.entry_price) * fill_event.size
         pnl_pct = (
@@ -329,6 +339,11 @@ class PaperPositionManager(IPositionManager):
             if position.entry_price > 0
             else 0
         )
+
+        # Emit position metric per observability.mdc §4 (after size update)
+        from polytrader.obs.metrics import set_position_net
+
+        set_position_net(market_slug=market_slug, outcome=outcome, net_position=position.size)
 
         # Check if position is fully closed
         if position.size <= 0:
@@ -381,6 +396,9 @@ class PaperPositionManager(IPositionManager):
             # Remove position
             del self._positions[key]
             self._position_fills.pop(key, None)
+
+            # Emit position metric per observability.mdc §4 (position closed = 0)
+            set_position_net(market_slug=market_slug, outcome=outcome, net_position=0.0)
         else:
             # Partial close
             logger.bind(
@@ -488,6 +506,11 @@ class PaperPositionManager(IPositionManager):
             # Unrealized P&L = (current_price - entry_price) * size
             position_pnl = (current_price - position.entry_price) * position.size
             unrealized_pnl += position_pnl
+
+        # Emit unrealized PnL metric per observability.mdc §4
+        from polytrader.obs.metrics import set_pnl_unrealized
+
+        set_pnl_unrealized(unrealized_pnl=unrealized_pnl)
 
         return unrealized_pnl
 
