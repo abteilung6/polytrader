@@ -22,6 +22,7 @@ from polytrader.events.types import (
     ReconcileEvent,
 )
 from polytrader.logging_config import logger
+from polytrader.obs.metrics import record_circuit_breaker, set_execution_enabled, set_kill_switch
 
 
 class CircuitBreakerThresholds(BaseModel):
@@ -83,6 +84,7 @@ class ExecutionControl:
     def enable(self) -> None:
         """Enable execution (simple enable without permit event)."""
         self.execution_enabled = True
+        set_execution_enabled(enabled=True)
         logger.info("Execution enabled")
 
     async def enable_with_permit(
@@ -103,6 +105,7 @@ class ExecutionControl:
             issued_by: Who issued the permit ("system" | "operator")
         """
         self.execution_enabled = True
+        set_execution_enabled(enabled=True)
         logger.info(
             "Execution enabled with permit: {permit_type} - {reason}",
             permit_type=permit_type,
@@ -122,6 +125,7 @@ class ExecutionControl:
     def disable(self) -> None:
         """Disable execution."""
         self.execution_enabled = False
+        set_execution_enabled(enabled=False)
         logger.warning("Execution disabled")
 
     async def set_kill_switch(
@@ -142,10 +146,12 @@ class ExecutionControl:
             triggered_by: Who triggered the kill switch ("system" | "operator" | "circuit_breaker")
         """
         self.kill_switch_active = active
+        set_kill_switch(active=active)
 
         if active:
             # Disable execution when kill switch is activated
             self.execution_enabled = False
+            set_execution_enabled(enabled=False)
             logger.error(
                 "Kill switch activated: {reason}",
                 reason=reason,
@@ -300,6 +306,9 @@ class CircuitBreaker:
         self._execution_control.disable()
         self._triggered = True
 
+        # Emit circuit breaker metric per observability.mdc §4
+        record_circuit_breaker(circuit_type=event.breaker_type)
+
         # Publish circuit breaker event
         await self._bus.publish(CIRCUIT_BREAKER, event)
 
@@ -329,6 +338,10 @@ class CircuitBreaker:
             reason="Circuit breaker reset by operator",
             details={},
         )
+
+        # Emit circuit breaker reset metric per observability.mdc §4
+        # Note: We still record it as a circuit breaker event, but with a reset type
+        record_circuit_breaker(circuit_type=f"{event.breaker_type}_reset")
 
         # Publish reset event
         await self._bus.publish(CIRCUIT_BREAKER, event)
