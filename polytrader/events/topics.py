@@ -30,6 +30,8 @@ _user_stream_fills_topic: Topic | None = None
 _user_stream_cancels_topic: Topic | None = None
 _reconcile_topic: Topic | None = None
 _circuit_breaker_topic: Topic | None = None
+_position_updates_topic: Topic | None = None
+_pnl_updates_topic: Topic | None = None
 
 
 def _create_market_data_topic() -> Topic:
@@ -441,6 +443,36 @@ def get_circuit_breaker_topic() -> Topic:
     return _circuit_breaker_topic
 
 
+def _create_position_updates_topic() -> Topic:
+    """Create the POSITION_UPDATES topic."""
+    from polytrader.events.types import PositionUpdatedEvent
+
+    return Topic[PositionUpdatedEvent]("position_updates")
+
+
+def get_position_updates_topic() -> Topic:
+    """Get the POSITION_UPDATES topic (singleton)."""
+    global _position_updates_topic
+    if _position_updates_topic is None:
+        _position_updates_topic = _create_position_updates_topic()
+    return _position_updates_topic
+
+
+def _create_pnl_updates_topic() -> Topic:
+    """Create the PNL_UPDATES topic."""
+    from polytrader.events.types import PnLEvent
+
+    return Topic[PnLEvent]("pnl_updates")
+
+
+def get_pnl_updates_topic() -> Topic:
+    """Get the PNL_UPDATES topic (singleton)."""
+    global _pnl_updates_topic
+    if _pnl_updates_topic is None:
+        _pnl_updates_topic = _create_pnl_updates_topic()
+    return _pnl_updates_topic
+
+
 def __getattr__(name: str) -> Topic:
     """Lazily initialize topic constants on first access.
 
@@ -510,5 +542,9 @@ def __getattr__(name: str) -> Topic:
         return get_reconcile_topic()
     elif name == "CIRCUIT_BREAKER":
         return get_circuit_breaker_topic()
+    elif name == "POSITION_UPDATES":
+        return get_position_updates_topic()
+    elif name == "PNL_UPDATES":
+        return get_pnl_updates_topic()
     else:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

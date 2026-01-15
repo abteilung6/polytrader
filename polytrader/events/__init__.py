@@ -229,6 +229,14 @@ def __getattr__(name: str):
         from polytrader.events.topics import get_circuit_breaker_topic
 
         return get_circuit_breaker_topic()
+    elif name == "POSITION_UPDATES":
+        from polytrader.events.topics import get_position_updates_topic
+
+        return get_position_updates_topic()
+    elif name == "PNL_UPDATES":
+        from polytrader.events.topics import get_pnl_updates_topic
+
+        return get_pnl_updates_topic()
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 

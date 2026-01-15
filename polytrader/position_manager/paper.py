@@ -16,7 +16,13 @@ import asyncio
 from typing import TYPE_CHECKING
 
 from polytrader.events import FILLS, MARKET_CHANGE, MARKET_DATA, EventBus
-from polytrader.events.types import FillEvent, MarketChangeEvent, MarketDataEvent
+from polytrader.events.types import (
+    FillEvent,
+    MarketChangeEvent,
+    MarketDataEvent,
+    PnLEvent,
+    PositionUpdatedEvent,
+)
 from polytrader.logging_config import logger
 from polytrader.oms.store import IOrderStore
 from polytrader.position_manager import IPositionManager
@@ -78,6 +84,41 @@ class PaperPositionManager(IPositionManager):
 
         self._running = False
 
+    async def _emit_pnl_event(self, update_reason: str) -> None:
+        """Emit PnLEvent with current PnL values.
+
+        Args:
+            update_reason: Reason for PnL update ("position_update", "price_update", "periodic")
+        """
+        from polytrader.events import PNL_UPDATES
+
+        # Calculate unrealized PnL (synchronous calculation)
+        unrealized_pnl = 0.0
+        for key, position in self._positions.items():
+            # Priority: 1) tracked latest prices, 2) entry_price (no P&L)
+            if key in self._latest_prices:
+                current_price = self._latest_prices[key]
+            else:
+                # No market data available - use entry price (no unrealized P&L)
+                current_price = position.entry_price
+
+            # Unrealized P&L = (current_price - entry_price) * size
+            position_pnl = (current_price - position.entry_price) * position.size
+            unrealized_pnl += position_pnl
+
+        # Calculate realized PnL from closed positions
+        realized_pnl = self._performance_metrics.get_total_realized_pnl()
+        total_pnl = realized_pnl + unrealized_pnl
+
+        pnl_event = PnLEvent(
+            realized_pnl=realized_pnl,
+            unrealized_pnl=unrealized_pnl,
+            total_pnl=total_pnl,
+            position_count=len(self._positions),
+            update_reason=update_reason,
+        )
+        await self._bus.publish(PNL_UPDATES, pnl_event)
+
     async def run(self) -> None:
         """Start the position manager.
 
@@ -110,7 +151,7 @@ class PaperPositionManager(IPositionManager):
                 while self._running:
                     market_event = await market_data_queue.get()
                     if isinstance(market_event, MarketDataEvent):
-                        self._handle_market_data(market_event)
+                        await self._handle_market_data(market_event)
             except asyncio.CancelledError:
                 pass
             except Exception:
@@ -143,7 +184,7 @@ class PaperPositionManager(IPositionManager):
             self._running = False
             logger.info("PaperPositionManager stopped")
 
-    def _handle_market_data(self, market_event: MarketDataEvent) -> None:
+    async def _handle_market_data(self, market_event: MarketDataEvent) -> None:
         """Handle a market data event and update latest prices.
 
         Args:
@@ -152,6 +193,11 @@ class PaperPositionManager(IPositionManager):
         key = (market_event.market_slug, market_event.outcome)
         # Store the mid price for unrealized P&L calculation
         self._latest_prices[key] = market_event.mid
+
+        # Emit PnLEvent if we have positions for this market per flows.mdc §11
+        if key in self._positions:
+            await self._emit_pnl_event(update_reason="price_update")
+
         logger.bind(
             market_slug=market_event.market_slug,
             outcome=market_event.outcome,
@@ -247,7 +293,8 @@ class PaperPositionManager(IPositionManager):
         target_price = order.intent.target_price
 
         # Create or update position
-        if key in self._positions:
+        was_existing = key in self._positions
+        if was_existing:
             # Update existing position (partial fill)
             position = self._positions[key]
             position.size = total_size
@@ -270,6 +317,27 @@ class PaperPositionManager(IPositionManager):
         from polytrader.obs.metrics import set_position_net
 
         set_position_net(market_slug=market_slug, outcome=outcome, net_position=total_size)
+
+        # Emit PositionUpdatedEvent per flows.mdc §11
+        from polytrader.events import POSITION_UPDATES
+
+        update_type = "updated" if was_existing else "created"
+        position_event = PositionUpdatedEvent(
+            market_slug=market_slug,
+            outcome=outcome,
+            net_position=total_size,
+            size=total_size,
+            entry_price=avg_entry_price,
+            target_price=target_price,
+            entry_time=position.entry_time,
+            order_id=order.order_id,
+            update_type=update_type,
+            correlation_id=fill_event.correlation_id,
+        )
+        await self._bus.publish(POSITION_UPDATES, position_event)
+
+        # Emit PnLEvent after position update per flows.mdc §11
+        await self._emit_pnl_event(update_reason="position_update")
 
         logger.bind(
             market_slug=market_slug,
@@ -340,11 +408,6 @@ class PaperPositionManager(IPositionManager):
             else 0
         )
 
-        # Emit position metric per observability.mdc §4 (after size update)
-        from polytrader.obs.metrics import set_position_net
-
-        set_position_net(market_slug=market_slug, outcome=outcome, net_position=position.size)
-
         # Check if position is fully closed
         if position.size <= 0:
             # Position fully closed
@@ -393,14 +456,50 @@ class PaperPositionManager(IPositionManager):
             # Update performance metrics
             self._performance_metrics.update_metrics()
 
-            # Remove position
+            # Emit PositionUpdatedEvent for closed position per flows.mdc §11
+            from polytrader.events import POSITION_UPDATES
+
+            position_event = PositionUpdatedEvent(
+                market_slug=market_slug,
+                outcome=outcome,
+                net_position=0.0,
+                size=0.0,
+                entry_price=position.entry_price,
+                target_price=position.target_price,
+                entry_time=position.entry_time,
+                order_id=position.order_id,
+                update_type="closed",
+                correlation_id=fill_event.correlation_id,
+            )
+            await self._bus.publish(POSITION_UPDATES, position_event)
+
+            # Remove position BEFORE emitting PnLEvent so position_count is correct
             del self._positions[key]
             self._position_fills.pop(key, None)
 
             # Emit position metric per observability.mdc §4 (position closed = 0)
             set_position_net(market_slug=market_slug, outcome=outcome, net_position=0.0)
+
+            # Emit PnLEvent after position close per flows.mdc §11
+            # (after removal so position_count=0)
+            await self._emit_pnl_event(update_reason="position_update")
         else:
-            # Partial close
+            # Partial close - emit PositionUpdatedEvent per flows.mdc §11
+            from polytrader.events import POSITION_UPDATES
+
+            position_event = PositionUpdatedEvent(
+                market_slug=market_slug,
+                outcome=outcome,
+                net_position=position.size,
+                size=position.size,
+                entry_price=position.entry_price,
+                target_price=position.target_price,
+                entry_time=position.entry_time,
+                order_id=position.order_id,
+                update_type="reduced",
+                correlation_id=fill_event.correlation_id,
+            )
+            await self._bus.publish(POSITION_UPDATES, position_event)
             logger.bind(
                 market_slug=market_slug,
                 outcome=outcome,
