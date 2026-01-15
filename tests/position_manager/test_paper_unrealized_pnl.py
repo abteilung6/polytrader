@@ -362,7 +362,8 @@ async def test_unrealized_pnl_direct_handler(
         best_bid=0.39,
         best_ask=0.41,
     )
-    position_manager._handle_market_data(market_event)
+    # _handle_market_data is now async, so we need to await it
+    await position_manager._handle_market_data(market_event)
 
     # Now should show unrealized P&L
     unrealized = position_manager.calculate_unrealized_pnl()

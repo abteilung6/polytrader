@@ -23,6 +23,8 @@ from polytrader.events.types import (
 )
 from polytrader.execution.adapter import IVenueAdapter
 from polytrader.execution.tactics import ExecutionTactics
+from polytrader.obs.logging import bind_correlation_context
+from polytrader.obs.metrics import record_adapter_error
 
 if TYPE_CHECKING:
     from polytrader.oms.commands import CancelOrderCommand, SubmitOrderCommand
@@ -97,7 +99,12 @@ class ExecutionRouter:
             except asyncio.CancelledError:
                 pass
             except Exception:
-                logger.exception("Error in submit command processor")
+                bind_correlation_context(
+                    logger,
+                    correlation_id="",
+                    event_type="ExecutionSubmitProcessorError",
+                    error_class="system",
+                ).exception("Error in submit command processor")
 
         async def process_cancel_commands() -> None:
             """Process cancel commands."""
@@ -108,7 +115,12 @@ class ExecutionRouter:
             except asyncio.CancelledError:
                 pass
             except Exception:
-                logger.exception("Error in cancel command processor")
+                bind_correlation_context(
+                    logger,
+                    correlation_id="",
+                    event_type="ExecutionCancelProcessorError",
+                    error_class="system",
+                ).exception("Error in cancel command processor")
 
         try:
             # Run both processors concurrently
@@ -144,12 +156,17 @@ class ExecutionRouter:
 
         # Check if execution is enabled (Phase 7: execution gating)
         if self._execution_control is not None and not self._execution_control.is_enabled():
-            logger.warning(
-                "Order submission rejected: execution is disabled",
+            bind_correlation_context(
+                logger,
+                correlation_id=command.correlation_id,
                 order_id=command.order_id,
                 client_order_id=command.client_order_id,
-                correlation_id=command.correlation_id,
-            )
+                market_slug=command.intent.market_slug,
+                outcome=command.intent.outcome,
+                side=command.intent.side,
+                event_type="ExecutionDisabled",
+                error_class="system",
+            ).warning("Order submission rejected: execution is disabled")
 
             # Emit OrderRejectedEvent
             from polytrader.events import ORDER_REJECTS
@@ -187,6 +204,7 @@ class ExecutionRouter:
                 )
             except ValueError as e:
                 # Throttled or other tactic failure
+                latency_ms = (time.monotonic() - start_time) * 1000.0
                 error_event = ExecutionErrorEvent(
                     order_id=command.order_id,
                     client_order_id=command.client_order_id,
@@ -196,6 +214,26 @@ class ExecutionRouter:
                     correlation_id=command.correlation_id,
                 )
                 await self._bus.publish(EXECUTION_ERRORS, error_event)
+
+                # Emit adapter error metric per observability.mdc §4
+                record_adapter_error(error_class="fatal")
+
+                # Structured logging for tactic failure
+                bind_correlation_context(
+                    logger,
+                    correlation_id=command.correlation_id,
+                    order_id=command.order_id,
+                    client_order_id=command.client_order_id,
+                    market_slug=command.intent.market_slug,
+                    outcome=command.intent.outcome,
+                    side=command.intent.side,
+                    event_type="ExecutionTacticFailure",
+                    error_class="fatal",
+                    latency_ms=latency_ms,
+                ).error(
+                    "Execution tactic failure: {error_message}",
+                    error_message=str(e),
+                )
                 return
 
             # Call venue adapter
@@ -217,6 +255,24 @@ class ExecutionRouter:
                 correlation_id=command.correlation_id,
             )
             await self._bus.publish(EXECUTION_RESPONSES, response_event)
+
+            # Structured logging for successful submission
+            bind_correlation_context(
+                logger,
+                correlation_id=command.correlation_id,
+                order_id=command.order_id,
+                client_order_id=command.client_order_id,
+                venue_order_id=venue_response.venue_order_id,
+                market_slug=command.intent.market_slug,
+                outcome=command.intent.outcome,
+                side=command.intent.side,
+                event_type="ExecutionSubmitSuccess",
+                latency_ms=latency_ms,
+            ).info(
+                "Order submitted successfully: {order_id} venue_order_id={venue_order_id}",
+                order_id=command.order_id,
+                venue_order_id=venue_response.venue_order_id,
+            )
 
             # Publish FillEvent if order was filled
             # For paper trading, fills are immediate. For real trading, this comes from user stream.
@@ -290,7 +346,23 @@ class ExecutionRouter:
                 )
                 await self._bus.publish(ORDER_REJECTS, reject_event)
 
-            logger.exception("Execution error handling submit command")
+            # Emit adapter error metric per observability.mdc §4
+            # Map error_type to error_class (retryable/fatal)
+            error_class = "retryable" if error_type == "retryable" else "fatal"
+            record_adapter_error(error_class=error_class)
+
+            bind_correlation_context(
+                logger,
+                correlation_id=command.correlation_id,
+                order_id=command.order_id,
+                client_order_id=command.client_order_id,
+                market_slug=command.intent.market_slug,
+                outcome=command.intent.outcome,
+                side=command.intent.side,
+                event_type="ExecutionSubmitError",
+                error_class=error_type,
+                latency_ms=latency_ms,
+            ).exception("Execution error handling submit command")
 
     async def _handle_cancel_command(self, command: "CancelOrderCommand") -> None:
         """Handle CancelOrderCommand from OMS.
@@ -343,6 +415,20 @@ class ExecutionRouter:
             )
             await self._bus.publish(EXECUTION_RESPONSES, response_event)
 
+            # Structured logging for successful cancellation
+            bind_correlation_context(
+                logger,
+                correlation_id=command.correlation_id,
+                order_id=command.order_id,
+                client_order_id=command.client_order_id,
+                venue_order_id=command.venue_order_id,
+                event_type="ExecutionCancelSuccess",
+                latency_ms=latency_ms,
+            ).info(
+                "Order cancelled successfully: {order_id}",
+                order_id=command.order_id,
+            )
+
         except Exception as e:
             # Handle errors
             latency_ms = (time.monotonic() - start_time) * 1000.0
@@ -363,4 +449,18 @@ class ExecutionRouter:
             )
             await self._bus.publish(EXECUTION_ERRORS, error_event)
 
-            logger.exception("Execution error handling cancel command")
+            # Emit adapter error metric per observability.mdc §4
+            # Map error_type to error_class (retryable/fatal)
+            error_class = "retryable" if error_type == "retryable" else "fatal"
+            record_adapter_error(error_class=error_class)
+
+            bind_correlation_context(
+                logger,
+                correlation_id=command.correlation_id,
+                order_id=command.order_id,
+                client_order_id=command.client_order_id,
+                venue_order_id=command.venue_order_id,
+                event_type="ExecutionCancelError",
+                error_class=error_type,
+                latency_ms=latency_ms,
+            ).exception("Execution error handling cancel command")

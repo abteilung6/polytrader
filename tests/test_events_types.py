@@ -1121,3 +1121,534 @@ class TestKillSwitchEvent:
         """Test that KillSwitchEvent requires triggered_by."""
         with pytest.raises(ValidationError):
             KillSwitchEvent(triggered=True, reason="Test")  # type: ignore[call-arg]
+
+
+class TestPositionUpdatedEvent:
+    """Tests for PositionUpdatedEvent per flows.mdc §11 and observability.mdc §1."""
+
+    def test_position_updated_event_creation(self) -> None:
+        """Test that PositionUpdatedEvent can be created."""
+        from polytrader.events.types import EventSource, PositionUpdatedEvent
+
+        event = PositionUpdatedEvent(
+            market_slug="test-market",
+            outcome="UP",
+            net_position=100.0,
+            size=100.0,
+            entry_price=0.45,
+            target_price=0.5,
+            entry_time=1234567890.0,
+            order_id="order-123",
+            update_type="created",
+        )
+
+        assert event.market_slug == "test-market"
+        assert event.outcome == "UP"
+        assert event.net_position == 100.0
+        assert event.size == 100.0
+        assert event.entry_price == 0.45
+        assert event.target_price == 0.5
+        assert event.entry_time == 1234567890.0
+        assert event.order_id == "order-123"
+        assert event.update_type == "created"
+        assert event.source == EventSource.POSTTRADE
+
+    def test_position_updated_event_has_base_fields(self) -> None:
+        """Test that PositionUpdatedEvent has all Event base class fields."""
+        from polytrader.events.types import EventSource, PositionUpdatedEvent
+
+        event = PositionUpdatedEvent(
+            market_slug="test-market",
+            outcome="UP",
+            net_position=100.0,
+            size=100.0,
+            entry_price=0.45,
+            entry_time=1234567890.0,
+            update_type="created",
+        )
+
+        assert event.event_id
+        assert event.ts_wall
+        assert event.ts_mono
+        assert event.correlation_id
+        assert event.run_id
+        assert event.schema_version == "1.0"
+        assert event.source == EventSource.POSTTRADE
+
+    def test_position_updated_event_optional_fields(self) -> None:
+        """Test that PositionUpdatedEvent optional fields work."""
+        from polytrader.events.types import PositionUpdatedEvent
+
+        # Without target_price and order_id
+        event = PositionUpdatedEvent(
+            market_slug="test-market",
+            outcome="DOWN",
+            net_position=-50.0,
+            size=50.0,
+            entry_price=0.55,
+            entry_time=1234567890.0,
+            update_type="updated",
+        )
+
+        assert event.target_price is None
+        assert event.order_id is None
+        assert event.net_position == -50.0  # Negative for short position
+
+    def test_position_updated_event_update_types(self) -> None:
+        """Test that PositionUpdatedEvent supports all update types."""
+        from polytrader.events.types import PositionUpdatedEvent
+
+        update_types = ["created", "updated", "reduced", "closed"]
+
+        for update_type in update_types:
+            event = PositionUpdatedEvent(
+                market_slug="test-market",
+                outcome="UP",
+                net_position=100.0 if update_type != "closed" else 0.0,
+                size=100.0 if update_type != "closed" else 0.0,
+                entry_price=0.45,
+                entry_time=1234567890.0,
+                update_type=update_type,
+            )
+            assert event.update_type == update_type
+
+    def test_position_updated_event_validation(self) -> None:
+        """Test that PositionUpdatedEvent validates constraints."""
+        from polytrader.events.types import PositionUpdatedEvent
+
+        # Valid: size >= 0
+        event = PositionUpdatedEvent(
+            market_slug="test-market",
+            outcome="UP",
+            net_position=100.0,
+            size=100.0,
+            entry_price=0.45,
+            entry_time=1234567890.0,
+            update_type="created",
+        )
+        assert event.size >= 0
+
+        # Invalid: size must be >= 0
+        with pytest.raises(ValidationError):
+            PositionUpdatedEvent(
+                market_slug="test-market",
+                outcome="UP",
+                net_position=100.0,
+                size=-10.0,
+                entry_price=0.45,
+                entry_time=1234567890.0,
+                update_type="created",
+            )
+
+        # Invalid: entry_price must be > 0
+        with pytest.raises(ValidationError):
+            PositionUpdatedEvent(
+                market_slug="test-market",
+                outcome="UP",
+                net_position=100.0,
+                size=100.0,
+                entry_price=0.0,
+                entry_time=1234567890.0,
+                update_type="created",
+            )
+
+        # Invalid: entry_price must be <= 1
+        with pytest.raises(ValidationError):
+            PositionUpdatedEvent(
+                market_slug="test-market",
+                outcome="UP",
+                net_position=100.0,
+                size=100.0,
+                entry_price=1.1,
+                entry_time=1234567890.0,
+                update_type="created",
+            )
+
+    def test_position_updated_event_serialization(self) -> None:
+        """Test that PositionUpdatedEvent can be serialized."""
+        from polytrader.events.types import PositionUpdatedEvent
+
+        event = PositionUpdatedEvent(
+            market_slug="test-market",
+            outcome="UP",
+            net_position=100.0,
+            size=100.0,
+            entry_price=0.45,
+            target_price=0.5,
+            entry_time=1234567890.0,
+            order_id="order-123",
+            update_type="created",
+        )
+
+        # Pydantic model can be serialized
+        event_dict = event.model_dump()
+        assert event_dict["market_slug"] == "test-market"
+        assert event_dict["outcome"] == "UP"
+        assert event_dict["net_position"] == 100.0
+        assert event_dict["update_type"] == "created"
+
+        # JSON serialization
+        event_json = event.model_dump_json()
+        assert isinstance(event_json, str)
+        assert "test-market" in event_json
+
+    def test_position_updated_event_is_immutable(self) -> None:
+        """Test that PositionUpdatedEvent is immutable (frozen model)."""
+        from polytrader.events.types import PositionUpdatedEvent
+
+        event = PositionUpdatedEvent(
+            market_slug="test-market",
+            outcome="UP",
+            net_position=100.0,
+            size=100.0,
+            entry_price=0.45,
+            entry_time=1234567890.0,
+            update_type="created",
+        )
+
+        with pytest.raises(ValidationError):
+            event.market_slug = "other-market"  # type: ignore[misc]
+
+
+class TestPnLEvent:
+    """Tests for PnLEvent per flows.mdc §11 and observability.mdc §1."""
+
+    def test_pnl_event_creation(self) -> None:
+        """Test that PnLEvent can be created."""
+        from polytrader.events.types import EventSource, PnLEvent
+
+        event = PnLEvent(
+            realized_pnl=50.0,
+            unrealized_pnl=25.0,
+            total_pnl=75.0,
+            position_count=3,
+            update_reason="position_update",
+        )
+
+        assert event.realized_pnl == 50.0
+        assert event.unrealized_pnl == 25.0
+        assert event.total_pnl == 75.0
+        assert event.position_count == 3
+        assert event.update_reason == "position_update"
+        assert event.source == EventSource.POSTTRADE
+
+    def test_pnl_event_has_base_fields(self) -> None:
+        """Test that PnLEvent has all Event base class fields."""
+        from polytrader.events.types import EventSource, PnLEvent
+
+        event = PnLEvent(
+            realized_pnl=0.0,
+            unrealized_pnl=0.0,
+            total_pnl=0.0,
+            position_count=0,
+            update_reason="periodic",
+        )
+
+        assert event.event_id
+        assert event.ts_wall
+        assert event.ts_mono
+        assert event.correlation_id
+        assert event.run_id
+        assert event.schema_version == "1.0"
+        assert event.source == EventSource.POSTTRADE
+
+    def test_pnl_event_defaults(self) -> None:
+        """Test that PnLEvent has correct defaults."""
+        from polytrader.events.types import PnLEvent
+
+        event = PnLEvent(
+            total_pnl=0.0,
+            position_count=0,
+            update_reason="periodic",
+        )
+
+        assert event.realized_pnl == 0.0
+        assert event.unrealized_pnl == 0.0
+
+    def test_pnl_event_update_reasons(self) -> None:
+        """Test that PnLEvent supports all update reasons."""
+        from polytrader.events.types import PnLEvent
+
+        update_reasons = ["position_update", "price_update", "periodic"]
+
+        for reason in update_reasons:
+            event = PnLEvent(
+                total_pnl=0.0,
+                position_count=0,
+                update_reason=reason,
+            )
+            assert event.update_reason == reason
+
+    def test_pnl_event_validation(self) -> None:
+        """Test that PnLEvent validates constraints."""
+        from polytrader.events.types import PnLEvent
+
+        # Valid: position_count >= 0
+        event = PnLEvent(
+            total_pnl=100.0,
+            position_count=5,
+            update_reason="position_update",
+        )
+        assert event.position_count >= 0
+
+        # Invalid: position_count must be >= 0
+        with pytest.raises(ValidationError):
+            PnLEvent(
+                total_pnl=100.0,
+                position_count=-1,
+                update_reason="position_update",
+            )
+
+    def test_pnl_event_total_calculation(self) -> None:
+        """Test that PnLEvent total_pnl can be calculated from realized + unrealized."""
+        from polytrader.events.types import PnLEvent
+
+        realized = 50.0
+        unrealized = 25.0
+        total = realized + unrealized
+
+        event = PnLEvent(
+            realized_pnl=realized,
+            unrealized_pnl=unrealized,
+            total_pnl=total,
+            position_count=2,
+            update_reason="price_update",
+        )
+
+        assert event.total_pnl == total
+        assert event.total_pnl == event.realized_pnl + event.unrealized_pnl
+
+    def test_pnl_event_serialization(self) -> None:
+        """Test that PnLEvent can be serialized."""
+        from polytrader.events.types import PnLEvent
+
+        event = PnLEvent(
+            realized_pnl=50.0,
+            unrealized_pnl=25.0,
+            total_pnl=75.0,
+            position_count=3,
+            update_reason="position_update",
+        )
+
+        # Pydantic model can be serialized
+        event_dict = event.model_dump()
+        assert event_dict["realized_pnl"] == 50.0
+        assert event_dict["unrealized_pnl"] == 25.0
+        assert event_dict["total_pnl"] == 75.0
+        assert event_dict["position_count"] == 3
+
+        # JSON serialization
+        event_json = event.model_dump_json()
+        assert isinstance(event_json, str)
+        assert "75.0" in event_json
+
+    def test_pnl_event_is_immutable(self) -> None:
+        """Test that PnLEvent is immutable (frozen model)."""
+        from polytrader.events.types import PnLEvent
+
+        event = PnLEvent(
+            total_pnl=100.0,
+            position_count=2,
+            update_reason="periodic",
+        )
+
+        with pytest.raises(ValidationError):
+            event.total_pnl = 200.0  # type: ignore[misc]
+
+
+class TestVenueConnectedEvent:
+    """Tests for VenueConnectedEvent."""
+
+    def test_venue_connected_event_creation(self) -> None:
+        """Test that VenueConnectedEvent can be created with required fields."""
+        from polytrader.events.types import VenueConnectedEvent
+
+        event = VenueConnectedEvent(
+            venue="polymarket",
+            connection_type="websocket",
+            url="wss://ws.example.com",
+        )
+        assert event.venue == "polymarket"
+        assert event.connection_type == "websocket"
+        assert event.url == "wss://ws.example.com"
+        assert event.source.value == "adapter"
+
+    def test_venue_connected_event_without_url(self) -> None:
+        """Test that VenueConnectedEvent can be created without URL."""
+        from polytrader.events.types import VenueConnectedEvent
+
+        event = VenueConnectedEvent(
+            venue="polymarket",
+            connection_type="rest",
+        )
+        assert event.venue == "polymarket"
+        assert event.connection_type == "rest"
+        assert event.url is None
+
+    def test_venue_connected_event_immutable(self) -> None:
+        """Test that VenueConnectedEvent is immutable."""
+        from polytrader.events.types import VenueConnectedEvent
+
+        event = VenueConnectedEvent(
+            venue="polymarket",
+            connection_type="websocket",
+        )
+        with pytest.raises(ValidationError):  # Pydantic frozen model raises on assignment
+            event.venue = "other"  # type: ignore[misc]
+
+
+class TestVenueDisconnectedEvent:
+    """Tests for VenueDisconnectedEvent."""
+
+    def test_venue_disconnected_event_creation(self) -> None:
+        """Test that VenueDisconnectedEvent can be created with required fields."""
+        from polytrader.events.types import VenueDisconnectedEvent
+
+        event = VenueDisconnectedEvent(
+            venue="polymarket",
+            connection_type="websocket",
+            reason="Connection closed",
+        )
+        assert event.venue == "polymarket"
+        assert event.connection_type == "websocket"
+        assert event.reason == "Connection closed"
+        assert event.source.value == "adapter"
+
+    def test_venue_disconnected_event_without_reason(self) -> None:
+        """Test that VenueDisconnectedEvent can be created without reason."""
+        from polytrader.events.types import VenueDisconnectedEvent
+
+        event = VenueDisconnectedEvent(
+            venue="polymarket",
+            connection_type="rest",
+        )
+        assert event.venue == "polymarket"
+        assert event.connection_type == "rest"
+        assert event.reason is None
+
+    def test_venue_disconnected_event_immutable(self) -> None:
+        """Test that VenueDisconnectedEvent is immutable."""
+        from polytrader.events.types import VenueDisconnectedEvent
+
+        event = VenueDisconnectedEvent(
+            venue="polymarket",
+            connection_type="websocket",
+        )
+        with pytest.raises(ValidationError):  # Pydantic frozen model raises on assignment
+            event.venue = "other"  # type: ignore[misc]
+
+
+class TestCancelRequestedEvent:
+    """Tests for CancelRequestedEvent per observability.mdc §1."""
+
+    def test_cancel_requested_event_creation(self) -> None:
+        """Test that CancelRequestedEvent can be created."""
+        from polytrader.events.types import CancelRequestedEvent, EventSource
+
+        order_id = str(uuid.uuid4())
+        client_order_id = "client-123"
+
+        event = CancelRequestedEvent(
+            order_id=order_id,
+            client_order_id=client_order_id,
+            reason="User requested cancellation",
+            requested_by="operator",
+        )
+
+        assert event.order_id == order_id
+        assert event.client_order_id == client_order_id
+        assert event.reason == "User requested cancellation"
+        assert event.requested_by == "operator"
+        assert event.source == EventSource.OMS
+
+    def test_cancel_requested_event_has_base_fields(self) -> None:
+        """Test that CancelRequestedEvent has all Event base class fields."""
+        from polytrader.events.types import CancelRequestedEvent, EventSource
+
+        event = CancelRequestedEvent(
+            order_id=str(uuid.uuid4()),
+            client_order_id="client-123",
+        )
+
+        assert event.event_id
+        assert event.ts_wall
+        assert event.ts_mono
+        assert event.correlation_id
+        assert event.run_id
+        assert event.schema_version == "1.0"
+        assert event.source == EventSource.OMS
+
+    def test_cancel_requested_event_defaults(self) -> None:
+        """Test that CancelRequestedEvent has correct defaults."""
+        from polytrader.events.types import CancelRequestedEvent
+
+        event = CancelRequestedEvent(
+            order_id=str(uuid.uuid4()),
+            client_order_id="client-123",
+        )
+
+        assert event.reason is None
+        assert event.requested_by == "system"
+
+    def test_cancel_requested_event_requested_by_values(self) -> None:
+        """Test that CancelRequestedEvent supports all requested_by values."""
+        from polytrader.events.types import CancelRequestedEvent
+
+        requested_by_values = ["system", "operator", "strategy"]
+
+        for requested_by in requested_by_values:
+            event = CancelRequestedEvent(
+                order_id=str(uuid.uuid4()),
+                client_order_id="client-123",
+                requested_by=requested_by,
+            )
+            assert event.requested_by == requested_by
+
+    def test_cancel_requested_event_serialization(self) -> None:
+        """Test that CancelRequestedEvent can be serialized."""
+        from polytrader.events.types import CancelRequestedEvent
+
+        order_id = str(uuid.uuid4())
+        event = CancelRequestedEvent(
+            order_id=order_id,
+            client_order_id="client-123",
+            reason="User requested cancellation",
+            requested_by="operator",
+        )
+
+        # Pydantic model can be serialized
+        event_dict = event.model_dump()
+        assert event_dict["order_id"] == order_id
+        assert event_dict["client_order_id"] == "client-123"
+        assert event_dict["reason"] == "User requested cancellation"
+        assert event_dict["requested_by"] == "operator"
+
+        # JSON serialization
+        event_json = event.model_dump_json()
+        assert isinstance(event_json, str)
+        assert "client-123" in event_json
+
+    def test_cancel_requested_event_is_immutable(self) -> None:
+        """Test that CancelRequestedEvent is immutable (frozen model)."""
+        from polytrader.events.types import CancelRequestedEvent
+
+        event = CancelRequestedEvent(
+            order_id=str(uuid.uuid4()),
+            client_order_id="client-123",
+        )
+
+        with pytest.raises(ValidationError):
+            event.reason = "New reason"  # type: ignore[misc]
+
+    def test_cancel_requested_event_correlation_id(self) -> None:
+        """Test that CancelRequestedEvent can share correlation_id with order."""
+        from polytrader.events.types import CancelRequestedEvent
+
+        shared_correlation_id = generate_correlation_id()
+        event = CancelRequestedEvent(
+            order_id=str(uuid.uuid4()),
+            client_order_id="client-123",
+            correlation_id=shared_correlation_id,
+        )
+
+        assert event.correlation_id == shared_correlation_id

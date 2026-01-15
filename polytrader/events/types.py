@@ -34,6 +34,7 @@ class EventSource(str, Enum):
     EXEC = "exec"  # Execution
     POSTTRADE = "posttrade"  # Post-Trade
     OPS = "ops"  # Operations/Control
+    ADAPTER = "adapter"  # Adapters (venue connectivity)
 
 
 class Event(BaseModel):
@@ -136,6 +137,46 @@ class SystemStoppedEvent(Event):
 
     source: EventSource = Field(default=EventSource.OPS)
     reason: str | None = Field(default=None, description="Optional reason for shutdown")
+
+
+class VenueConnectedEvent(Event):
+    """Emitted when a venue connection is established.
+
+    Per observability.mdc §6: VenueConnectedEvent enables replayability checks.
+    This event is emitted when a WebSocket connection to a venue is successfully
+    established, allowing the system to track connection state for replay.
+
+    Attributes:
+        venue: Venue identifier (e.g., "polymarket")
+        connection_type: Type of connection (e.g., "websocket", "rest")
+        url: Connection URL (if applicable)
+    """
+
+    source: EventSource = Field(default=EventSource.ADAPTER)
+
+    venue: str = Field(description="Venue identifier (e.g., 'polymarket')")
+    connection_type: str = Field(description="Type of connection (e.g., 'websocket', 'rest')")
+    url: str | None = Field(default=None, description="Connection URL (if applicable)")
+
+
+class VenueDisconnectedEvent(Event):
+    """Emitted when a venue connection is lost.
+
+    Per observability.mdc §6: VenueDisconnectedEvent enables replayability checks.
+    This event is emitted when a WebSocket connection to a venue is lost or closed,
+    allowing the system to track connection state for replay.
+
+    Attributes:
+        venue: Venue identifier (e.g., "polymarket")
+        connection_type: Type of connection (e.g., "websocket", "rest")
+        reason: Optional reason for disconnection
+    """
+
+    source: EventSource = Field(default=EventSource.ADAPTER)
+
+    venue: str = Field(description="Venue identifier (e.g., 'polymarket')")
+    connection_type: str = Field(description="Type of connection (e.g., 'websocket', 'rest')")
+    reason: str | None = Field(default=None, description="Optional reason for disconnection")
 
 
 class ServiceStartedEvent(Event):
@@ -845,4 +886,104 @@ class KillSwitchEvent(Event):
     details: dict[str, Any] = Field(
         default_factory=dict,
         description="Dictionary with additional context (order counts, etc.)",
+    )
+
+
+class PositionUpdatedEvent(Event):
+    """Event emitted when a position is updated.
+
+    Per flows.mdc §11: Post-Trade updates positions from FillEvents and emits PositionUpdatedEvent.
+    Per observability.mdc §1: PositionUpdatedEvent is a core event type.
+
+    This event is emitted whenever a position changes:
+    - New position created (from BUY fill)
+    - Position updated (from additional BUY fills)
+    - Position reduced (from SELL fill)
+    - Position closed (from SELL fill that closes position)
+
+    Attributes:
+        market_slug: Polymarket market identifier
+        outcome: Market outcome ("UP" or "DOWN")
+        net_position: Net position size (positive for long, negative for short, 0 for closed)
+        size: Current position size in USD (absolute value of net_position)
+        entry_price: Average entry price for the position
+        target_price: Target price to sell at (if applicable)
+        entry_time: Timestamp when position was first opened
+        order_id: ID of the order that caused this update
+        update_type: Type of update ("created", "updated", "reduced", "closed")
+    """
+
+    source: EventSource = Field(default=EventSource.POSTTRADE)
+
+    market_slug: str = Field(description="Polymarket market identifier")
+    outcome: Outcome = Field(description="Market outcome: UP or DOWN")
+    net_position: float = Field(
+        description="Net position size (positive for long, negative for short, 0 for closed)"
+    )
+    size: float = Field(ge=0, description="Current position size in USD (absolute value)")
+    entry_price: float = Field(gt=0, le=1, description="Average entry price for the position")
+    target_price: float | None = Field(
+        default=None, ge=0, le=1, description="Target price to sell at (if applicable)"
+    )
+    entry_time: float = Field(description="Timestamp when position was first opened")
+    order_id: str | None = Field(
+        default=None, description="ID of the order that caused this update"
+    )
+    update_type: Literal["created", "updated", "reduced", "closed"] = Field(
+        description="Type of position update"
+    )
+
+
+class PnLEvent(Event):
+    """Event emitted when PnL is calculated or updated.
+
+    Per flows.mdc §11: Post-Trade updates realized/unrealized PnL and emits PnLEvent.
+    Per observability.mdc §1: PnLEvent is a core event type.
+
+    This event is emitted periodically or when PnL changes significantly:
+    - After position updates
+    - After market price updates (for unrealized PnL)
+    - After position closes (for realized PnL)
+
+    Attributes:
+        realized_pnl: Realized P&L from closed positions (USD)
+        unrealized_pnl: Unrealized P&L from open positions (USD)
+        total_pnl: Total P&L (realized + unrealized)
+        position_count: Number of open positions
+        update_reason: Reason for this PnL update ("position_update", "price_update", "periodic")
+    """
+
+    source: EventSource = Field(default=EventSource.POSTTRADE)
+
+    realized_pnl: float = Field(default=0.0, description="Realized P&L from closed positions (USD)")
+    unrealized_pnl: float = Field(
+        default=0.0, description="Unrealized P&L from open positions (USD)"
+    )
+    total_pnl: float = Field(description="Total P&L (realized + unrealized)")
+    position_count: int = Field(ge=0, description="Number of open positions")
+    update_reason: Literal["position_update", "price_update", "periodic"] = Field(
+        description="Reason for this PnL update"
+    )
+
+
+class CancelRequestedEvent(Event):
+    """Event emitted when a cancel request is made.
+
+    Per observability.mdc §1: CancelRequestedEvent is a core event type.
+    This event is emitted when a cancel command is received, before the actual cancellation.
+
+    Attributes:
+        order_id: Internal UUID for the order
+        client_order_id: Idempotency key
+        reason: Optional cancellation reason
+        requested_by: Who requested the cancel ("system", "operator", "strategy")
+    """
+
+    source: EventSource = Field(default=EventSource.OMS)
+
+    order_id: str = Field(description="Internal UUID for the order")
+    client_order_id: str = Field(description="Idempotency key")
+    reason: str | None = Field(default=None, description="Optional cancellation reason")
+    requested_by: Literal["system", "operator", "strategy"] = Field(
+        default="system", description="Who requested the cancel"
     )

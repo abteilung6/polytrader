@@ -332,3 +332,211 @@ def record_projected_exposure(exposure: float) -> None:
     """
     collector = get_metrics_collector()
     collector.set_gauge("risk_projected_exposure", exposure)
+
+
+# Market Data metrics functions per observability.mdc §4
+
+
+def record_md_update(market_slug: str | None = None, outcome: str | None = None) -> None:
+    """Record a market data update per observability.mdc §4.
+
+    Args:
+        market_slug: Optional market slug label
+        outcome: Optional outcome label (UP/DOWN)
+    """
+    collector = get_metrics_collector()
+    labels: dict[str, str] = {}
+    if market_slug:
+        labels["market_slug"] = market_slug
+    if outcome:
+        labels["outcome"] = outcome
+    collector.increment_counter("md_updates_total", labels=labels if labels else None)
+
+
+def record_md_staleness(staleness_seconds: float, market_slug: str | None = None) -> None:
+    """Record market data staleness per observability.mdc §4.
+
+    Args:
+        staleness_seconds: Staleness in seconds (time since last update)
+        market_slug: Optional market slug label
+    """
+    collector = get_metrics_collector()
+    labels: dict[str, str] = {}
+    if market_slug:
+        labels["market_slug"] = market_slug
+    collector.set_gauge(
+        "md_staleness_seconds", staleness_seconds, labels=labels if labels else None
+    )
+
+
+def record_md_gap(market_slug: str | None = None) -> None:
+    """Record a market data gap per observability.mdc §4.
+
+    Args:
+        market_slug: Optional market slug label
+    """
+    collector = get_metrics_collector()
+    labels: dict[str, str] = {}
+    if market_slug:
+        labels["market_slug"] = market_slug
+    collector.increment_counter("md_gap_total", labels=labels if labels else None)
+
+
+def record_md_reconnect(market_slug: str | None = None) -> None:
+    """Record a market data reconnect per observability.mdc §4.
+
+    Args:
+        market_slug: Optional market slug label
+    """
+    collector = get_metrics_collector()
+    labels: dict[str, str] = {}
+    if market_slug:
+        labels["market_slug"] = market_slug
+    collector.increment_counter("md_reconnect_total", labels=labels if labels else None)
+
+
+def set_md_book_mid(mid: float, market_slug: str, outcome: str) -> None:
+    """Set market data book mid price per observability.mdc §4.
+
+    Args:
+        mid: Mid price (average of bid and ask)
+        market_slug: Market slug label
+        outcome: Outcome label (UP/DOWN)
+    """
+    collector = get_metrics_collector()
+    collector.set_gauge("md_book_mid", mid, labels={"market_slug": market_slug, "outcome": outcome})
+
+
+def set_md_spread(spread: float, market_slug: str, outcome: str) -> None:
+    """Set market data spread per observability.mdc §4.
+
+    Args:
+        spread: Spread (ask - bid)
+        market_slug: Market slug label
+        outcome: Outcome label (UP/DOWN)
+    """
+    collector = get_metrics_collector()
+    collector.set_gauge(
+        "md_spread", spread, labels={"market_slug": market_slug, "outcome": outcome}
+    )
+
+
+# Strategy metrics functions per observability.mdc §4
+
+
+def record_strategy_eval(strategy_id: str) -> None:
+    """Record a strategy evaluation per observability.mdc §4.
+
+    Args:
+        strategy_id: Strategy identifier (e.g., "simple_threshold")
+    """
+    collector = get_metrics_collector()
+    collector.increment_counter("strategy_eval_total", labels={"strategy_id": strategy_id})
+
+
+def record_strategy_eval_latency(strategy_id: str, latency_ms: float) -> None:
+    """Record strategy evaluation latency per observability.mdc §4.
+
+    Args:
+        strategy_id: Strategy identifier (e.g., "simple_threshold")
+        latency_ms: Evaluation latency in milliseconds
+    """
+    collector = get_metrics_collector()
+    collector.record_histogram(
+        "strategy_eval_latency_ms", latency_ms, labels={"strategy_id": strategy_id}
+    )
+
+
+def record_order_intent(strategy_id: str, market_slug: str, outcome: str, side: str) -> None:
+    """Record an order intent per observability.mdc §4.
+
+    Args:
+        strategy_id: Strategy identifier (e.g., "simple_threshold")
+        market_slug: Market slug label
+        outcome: Outcome label (UP/DOWN)
+        side: Trade side label (BUY/SELL)
+    """
+    collector = get_metrics_collector()
+    collector.increment_counter(
+        "order_intents_total",
+        labels={
+            "strategy_id": strategy_id,
+            "market_slug": market_slug,
+            "outcome": outcome,
+            "side": side,
+        },
+    )
+
+
+# Safety metrics functions per observability.mdc §4
+
+
+def set_execution_enabled(enabled: bool) -> None:
+    """Set execution enabled gauge per observability.mdc §4.
+
+    Args:
+        enabled: Whether execution is enabled (True = 1, False = 0)
+    """
+    collector = get_metrics_collector()
+    collector.set_gauge("execution_enabled", 1.0 if enabled else 0.0)
+
+
+def set_kill_switch(active: bool) -> None:
+    """Set kill switch gauge per observability.mdc §4.
+
+    Args:
+        active: Whether kill switch is active (True = 1, False = 0)
+    """
+    collector = get_metrics_collector()
+    collector.set_gauge("kill_switch", 1.0 if active else 0.0)
+
+
+def record_circuit_breaker(circuit_type: str) -> None:
+    """Record a circuit breaker trigger per observability.mdc §4.
+
+    Args:
+        circuit_type: Circuit breaker type (e.g., "reconcile_divergence",
+            "data_stale", "error_rate")
+    """
+    collector = get_metrics_collector()
+    collector.increment_counter("circuit_breaker_total", labels={"type": circuit_type})
+
+
+def record_adapter_error(error_class: str) -> None:
+    """Record an adapter error per observability.mdc §4.
+
+    Args:
+        error_class: Error classification (e.g., "fatal", "retryable",
+            "network", "timeout")
+    """
+    collector = get_metrics_collector()
+    collector.increment_counter("adapter_errors_total", labels={"class": error_class})
+
+
+# Posttrade metrics functions per observability.mdc §4
+
+
+def set_position_net(market_slug: str, outcome: str, net_position: float) -> None:
+    """Set position net gauge per observability.mdc §4.
+
+    Args:
+        market_slug: Market identifier
+        outcome: Market outcome (UP/DOWN)
+        net_position: Net position size (positive for long, negative for short)
+    """
+    collector = get_metrics_collector()
+    collector.set_gauge(
+        "position_net",
+        net_position,
+        labels={"market": market_slug, "outcome": outcome},
+    )
+
+
+def set_pnl_unrealized(unrealized_pnl: float) -> None:
+    """Set unrealized PnL gauge per observability.mdc §4.
+
+    Args:
+        unrealized_pnl: Total unrealized profit/loss across all open positions
+    """
+    collector = get_metrics_collector()
+    collector.set_gauge("pnl_unrealized", unrealized_pnl)

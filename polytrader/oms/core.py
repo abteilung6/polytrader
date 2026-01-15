@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 from polytrader.events import (
     APPROVED_PROPOSALS,
     CANCEL_ORDER_COMMANDS,
+    CANCEL_REQUESTED,
     FILLS,
     ORDER_ACKS,
     ORDER_CANCELS,
@@ -25,6 +26,7 @@ from polytrader.events import (
 )
 from polytrader.events.bus import EventBus
 from polytrader.events.types import (
+    CancelRequestedEvent,
     FillEvent,
     OrderAckEvent,
     OrderCanceledEvent,
@@ -32,6 +34,7 @@ from polytrader.events.types import (
     OrderSubmittedEvent,
 )
 from polytrader.logging_config import logger
+from polytrader.obs.logging import bind_correlation_context, bind_order_context
 from polytrader.oms.fsm import transition_order_state
 from polytrader.oms.idempotency import IdempotencyStore, generate_client_order_id
 from polytrader.oms.metrics import (
@@ -145,7 +148,12 @@ class OMSCore:
                     break
                 except Exception:
                     # Don't let gauge updates crash the main loop
-                    logger.exception("Error updating OMS gauges")
+                    bind_correlation_context(
+                        logger,
+                        correlation_id="",
+                        event_type="OMSGaugeUpdateError",
+                        error_class="system",
+                    ).exception("Error updating OMS gauges")
                     await asyncio.sleep(1.0)
 
         gauge_task = asyncio.create_task(update_gauges())
@@ -164,7 +172,12 @@ class OMSCore:
                 except asyncio.CancelledError:
                     break
                 except Exception as e:
-                    logger.exception("Error handling canonical ack", error=str(e))
+                    bind_correlation_context(
+                        logger,
+                        correlation_id="",
+                        event_type="CanonicalAckError",
+                        error_class="system",
+                    ).exception("Error handling canonical ack", error=str(e))
 
         async def process_user_stream_rejects():
             """Process user stream rejects."""
@@ -179,7 +192,12 @@ class OMSCore:
                 except asyncio.CancelledError:
                     break
                 except Exception as e:
-                    logger.exception("Error handling canonical reject", error=str(e))
+                    bind_correlation_context(
+                        logger,
+                        correlation_id="",
+                        event_type="CanonicalRejectError",
+                        error_class="system",
+                    ).exception("Error handling canonical reject", error=str(e))
 
         async def process_user_stream_fills():
             """Process user stream fills."""
@@ -194,7 +212,12 @@ class OMSCore:
                 except asyncio.CancelledError:
                     break
                 except Exception as e:
-                    logger.exception("Error handling canonical fill", error=str(e))
+                    bind_correlation_context(
+                        logger,
+                        correlation_id="",
+                        event_type="CanonicalFillError",
+                        error_class="system",
+                    ).exception("Error handling canonical fill", error=str(e))
 
         async def process_user_stream_cancels():
             """Process user stream cancels."""
@@ -209,7 +232,12 @@ class OMSCore:
                 except asyncio.CancelledError:
                     break
                 except Exception as e:
-                    logger.exception("Error handling canonical cancel", error=str(e))
+                    bind_correlation_context(
+                        logger,
+                        correlation_id="",
+                        event_type="CanonicalCancelError",
+                        error_class="system",
+                    ).exception("Error handling canonical cancel", error=str(e))
 
         # Start user stream handlers
         user_stream_tasks = [
@@ -277,14 +305,9 @@ class OMSCore:
             existing_order = self._store.get_order(existing_order_id)
             if existing_order:
                 record_idempotency_hit(client_order_id)
-                logger.bind(
-                    correlation_id=intent.correlation_id,
-                    order_id=existing_order.order_id,
-                    client_order_id=client_order_id,
-                    market_slug=intent.market_slug,
-                    outcome=intent.outcome,
-                    side=intent.side,
-                ).debug("Duplicate order detected, returning existing order")
+                bind_order_context(logger, existing_order, event_type="OrderDuplicate").debug(
+                    "Duplicate order detected, returning existing order"
+                )
                 return existing_order
             # Order ID exists but order not found - clear idempotency mapping
             # (shouldn't happen, but handle gracefully)
@@ -337,15 +360,15 @@ class OMSCore:
         # Store handler will update state if needed (idempotent)
         self._store.handle_order_submitted(submitted_event)
 
+        # Update orders_live gauge immediately after order creation
+        update_orders_live_gauge(self._store)
+
         # Structured logging
         total_latency_ms = (time.monotonic() - start_time) * 1000
-        logger.bind(
-            correlation_id=intent.correlation_id,
-            order_id=order.order_id,
-            client_order_id=client_order_id,
-            market_slug=order.market_slug,
-            outcome=order.outcome,
-            side=order.side,
+        bind_order_context(
+            logger,
+            order,
+            event_type="OrderCreated",
             size=order.size,
             limit_price=order.limit_price,
             latency_ms=total_latency_ms,
@@ -387,8 +410,11 @@ class OMSCore:
         start_time = time.monotonic()
         order = self._store.get_order_by_client_id(client_order_id)
         if not order:
-            logger.bind(
+            bind_correlation_context(
+                logger,
+                correlation_id="",  # Not available when order not found
                 client_order_id=client_order_id,
+                event_type="OrderAckFailed",
                 error_class="ValueError",
             ).error(
                 "Order not found for client_order_id: {client_order_id}",
@@ -424,14 +450,11 @@ class OMSCore:
 
         # Structured logging
         latency_ms = (time.monotonic() - start_time) * 1000
-        logger.bind(
-            correlation_id=order.correlation_id,
-            order_id=order.order_id,
-            client_order_id=client_order_id,
+        bind_order_context(
+            logger,
+            order,
+            event_type="OrderAcked",
             venue_order_id=venue_order_id,
-            market_slug=order.market_slug,
-            outcome=order.outcome,
-            side=order.side,
             latency_ms=latency_ms,
         ).info(
             "Order acknowledged: {order_id} venue_order_id={venue_order_id}",
@@ -463,8 +486,11 @@ class OMSCore:
         start_time = time.monotonic()
         order = self._store.get_order_by_client_id(client_order_id)
         if not order:
-            logger.bind(
+            bind_correlation_context(
+                logger,
+                correlation_id="",  # Not available when order not found
                 client_order_id=client_order_id,
+                event_type="OrderRejectFailed",
                 error_class="ValueError",
             ).error(
                 "Order not found for client_order_id: {client_order_id}",
@@ -500,14 +526,10 @@ class OMSCore:
 
         # Structured logging
         latency_ms = (time.monotonic() - start_time) * 1000
-        logger.bind(
-            correlation_id=order.correlation_id,
-            order_id=order.order_id,
-            client_order_id=client_order_id,
-            venue_order_id=order.venue_order_id,
-            market_slug=order.market_slug,
-            outcome=order.outcome,
-            side=order.side,
+        bind_order_context(
+            logger,
+            order,
+            event_type="OrderRejected",
             reason=reason,
             latency_ms=latency_ms,
             error_class="rejection",
@@ -516,6 +538,9 @@ class OMSCore:
             order_id=order.order_id,
             reason=reason,
         )
+
+        # Update orders_live gauge immediately after state change
+        update_orders_live_gauge(self._store)
 
     async def handle_fill(
         self,
@@ -550,8 +575,11 @@ class OMSCore:
         start_time = time.monotonic()
         order = self._store.get_order_by_client_id(client_order_id)
         if not order:
-            logger.bind(
+            bind_correlation_context(
+                logger,
+                correlation_id="",  # Not available when order not found
                 client_order_id=client_order_id,
+                event_type="OrderFillFailed",
                 error_class="ValueError",
             ).error(
                 "Order not found for client_order_id: {client_order_id}",
@@ -565,10 +593,10 @@ class OMSCore:
                 f"Fill size {size} would exceed order size {order.size} "
                 f"(current filled: {order.filled_size})"
             )
-            logger.bind(
-                correlation_id=order.correlation_id,
-                order_id=order.order_id,
-                client_order_id=client_order_id,
+            bind_order_context(
+                logger,
+                order,
+                event_type="OrderFillValidationFailed",
                 fill_size=size,
                 order_size=order.size,
                 current_filled=order.filled_size,
@@ -618,18 +646,16 @@ class OMSCore:
                     ) * 1000
                     record_order_lifetime(updated_order, lifetime_ms)
                 del self._order_timestamps[updated_order.order_id]
+                # Update orders_live gauge immediately when order becomes terminal
+                update_orders_live_gauge(self._store)
 
         # Structured logging
         latency_ms = (time.monotonic() - start_time) * 1000
-        logger.bind(
-            correlation_id=order.correlation_id,
-            order_id=order.order_id,
-            client_order_id=client_order_id,
-            venue_order_id=order.venue_order_id,
+        bind_order_context(
+            logger,
+            order,
+            event_type="OrderFilled",
             venue_fill_id=venue_fill_id,
-            market_slug=order.market_slug,
-            outcome=order.outcome,
-            side=order.side,
             fill_size=size,
             fill_price=price,
             fee=fee,
@@ -668,8 +694,11 @@ class OMSCore:
         start_time = time.monotonic()
         order = self._store.get_order_by_client_id(client_order_id)
         if not order:
-            logger.bind(
+            bind_correlation_context(
+                logger,
+                correlation_id="",  # Not available when order not found
                 client_order_id=client_order_id,
+                event_type="OrderCancelFailed",
                 error_class="ValueError",
             ).error(
                 "Order not found for client_order_id: {client_order_id}",
@@ -680,10 +709,10 @@ class OMSCore:
         # Check if order can be cancelled
         if order.is_terminal:
             error_msg = f"Order {order.order_id} is already in terminal state: {order.state}"
-            logger.bind(
-                correlation_id=order.correlation_id,
-                order_id=order.order_id,
-                client_order_id=client_order_id,
+            bind_order_context(
+                logger,
+                order,
+                event_type="OrderCancelInvalid",
                 state=order.state.value,
                 error_class="ValueError",
             ).warning(error_msg)
@@ -703,6 +732,16 @@ class OMSCore:
                 # For now, record with current state
                 record_order_lifetime(order, lifetime_ms)
             del self._order_timestamps[order.order_id]
+
+        # Emit CancelRequestedEvent per observability.mdc §1
+        cancel_requested_event = CancelRequestedEvent(
+            order_id=order.order_id,
+            client_order_id=client_order_id,
+            reason=reason,
+            requested_by="system",
+            correlation_id=order.correlation_id,
+        )
+        await self._bus.publish(CANCEL_REQUESTED, cancel_requested_event)
 
         # Send CancelOrderCommand to Execution
         from polytrader.oms.commands import CancelOrderCommand
@@ -726,16 +765,15 @@ class OMSCore:
         # Store handler will handle state transition
         self._store.handle_order_canceled(cancel_event)
 
+        # Update orders_live gauge immediately after state change (CANCELLED is terminal)
+        update_orders_live_gauge(self._store)
+
         # Structured logging
         latency_ms = (time.monotonic() - start_time) * 1000
-        logger.bind(
-            correlation_id=order.correlation_id,
-            order_id=order.order_id,
-            client_order_id=client_order_id,
-            venue_order_id=order.venue_order_id,
-            market_slug=order.market_slug,
-            outcome=order.outcome,
-            side=order.side,
+        bind_order_context(
+            logger,
+            order,
+            event_type="OrderCanceled",
             reason=reason,
             latency_ms=latency_ms,
         ).info(
@@ -760,9 +798,12 @@ class OMSCore:
             order = self._store.get_order_by_venue_id(canonical_ack.venue_order_id)
 
         if not order:
-            logger.bind(
+            bind_correlation_context(
+                logger,
+                correlation_id="",  # Not available when order not found
                 client_order_id=canonical_ack.client_order_id or "",
                 venue_order_id=canonical_ack.venue_order_id,
+                event_type="CanonicalAckOrderNotFound",
             ).warning(
                 "Order not found for canonical ack (venue_order_id={venue_order_id})",
                 venue_order_id=canonical_ack.venue_order_id,
@@ -789,8 +830,11 @@ class OMSCore:
             order = self._store.get_order_by_client_id(canonical_reject.client_order_id)
 
         if not order:
-            logger.bind(
+            bind_correlation_context(
+                logger,
+                correlation_id="",  # Not available when order not found
                 client_order_id=canonical_reject.client_order_id or "",
+                event_type="CanonicalRejectOrderNotFound",
             ).warning(
                 "Order not found for canonical reject (client_order_id={client_order_id})",
                 client_order_id=canonical_reject.client_order_id or "",
@@ -819,10 +863,13 @@ class OMSCore:
             order = self._store.get_order_by_venue_id(canonical_fill.venue_order_id)
 
         if not order:
-            logger.bind(
+            bind_correlation_context(
+                logger,
+                correlation_id="",  # Not available when order not found
                 client_order_id=canonical_fill.client_order_id or "",
                 venue_order_id=canonical_fill.venue_order_id or "",
                 fill_id=canonical_fill.fill_id,
+                event_type="CanonicalFillOrderNotFound",
             ).warning(
                 (
                     "Order not found for canonical fill "
@@ -858,9 +905,12 @@ class OMSCore:
             order = self._store.get_order_by_venue_id(canonical_cancel.venue_order_id)
 
         if not order:
-            logger.bind(
+            bind_correlation_context(
+                logger,
+                correlation_id="",  # Not available when order not found
                 client_order_id=canonical_cancel.client_order_id or "",
                 venue_order_id=canonical_cancel.venue_order_id,
+                event_type="CanonicalCancelOrderNotFound",
             ).warning(
                 "Order not found for canonical cancel (venue_order_id={venue_order_id})",
                 venue_order_id=canonical_cancel.venue_order_id,

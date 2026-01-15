@@ -5,6 +5,7 @@ from polytrader.events.store import IEventStore, MemoryEventStore
 
 # Import event types first
 from polytrader.events.types import (
+    CancelRequestedEvent,
     CircuitBreakerEvent,
     ConfigLoadedEvent,
     Event,
@@ -25,6 +26,8 @@ from polytrader.events.types import (
     OrderIntentEvent,
     OrderRejectedEvent,
     OrderSubmittedEvent,
+    PnLEvent,
+    PositionUpdatedEvent,
     ReconcileEvent,
     RiskCheckEvent,
     ServiceErrorEvent,
@@ -39,6 +42,7 @@ from polytrader.events.types import (
 __all__ = [
     "APPROVED_PROPOSALS",
     "CANCEL_ORDER_COMMANDS",
+    "CancelRequestedEvent",
     "CircuitBreakerEvent",
     "ConfigLoadedEvent",
     "Event",
@@ -76,6 +80,8 @@ __all__ = [
     "OrderSubmittedEvent",
     "ORDERS",
     "CIRCUIT_BREAKER",
+    "PnLEvent",
+    "PositionUpdatedEvent",
     "PROPOSALS",
     "RECONCILE",
     "ReconcileEvent",
@@ -93,6 +99,10 @@ __all__ = [
     "TARGETS",
     "TargetEvent",
     "Topic",
+    "VenueConnectedEvent",
+    "VenueDisconnectedEvent",
+    "VENUE_CONNECTED",
+    "VENUE_DISCONNECTED",
     "USER_STREAM_ACKS",
     "USER_STREAM_CANCELS",
     "USER_STREAM_FILLS",
@@ -223,6 +233,26 @@ def __getattr__(name: str):
         from polytrader.events.topics import get_circuit_breaker_topic
 
         return get_circuit_breaker_topic()
+    elif name == "POSITION_UPDATES":
+        from polytrader.events.topics import get_position_updates_topic
+
+        return get_position_updates_topic()
+    elif name == "PNL_UPDATES":
+        from polytrader.events.topics import get_pnl_updates_topic
+
+        return get_pnl_updates_topic()
+    elif name == "CANCEL_REQUESTED":
+        from polytrader.events.topics import get_cancel_requested_topic
+
+        return get_cancel_requested_topic()
+    elif name == "VENUE_CONNECTED":
+        from polytrader.events.topics import get_venue_connected_topic
+
+        return get_venue_connected_topic()
+    elif name == "VENUE_DISCONNECTED":
+        from polytrader.events.topics import get_venue_disconnected_topic
+
+        return get_venue_disconnected_topic()
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 

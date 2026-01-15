@@ -6,6 +6,7 @@ import time
 from polytrader.events import PROPOSALS, SIGNALS, TARGETS, EventBus
 from polytrader.events.types import MarketDataEvent, SignalEvent, TargetEvent
 from polytrader.logging_config import logger
+from polytrader.obs.logging import bind_strategy_context
 from polytrader.obs.metrics import IMetricsCollector, MemoryMetricsCollector
 from polytrader.portfolio.intents import convert_target_to_intent
 from polytrader.portfolio.sizing import calculate_size
@@ -69,17 +70,26 @@ class PortfolioService:
         """Main loop: subscribe to SIGNALS and process."""
         signals_queue = self.bus.subscribe(SIGNALS)
 
-        logger.info("PortfolioService started, subscribing to SIGNALS")
+        bind_strategy_context(
+            logger, strategy_id="portfolio_service", event_type="PortfolioServiceStarted"
+        ).info("PortfolioService started, subscribing to SIGNALS")
 
         try:
             while self._running:
                 signal = await signals_queue.get()
                 await self._process_signal(signal)
         except asyncio.CancelledError:
-            logger.info("PortfolioService stopped")
+            bind_strategy_context(
+                logger, strategy_id="portfolio_service", event_type="PortfolioServiceStopped"
+            ).info("PortfolioService stopped")
             raise
         except Exception:
-            logger.exception("Error in PortfolioService")
+            bind_strategy_context(
+                logger,
+                strategy_id="portfolio_service",
+                event_type="PortfolioServiceError",
+                error_class="system",
+            ).exception("Error in PortfolioService")
             raise
 
     async def _process_signal(self, signal: SignalEvent) -> None:
@@ -94,12 +104,19 @@ class PortfolioService:
             # Step 1: Convert signal to target
             target = convert_signal_to_target(signal, fixed_size_usd=self.fixed_size_usd)
             if target is None:
-                logger.debug(
-                    "No target generated from signal",
+                latency_ms = (time.perf_counter() - start_time) * 1000
+                bind_strategy_context(
+                    logger,
+                    strategy_id=signal.model_id,
+                    correlation_id=signal.correlation_id,
                     market_slug=signal.market_slug,
+                    outcome=signal.outcome,
+                    event_type="PortfolioNoTarget",
+                    latency_ms=latency_ms,
+                ).debug(
+                    "No target generated from signal",
                     edge=signal.edge,
                     confidence=signal.confidence,
-                    correlation_id=signal.correlation_id,
                 )
                 return
 
@@ -120,12 +137,17 @@ class PortfolioService:
             # Step 3: Get current market data (for limit_price)
             market_data = self._get_current_market_data(signal.market_slug, signal.outcome)
             if market_data is None:
-                logger.warning(
-                    "No market data available for signal",
+                latency_ms = (time.perf_counter() - start_time) * 1000
+                bind_strategy_context(
+                    logger,
+                    strategy_id=signal.model_id,
+                    correlation_id=signal.correlation_id,
                     market_slug=signal.market_slug,
                     outcome=signal.outcome,
-                    correlation_id=signal.correlation_id,
-                )
+                    event_type="PortfolioNoMarketData",
+                    error_class="system",
+                    latency_ms=latency_ms,
+                ).warning("No market data available for signal")
                 return
 
             # Step 4: Get current position (for portfolio-aware sizing)
@@ -134,10 +156,17 @@ class PortfolioService:
             # Step 5: Calculate order size (portfolio-aware)
             size = calculate_size(target, current_position)
             if size <= 0.0:
-                logger.debug(
-                    "No order size needed (target already met or size <= 0)",
+                latency_ms = (time.perf_counter() - start_time) * 1000
+                bind_strategy_context(
+                    logger,
+                    strategy_id=signal.model_id,
+                    correlation_id=signal.correlation_id,
                     market_slug=signal.market_slug,
                     outcome=signal.outcome,
+                    event_type="PortfolioNoSize",
+                    latency_ms=latency_ms,
+                ).debug(
+                    "No order size needed (target already met or size <= 0)",
                     target_exposure=target.target_exposure,
                     current_position=current_position.size if current_position else 0.0,
                     calculated_size=size,
@@ -147,12 +176,17 @@ class PortfolioService:
             # Step 6: Convert target to order intent
             intent = convert_target_to_intent(target, market_data, signal, size)
             if intent is None:
-                logger.warning(
-                    "No order intent generated from target",
+                latency_ms = (time.perf_counter() - start_time) * 1000
+                bind_strategy_context(
+                    logger,
+                    strategy_id=signal.model_id,
+                    correlation_id=signal.correlation_id,
                     market_slug=target.market_slug,
                     outcome=target.outcome,
-                    correlation_id=signal.correlation_id,
-                )
+                    event_type="PortfolioNoIntent",
+                    error_class="system",
+                    latency_ms=latency_ms,
+                ).warning("No order intent generated from target")
                 return
 
             # Step 7: Publish OrderIntentEvent to PROPOSALS (RiskChecker subscribes here)
@@ -163,24 +197,34 @@ class PortfolioService:
             latency_ms = (time.perf_counter() - start_time) * 1000
             self.metrics.record_histogram("portfolio_processing_latency_ms", latency_ms)
 
-            logger.info(
-                "Published OrderIntentEvent to PROPOSALS",
+            bind_strategy_context(
+                logger,
+                strategy_id=signal.model_id,
+                correlation_id=intent.correlation_id,
                 market_slug=intent.market_slug,
                 outcome=intent.outcome,
+                event_type="PortfolioIntentPublished",
+                latency_ms=latency_ms,
+            ).info(
+                "Published OrderIntentEvent to PROPOSALS",
                 side=intent.side,
                 size=intent.size,
                 limit_price=intent.limit_price,
-                correlation_id=intent.correlation_id,
-                latency_ms=latency_ms,
             )
 
         except Exception:
             self.metrics.increment_counter("portfolio_errors_total")
-            logger.exception(
-                "Error processing signal",
-                market_slug=signal.market_slug,
+            latency_ms = (time.perf_counter() - start_time) * 1000
+            bind_strategy_context(
+                logger,
+                strategy_id=signal.model_id,
                 correlation_id=signal.correlation_id,
-            )
+                market_slug=signal.market_slug,
+                outcome=signal.outcome,
+                event_type="PortfolioProcessingError",
+                error_class="system",
+                latency_ms=latency_ms,
+            ).exception("Error processing signal")
             # Continue processing despite errors
 
     def _get_current_market_data(self, market_slug: str, outcome: str) -> MarketDataEvent | None:

@@ -30,6 +30,11 @@ _user_stream_fills_topic: Topic | None = None
 _user_stream_cancels_topic: Topic | None = None
 _reconcile_topic: Topic | None = None
 _circuit_breaker_topic: Topic | None = None
+_position_updates_topic: Topic | None = None
+_pnl_updates_topic: Topic | None = None
+_cancel_requested_topic: Topic | None = None
+_venue_connected_topic: Topic | None = None
+_venue_disconnected_topic: Topic | None = None
 
 
 def _create_market_data_topic() -> Topic:
@@ -441,6 +446,81 @@ def get_circuit_breaker_topic() -> Topic:
     return _circuit_breaker_topic
 
 
+def _create_position_updates_topic() -> Topic:
+    """Create the POSITION_UPDATES topic."""
+    from polytrader.events.types import PositionUpdatedEvent
+
+    return Topic[PositionUpdatedEvent]("position_updates")
+
+
+def get_position_updates_topic() -> Topic:
+    """Get the POSITION_UPDATES topic (singleton)."""
+    global _position_updates_topic
+    if _position_updates_topic is None:
+        _position_updates_topic = _create_position_updates_topic()
+    return _position_updates_topic
+
+
+def _create_pnl_updates_topic() -> Topic:
+    """Create the PNL_UPDATES topic."""
+    from polytrader.events.types import PnLEvent
+
+    return Topic[PnLEvent]("pnl_updates")
+
+
+def get_pnl_updates_topic() -> Topic:
+    """Get the PNL_UPDATES topic (singleton)."""
+    global _pnl_updates_topic
+    if _pnl_updates_topic is None:
+        _pnl_updates_topic = _create_pnl_updates_topic()
+    return _pnl_updates_topic
+
+
+def _create_cancel_requested_topic() -> Topic:
+    """Create the CANCEL_REQUESTED topic."""
+    from polytrader.events.types import CancelRequestedEvent
+
+    return Topic[CancelRequestedEvent]("cancel_requested")
+
+
+def get_cancel_requested_topic() -> Topic:
+    """Get the CANCEL_REQUESTED topic (singleton)."""
+    global _cancel_requested_topic
+    if _cancel_requested_topic is None:
+        _cancel_requested_topic = _create_cancel_requested_topic()
+    return _cancel_requested_topic
+
+
+def _create_venue_connected_topic() -> Topic:
+    """Create the VENUE_CONNECTED topic."""
+    from polytrader.events.types import VenueConnectedEvent
+
+    return Topic[VenueConnectedEvent]("venue_connected")
+
+
+def get_venue_connected_topic() -> Topic:
+    """Get the VENUE_CONNECTED topic (singleton)."""
+    global _venue_connected_topic
+    if _venue_connected_topic is None:
+        _venue_connected_topic = _create_venue_connected_topic()
+    return _venue_connected_topic
+
+
+def _create_venue_disconnected_topic() -> Topic:
+    """Create the VENUE_DISCONNECTED topic."""
+    from polytrader.events.types import VenueDisconnectedEvent
+
+    return Topic[VenueDisconnectedEvent]("venue_disconnected")
+
+
+def get_venue_disconnected_topic() -> Topic:
+    """Get the VENUE_DISCONNECTED topic (singleton)."""
+    global _venue_disconnected_topic
+    if _venue_disconnected_topic is None:
+        _venue_disconnected_topic = _create_venue_disconnected_topic()
+    return _venue_disconnected_topic
+
+
 def __getattr__(name: str) -> Topic:
     """Lazily initialize topic constants on first access.
 
@@ -510,5 +590,15 @@ def __getattr__(name: str) -> Topic:
         return get_reconcile_topic()
     elif name == "CIRCUIT_BREAKER":
         return get_circuit_breaker_topic()
+    elif name == "POSITION_UPDATES":
+        return get_position_updates_topic()
+    elif name == "PNL_UPDATES":
+        return get_pnl_updates_topic()
+    elif name == "CANCEL_REQUESTED":
+        return get_cancel_requested_topic()
+    elif name == "VENUE_CONNECTED":
+        return get_venue_connected_topic()
+    elif name == "VENUE_DISCONNECTED":
+        return get_venue_disconnected_topic()
     else:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
