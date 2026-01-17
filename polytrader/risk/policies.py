@@ -359,11 +359,12 @@ def check_position_limits(context: RiskContext, limits: RiskLimits) -> RiskResul
 def check_max_trades_per_market(context: RiskContext, limits: RiskLimits) -> RiskResult:
     """Check max trades per market/outcome (for BUY orders only).
 
-    This is a simple check: if we've already traded this market/outcome,
-    deny additional BUY orders. SELL orders are allowed.
+    This is a simple check: if we've already traded or approved a trade for
+    this market/outcome, deny additional BUY orders. SELL orders are allowed.
 
-    Note: This uses executed_trades from RiskContext. In Phase 3 (OMS),
-    this will come from OMS state.
+    Note: This uses executed_trades from RiskContext, which includes both
+    executed trades and approved orders (to prevent race conditions).
+    In Phase 3 (OMS), this will come from OMS state.
 
     Args:
         context: Risk context
@@ -384,7 +385,9 @@ def check_max_trades_per_market(context: RiskContext, limits: RiskLimits) -> Ris
             metadata=metadata,
         )
 
-    # Check if we've already traded this market/outcome
+    # Check if we've already traded or approved a trade for this market/outcome
+    # executed_trades includes both executed and approved trades to prevent
+    # race condition where multiple orders pass risk checks before first executes
     key = (intent.market_slug, intent.outcome)
 
     if key in context.executed_trades:

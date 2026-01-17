@@ -155,6 +155,7 @@ class RiskChecker:
         engine: Risk engine for running checks
         store: Optional market data store for building context
         _executed_trades: Set of (market_slug, outcome) tuples for executed trades
+        _approved_trades: Set of (market_slug, outcome) tuples for approved BUY orders
         _order_count_last_minute: Number of orders in the last minute (simple counter)
         _running: Whether the checker is running
     """
@@ -176,6 +177,7 @@ class RiskChecker:
         self.engine = engine
         self.store = store
         self._executed_trades: set[tuple[str, Outcome]] = set()
+        self._approved_trades: set[tuple[str, Outcome]] = set()
         self._order_count_last_minute = 0
         self._running = False
 
@@ -219,7 +221,11 @@ class RiskChecker:
                     record_risk_denial(reason=reason_code.value)
 
             # Log denial with correlation_id and reason codes per observability.mdc §2, §3
-            reason_codes_str = ", ".join([rc.value for rc in result.reason_codes])
+            # Filter out RISK_ALLOWED from denial messages (it's confusing to show both)
+            denial_reasons = [
+                rc.value for rc in result.reason_codes if rc != RiskReasonCode.RISK_ALLOWED
+            ]
+            reason_codes_str = ", ".join(denial_reasons)
             log_context.warning(
                 "Risk check denied: {reason_codes}",
                 reason_codes=reason_codes_str,
@@ -244,6 +250,16 @@ class RiskChecker:
         if result.allowed:
             await self.bus.publish(APPROVED_PROPOSALS, intent)
             self._order_count_last_minute += 1
+            # Track approved BUY orders immediately to prevent race condition
+            # where multiple orders pass risk checks before first one executes
+            if intent.side == "BUY":
+                key = (intent.market_slug, intent.outcome)
+                self._approved_trades.add(key)
+                log_context.debug(
+                    "Tracked approved BUY order for max_trades check: {market_slug}/{outcome}",
+                    market_slug=intent.market_slug,
+                    outcome=intent.outcome,
+                )
             log_context.debug("Published approved proposal to APPROVED_PROPOSALS")
         else:
             log_context.debug("Proposal denied, not publishing to APPROVED_PROPOSALS")
@@ -271,7 +287,11 @@ class RiskChecker:
                 try:
                     order = await orders_queue.get()
                     if order.side == "BUY":
-                        self._executed_trades.add((order.market_slug, order.outcome))
+                        key = (order.market_slug, order.outcome)
+                        self._executed_trades.add(key)
+                        # Remove from approved trades since it's now executed
+                        # (prevents double-counting, though both sets are checked)
+                        self._approved_trades.discard(key)
                         logger.bind(
                             correlation_id=order.correlation_id,
                             market_slug=order.market_slug,
@@ -341,11 +361,16 @@ class RiskChecker:
 
         global_position = sum(current_positions.values())
 
+        # Combine executed and approved trades for max_trades_per_market check
+        # This prevents race condition where multiple orders pass risk checks
+        # before the first one executes
+        all_trades = self._executed_trades | self._approved_trades
+
         return RiskContext(
             intent=intent,
             current_positions=current_positions,
             global_position=global_position,
-            executed_trades=self._executed_trades,
+            executed_trades=all_trades,  # Include both executed and approved
             market_data=market_data,
             owned_tokens=owned_tokens,
             # System health defaults for Phase 2 (will be implemented in Phase 3)
