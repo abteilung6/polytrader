@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: polytrader-postgres
+    environment:
+      POSTGRES_USER: ${DB_USER:-polytrader}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-polytrader}
+      POSTGRES_DB: ${DB_DATABASE:-polytrader}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-polytrader} -d ${DB_DATABASE:-polytrader}"]
+      interval: 2s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+volumes:
+  postgres_data:
