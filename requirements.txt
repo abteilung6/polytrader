@@ -1,5 +1,7 @@
+alembic>=1.18.1
 loguru>=0.7.3
 psycopg[binary,pool]>=3.3.2
+sqlalchemy>=2.0.45
 py-clob-client>=0.34.0
 pydantic>=2.12.5
 pydantic-settings>=2.12.0

@@ -188,18 +188,32 @@ async def postgres_connection(postgres_test_url: str) -> AsyncGenerator[AsyncCon
 
 
 @pytest.fixture
-async def postgres_db(postgres_connection: AsyncConnection) -> AsyncGenerator[None, None]:
-    """Ensure database is clean before and after test (truncate all tables).
+async def postgres_db(
+    postgres_connection: AsyncConnection, postgres_test_url: str
+) -> AsyncGenerator[None, None]:
+    """Ensure database is migrated and clean before and after test.
+
+    This fixture:
+    1. Runs migrations automatically (idempotent - safe to run multiple times)
+    2. Truncates all tables before test
+    3. Truncates all tables after test
 
     Args:
         postgres_connection: PostgreSQL connection (to worker-specific database)
+        postgres_test_url: PostgreSQL connection URL (needed for migrations)
 
     Yields:
         None (cleanup happens automatically)
 
     Note:
         This fixture operates on worker-specific database, so parallel execution is safe.
+        Migrations are run automatically, so tests don't need to call run_migrations().
     """
+    # Run migrations first (idempotent - Alembic handles this)
+    from polytrader.db.migrations import run_migrations
+
+    await run_migrations(postgres_test_url)
+
     # Truncate all tables before test (if any exist)
     async with postgres_connection.cursor() as cur:
         await cur.execute("""

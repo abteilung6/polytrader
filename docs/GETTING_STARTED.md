@@ -77,9 +77,10 @@ docker ps | grep polytrader-postgres
 ```bash
 # Run migrations to create events table
 make db-migrate
-```
 
-**Note:** Migrations will be available after Commit 3 is implemented.
+# Or manually using Alembic
+alembic upgrade head
+```
 
 ### 7. Verify Setup
 
@@ -105,7 +106,11 @@ make db-psql      # Connect to database with psql
 ### Running Migrations
 
 ```bash
-make db-migrate   # Run all pending migrations
+make db-migrate        # Run all pending migrations (Alembic)
+alembic upgrade head   # Same as above
+alembic downgrade -1   # Rollback last migration
+alembic current       # Show current migration version
+alembic history       # Show migration history
 ```
 
 ### Running Tests
@@ -138,7 +143,8 @@ python -m cli model paper \
 ### Migration Errors
 
 - Ensure database is running: `make db-up`
-- Check migration files exist: `ls polytrader/events/migrations/versions/`
+- Check migration files exist: `ls alembic/versions/`
+- Check current migration version: `alembic current`
 - View database schema: `make db-psql` then `\d events`
 
 ### Test Database Issues

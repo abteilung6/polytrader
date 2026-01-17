@@ -2,6 +2,8 @@
 .PHONY: db-up db-down db-migrate db-logs db-psql
 .PHONY: test-db-up test-db-down test-db-migrate
 
+PYTHON ?= python3
+
 install:
 	pip install -r requirements.txt
 
@@ -33,7 +35,7 @@ db-down:
 	docker compose down
 
 db-migrate:
-	@echo "Migrations will be implemented in Commit 3"
+	$(PYTHON) -m alembic upgrade head
 
 db-logs:
 	docker compose logs -f postgres
@@ -51,4 +53,4 @@ test-db-down:
 	docker compose -f docker-compose.test.yml down
 
 test-db-migrate:
-	@echo "Migrations will be implemented in Commit 3"
+	ALEMBIC_SQLALCHEMY_URL=postgresql+psycopg://test_user:test_password@localhost:5433/polytrader_test $(PYTHON) -m alembic upgrade head
