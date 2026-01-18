@@ -85,10 +85,11 @@ class TestMigrationRunner:
             rows = await cur.fetchall()
             versions = [row[0] for row in rows]
 
-            # Alembic uses revision IDs (e.g., '139195d3d869')
+            # Alembic stores only the HEAD revision (latest applied migration)
             assert len(versions) > 0
-            # Check that our initial migration revision is present
-            assert any("139195d3d869" in v for v in versions)
+            # Check that a valid migration revision is present (21bc6d880faf is current HEAD)
+            # Note: Alembic only stores the latest revision, not the full history
+            assert "21bc6d880faf" in versions
 
     @pytest.mark.asyncio
     async def test_run_migrations_idempotent(
