@@ -14,8 +14,10 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from polytrader.ops.health import HealthStatus
 
-from polytrader.config import load_config
+from polytrader.config import get_database_url, load_config
 from polytrader.events import SYSTEM_LIFECYCLE, EventBus
+from polytrader.events.sink import EventSink
+from polytrader.events.stores import PostgreSQLEventStore
 from polytrader.events.types import (
     ServiceErrorEvent,
     ServiceStartedEvent,
@@ -147,6 +149,9 @@ class SystemSupervisor:
         self._reconciliation_service: Any | None = None
         self._circuit_breaker: CircuitBreaker | None = None
 
+        # EventSink (mandatory, per proposal)
+        self._event_sink: EventSink | None = None
+
         # Health gate status (set during boot, used in commit 7 for execution permit)
         self._health_gates_passed: bool = True
 
@@ -158,6 +163,7 @@ class SystemSupervisor:
         self._position_manager_task: asyncio.Task | None = None
         self._user_stream_task: asyncio.Task | None = None
         self._reconciliation_task: asyncio.Task | None = None
+        self._event_sink_task: asyncio.Task | None = None
 
     async def start(self) -> None:
         """Start all global services following boot sequence.
@@ -196,6 +202,9 @@ class SystemSupervisor:
 
             # 2. Init event store (emit SystemStartedEvent)
             await self._init_event_store()
+
+            # 2.5. Initialize EventSink (mandatory, per proposal)
+            await self._init_event_sink()
 
             # Create core components ONCE early (before boot steps that need them)
             # Per review: OMS core and position manager must be created once and reused
@@ -341,6 +350,47 @@ class SystemSupervisor:
                 error_type=type(e).__name__,
             )
             # Continue with startup even if event emission fails
+
+    async def _init_event_sink(self) -> None:
+        """Initialize EventSink for asynchronous event persistence.
+
+        Per proposal: EventSink is mandatory (no config check).
+        Initializes PostgreSQL event store and EventSink.
+        Errors are logged but do not prevent startup.
+        """
+        try:
+            # Get database URL from config or environment
+            # This may fail if database config is missing, which is OK
+            try:
+                database_url = get_database_url()
+            except Exception as config_error:
+                logger.warning(
+                    "Database configuration not available: {error}. "
+                    "EventSink will not be initialized.",
+                    error=str(config_error),
+                    error_type=type(config_error).__name__,
+                )
+                self._event_sink = None
+                return
+
+            # Create PostgreSQL event store
+            event_store = PostgreSQLEventStore(connection_url=database_url, pool_size=10)
+            await event_store.initialize()
+
+            # Create EventSink
+            self._event_sink = EventSink(bus=self.bus, store=event_store)
+
+            logger.info("EventSink initialized successfully")
+        except Exception as e:
+            logger.exception(
+                "Error initializing EventSink: {error}. "
+                "System will continue without event persistence.",
+                error=str(e),
+                error_type=type(e).__name__,
+            )
+            # Continue with startup even if EventSink initialization fails
+            # (system can operate without event persistence, though not recommended)
+            self._event_sink = None
 
     async def _start_adapters(self) -> None:
         """Start adapters (market data, user stream).
@@ -752,6 +802,13 @@ class SystemSupervisor:
             )
             services_started += 1
 
+        # 9. EventSink (mandatory, per proposal)
+        if self._event_sink is not None:
+            await self._start_event_sink_task()
+            services_started += 1
+        else:
+            logger.warning("EventSink not initialized - events will not be persisted to database")
+
         return services_started
 
     async def _start_service(
@@ -1027,6 +1084,76 @@ class SystemSupervisor:
                     f"Retryable error starting ReconciliationService: {error_msg}"
                 ) from e
 
+    async def _start_event_sink_task(self) -> None:
+        """Start EventSink as a separate async task.
+
+        Per proposal: EventSink runs independently and handles errors gracefully.
+        """
+        if self._event_sink is None:
+            return
+
+        service_start = time.perf_counter()
+
+        try:
+            # Start EventSink task
+            task = asyncio.create_task(self._event_sink.run())
+            self._event_sink_task = task
+
+            # Wait a short time for EventSink to initialize
+            await asyncio.sleep(self.startup_delay_s)
+
+            # Record metrics and emit event
+            startup_time_ms = (time.perf_counter() - service_start) * 1000
+            record_service_started("EventSink", SUPERVISOR_TYPE, startup_time_ms)
+
+            started_event = ServiceStartedEvent(
+                service_name="EventSink",
+                supervisor_type=SUPERVISOR_TYPE,
+                startup_time_ms=startup_time_ms,
+            )
+            await self.bus.publish(SYSTEM_LIFECYCLE, started_event)
+
+            logger.bind(
+                supervisor=SUPERVISOR_TYPE,
+                service="EventSink",
+                startup_time_ms=startup_time_ms,
+            ).debug(
+                "EventSink started in {time_ms:.1f}ms",
+                time_ms=startup_time_ms,
+            )
+
+        except Exception as e:
+            error_class = classify_service_error(e)
+            error_type = type(e).__name__
+            error_msg = str(e)
+
+            logger.bind(
+                supervisor=SUPERVISOR_TYPE,
+                service="EventSink",
+                error_type=error_type,
+                error_class=error_class,
+            ).exception(
+                "Failed to start EventSink: {error}. "
+                "System will continue without event persistence.",
+                error=error_msg,
+            )
+
+            # Emit error event
+            error_event = ServiceErrorEvent(
+                service_name="EventSink",
+                supervisor_type=SUPERVISOR_TYPE,
+                error_type=error_type,
+                error_message=error_msg,
+                error_class=error_class,
+            )
+            await self.bus.publish(SYSTEM_LIFECYCLE, error_event)
+
+            # Record metric
+            record_service_error("EventSink", SUPERVISOR_TYPE, error_type, error_class)
+
+            # Don't re-raise - EventSink failures should not prevent system startup
+            # (per proposal: graceful error handling)
+
     async def stop(self) -> None:
         """Stop all global services in reverse order.
 
@@ -1044,6 +1171,47 @@ class SystemSupervisor:
         services_stopped = 0
 
         # Stop in reverse order
+        # Stop EventSink (should be last to flush remaining events)
+        if self._event_sink is not None:
+            try:
+                await self._event_sink.stop()
+                record_service_stopped("EventSink", SUPERVISOR_TYPE)
+                stopped_event = ServiceStoppedEvent(
+                    service_name="EventSink",
+                    supervisor_type=SUPERVISOR_TYPE,
+                    reason=None,
+                )
+                await self.bus.publish(SYSTEM_LIFECYCLE, stopped_event)
+                logger.bind(supervisor=SUPERVISOR_TYPE, service="EventSink").debug(
+                    "EventSink stopped"
+                )
+                services_stopped += 1
+            except Exception as e:
+                logger.bind(
+                    supervisor=SUPERVISOR_TYPE,
+                    service="EventSink",
+                    error_type=type(e).__name__,
+                ).exception("Error stopping EventSink: {error}", error=str(e))
+            finally:
+                if self._event_sink_task is not None:
+                    if not self._event_sink_task.done():
+                        self._event_sink_task.cancel()
+                    try:
+                        await asyncio.wait_for(self._event_sink_task, timeout=5.0)
+                    except (asyncio.CancelledError, TimeoutError):
+                        pass
+                    self._event_sink_task = None
+                # Cleanup event store
+                if hasattr(self._event_sink, "_store"):
+                    try:
+                        await self._event_sink._store.cleanup()
+                    except Exception as cleanup_error:
+                        logger.exception(
+                            "Error cleaning up EventSink store: {error}",
+                            error=str(cleanup_error),
+                        )
+                self._event_sink = None
+
         # Stop reconciliation task
         if self._reconciliation_task is not None:
             try:
@@ -1204,6 +1372,7 @@ class SystemSupervisor:
             self._execution_router_task,
             self._oms_core_task,
             self._risk_checker_task,
+            self._event_sink_task,
         ]
 
         for task in tasks:
@@ -1221,6 +1390,7 @@ class SystemSupervisor:
         self._execution_router_task = None
         self._oms_core_task = None
         self._risk_checker_task = None
+        self._event_sink_task = None
 
         set_services_running(SUPERVISOR_TYPE, 0)
 
@@ -1251,6 +1421,7 @@ class SystemSupervisor:
                     self._position_manager_task,
                     self._user_stream_task,
                     self._reconciliation_task,
+                    self._event_sink_task,
                 ]
                 if t is not None
             ]
