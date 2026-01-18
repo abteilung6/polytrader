@@ -1,6 +1,7 @@
 """Event infrastructure for the trading system."""
 
 from polytrader.events.bus import EventBus, Topic
+from polytrader.events.sink import EventSink
 from polytrader.events.store import IEventStore, MemoryEventStore
 from polytrader.events.stores import (
     PostgreSQLEventStore,
@@ -52,6 +53,7 @@ __all__ = [
     "ConfigLoadedEvent",
     "Event",
     "EventBus",
+    "EventSink",
     "EventSource",
     "EXECUTION_ERRORS",
     "EXECUTION_REQUESTS",

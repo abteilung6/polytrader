@@ -1,0 +1,303 @@
+"""Integration tests for EventSink.
+
+Tests EventSink functionality with real PostgreSQL database.
+"""
+
+import asyncio
+from collections.abc import AsyncGenerator
+
+import pytest
+
+from polytrader.events.bus import EventBus
+from polytrader.events.sink import EventSink
+from polytrader.events.stores import PostgreSQLEventStore
+from polytrader.events.types import (
+    OrderCreatedEvent,
+    OrderIntentEvent,
+    SystemStartedEvent,
+)
+
+
+@pytest.fixture
+async def event_sink(
+    postgres_test_url: str,
+) -> AsyncGenerator[EventSink, None]:
+    """Create EventSink for testing."""
+    from sqlalchemy import text
+
+    from polytrader.db.migrations import run_migrations
+
+    # Ensure migrations are run
+    await run_migrations(postgres_test_url)
+
+    # Create event bus and store
+    store = PostgreSQLEventStore(connection_url=postgres_test_url, pool_size=5)
+    await store.initialize()
+
+    # Truncate table for clean state
+    if store._Session:
+        async with store._Session() as session:
+            await session.execute(text("TRUNCATE TABLE events CASCADE"))
+            await session.commit()
+
+    bus = EventBus()
+    sink = EventSink(bus=bus, store=store, batch_size=10, flush_interval_s=0.1)
+
+    # Start sink in background
+    sink_task = asyncio.create_task(sink.run())
+
+    yield sink
+
+    # Stop sink
+    await sink.stop()
+    sink_task.cancel()
+    try:
+        await sink_task
+    except asyncio.CancelledError:
+        pass
+
+    await store.cleanup()
+
+
+@pytest.mark.asyncio
+async def test_event_sink_persists_events(event_sink: EventSink) -> None:
+    """Test that EventSink persists events to database."""
+    from polytrader.events import SYSTEM_LIFECYCLE
+
+    # Publish events
+    event1 = SystemStartedEvent()
+    await event_sink._bus.publish(SYSTEM_LIFECYCLE, event1)
+
+    # Wait for flush (flush_interval is 0.1s in test)
+    await asyncio.sleep(0.2)
+
+    # Verify events were persisted
+    events = list(event_sink._store.read_stream())
+    assert len(events) >= 1
+    assert any(e.event_id == event1.event_id for e in events)
+
+
+@pytest.mark.asyncio
+async def test_event_sink_batch_writing(event_sink: EventSink) -> None:
+    """Test that EventSink batches events before writing."""
+    from polytrader.events import SYSTEM_LIFECYCLE
+
+    # Publish multiple events
+    events_published = []
+    for _ in range(5):
+        event = SystemStartedEvent()
+        events_published.append(event)
+        await event_sink._bus.publish(SYSTEM_LIFECYCLE, event)
+
+    # Wait for flush
+    await asyncio.sleep(0.2)
+
+    # Verify all events were persisted
+    events = list(event_sink._store.read_stream())
+    assert len(events) >= 5
+
+    # Verify all published events are in database
+    published_ids = {e.event_id for e in events_published}
+    stored_ids = {e.event_id for e in events}
+    assert published_ids.issubset(stored_ids)
+
+
+@pytest.mark.asyncio
+async def test_event_sink_subscribes_to_all_topics(event_sink: EventSink) -> None:
+    """Test that EventSink subscribes to all event topics."""
+    from polytrader.events import (
+        ORDER_CREATED,
+        SYSTEM_LIFECYCLE,
+    )
+
+    # Publish events to different topics
+    event1 = SystemStartedEvent()
+    await event_sink._bus.publish(SYSTEM_LIFECYCLE, event1)
+
+    intent = OrderIntentEvent(
+        market_slug="btc-updown-15m",
+        outcome="UP",
+        side="BUY",
+        target_price=0.5,
+        limit_price=0.45,
+        size=100.0,
+        reason="Test",
+    )
+    event2 = OrderCreatedEvent(
+        order_id="order-123",
+        client_order_id="client-456",
+        intent=intent,
+    )
+    await event_sink._bus.publish(ORDER_CREATED, event2)
+
+    # Wait for flush
+    await asyncio.sleep(0.2)
+
+    # Verify both events were persisted
+    events = list(event_sink._store.read_stream())
+    assert len(events) >= 2
+
+    event_ids = {e.event_id for e in events}
+    assert event1.event_id in event_ids
+    assert event2.event_id in event_ids
+
+
+@pytest.mark.asyncio
+async def test_event_sink_handles_database_errors_gracefully(
+    postgres_test_url: str,
+) -> None:
+    """Test that EventSink handles database errors gracefully."""
+    from polytrader.db.migrations import run_migrations
+
+    # Ensure migrations are run
+    await run_migrations(postgres_test_url)
+
+    # Create store
+    store = PostgreSQLEventStore(connection_url=postgres_test_url, pool_size=5)
+    await store.initialize()
+
+    # Truncate table
+    from sqlalchemy import text
+
+    if store._Session:
+        async with store._Session() as session:
+            await session.execute(text("TRUNCATE TABLE events CASCADE"))
+            await session.commit()
+
+    bus = EventBus()
+    sink = EventSink(bus=bus, store=store, batch_size=10, flush_interval_s=0.1)
+
+    # Start sink
+    sink_task = asyncio.create_task(sink.run())
+
+    try:
+        # Publish an event
+        from polytrader.events import SYSTEM_LIFECYCLE
+
+        event = SystemStartedEvent()
+        await bus.publish(SYSTEM_LIFECYCLE, event)
+
+        # Wait a bit
+        await asyncio.sleep(0.2)
+
+        # Close store connection to simulate database error
+        await store.cleanup()
+
+        # Publish another event (should fail gracefully)
+        event2 = SystemStartedEvent()
+        await bus.publish(SYSTEM_LIFECYCLE, event2)
+
+        # Wait for flush attempt
+        await asyncio.sleep(0.2)
+
+        # Sink should still be running (errors are logged, not thrown)
+        assert sink._running is True
+
+    finally:
+        await sink.stop()
+        sink_task.cancel()
+        try:
+            await sink_task
+        except asyncio.CancelledError:
+            pass
+
+
+@pytest.mark.asyncio
+async def test_event_sink_circuit_breaker(postgres_test_url: str) -> None:
+    """Test that EventSink circuit breaker opens after failures."""
+    from polytrader.db.migrations import run_migrations
+
+    await run_migrations(postgres_test_url)
+
+    # Create a store that will fail (invalid connection)
+    invalid_store = PostgreSQLEventStore(
+        connection_url="postgresql://invalid:invalid@localhost:9999/invalid", pool_size=1
+    )
+    # Don't initialize - this will cause failures
+
+    bus = EventBus()
+    sink = EventSink(
+        bus=bus,
+        store=invalid_store,
+        batch_size=1,
+        flush_interval_s=0.1,
+    )
+
+    # Test circuit breaker directly
+    breaker = sink._circuit_breaker
+
+    # Record failures until circuit opens
+    for _ in range(10):
+        breaker.record_failure()
+
+    # Circuit should be open
+    assert breaker.state.value == "open"
+    assert not breaker.allow_request()
+
+    # Record success in OPEN state doesn't close it (need to wait for cooldown)
+    # But if we're in HALF_OPEN, success will close it
+    # For this test, verify that success in HALF_OPEN closes the circuit
+    # First, manually set to HALF_OPEN (simulating cooldown passed)
+    from polytrader.events.sink import CircuitState
+
+    breaker._state = CircuitState.HALF_OPEN
+    breaker.record_success()
+    assert breaker.state.value == "closed"
+    assert breaker.allow_request()
+
+
+@pytest.mark.asyncio
+async def test_event_sink_stop_flushes_remaining_events(event_sink: EventSink) -> None:
+    """Test that stop() flushes remaining events in buffer."""
+    from polytrader.events import SYSTEM_LIFECYCLE
+
+    # Publish events
+    events_published = []
+    for _ in range(3):
+        event = SystemStartedEvent()
+        events_published.append(event)
+        await event_sink._bus.publish(SYSTEM_LIFECYCLE, event)
+
+    # Wait a bit for events to be consumed into buffer
+    await asyncio.sleep(0.15)
+
+    # Stop sink (should flush remaining events in buffer)
+    await event_sink.stop()
+
+    # Verify events were flushed on stop
+    events = list(event_sink._store.read_stream())
+    assert len(events) >= 3
+
+    published_ids = {e.event_id for e in events_published}
+    stored_ids = {e.event_id for e in events}
+    assert published_ids.issubset(stored_ids)
+
+
+@pytest.mark.asyncio
+async def test_event_sink_buffer_overflow_protection(event_sink: EventSink) -> None:
+    """Test that EventSink handles buffer overflow by dropping oldest events."""
+    from polytrader.events import SYSTEM_LIFECYCLE
+
+    # Set small buffer size for test
+    event_sink._max_buffer_size = 5
+
+    # Publish more events than buffer size
+    events_published = []
+    for _ in range(10):
+        event = SystemStartedEvent()
+        events_published.append(event)
+        await event_sink._bus.publish(SYSTEM_LIFECYCLE, event)
+
+    # Wait a bit for events to be buffered
+    await asyncio.sleep(0.05)
+
+    # Buffer should not exceed max_buffer_size
+    assert len(event_sink._buffer) <= event_sink._max_buffer_size
+
+    # Wait for flush
+    await asyncio.sleep(0.2)
+
+    # Some events should have been persisted (those that weren't dropped)
+    events = list(event_sink._store.read_stream())
+    # At least some events should be persisted (buffer overflow drops oldest, not all)
+    assert len(events) > 0
