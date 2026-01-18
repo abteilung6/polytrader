@@ -1,8 +1,13 @@
-"""Configuration module: Polymarket secrets and general config loading.
+"""Configuration module: Polymarket secrets, database config, and general config loading.
 
 This module contains:
 - Polymarket-specific configuration (secrets, API URLs)
+- Database configuration (PostgreSQL connection settings)
 - General config loading and validation (Phase 7)
+
+Configuration is separated into:
+- Secrets: Sensitive values (private keys, passwords) using SecretStr
+- Config: Non-sensitive settings (hosts, ports, database names)
 """
 
 import hashlib
@@ -22,6 +27,11 @@ CHAIN_ID = 137  # Polygon mainnet
 
 
 class PolymarketSecrets(BaseSettings):
+    """Polymarket-specific secrets (wallet authentication).
+
+    These are sensitive values that should be kept secret.
+    """
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -47,6 +57,80 @@ class PolymarketSecrets(BaseSettings):
         description="Signature type: 0=EOA/MetaMask, 1=Magic wallet, 2=Browser wallet proxy",
         alias="SIGNATURE_TYPE",
     )
+
+
+class DatabaseConfig(BaseSettings):
+    """Database configuration (PostgreSQL).
+
+    Separates non-sensitive configuration from secrets (password).
+    Per architecture: PostgreSQL is mandatory for event persistence.
+    """
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    # Database connection settings (non-sensitive)
+    db_host: str = Field(
+        default="localhost",
+        description="PostgreSQL host",
+        alias="DB_HOST",
+    )
+
+    db_port: int = Field(
+        default=5432,
+        description="PostgreSQL port",
+        alias="DB_PORT",
+    )
+
+    db_database: str = Field(
+        ...,
+        description="PostgreSQL database name",
+        alias="DB_DATABASE",
+    )
+
+    db_user: str = Field(
+        ...,
+        description="PostgreSQL user",
+        alias="DB_USER",
+    )
+
+    # Database secret (sensitive)
+    db_password: SecretStr = Field(
+        ...,
+        description="PostgreSQL password",
+        alias="DB_PASSWORD",
+    )
+
+
+def get_database_url(config: DatabaseConfig | None = None) -> str:
+    """Get PostgreSQL connection URL from configuration.
+
+    Args:
+        config: DatabaseConfig instance. If None, loads from environment.
+
+    Returns:
+        PostgreSQL connection URL in format: postgresql://user:password@host:port/database
+
+    Raises:
+        ValueError: If required configuration is missing
+
+    Example:
+        >>> config = DatabaseConfig()
+        >>> url = get_database_url(config)
+        >>> assert url.startswith("postgresql://")
+    """
+    if config is None:
+        config = DatabaseConfig()
+
+    # Get password (SecretStr -> str)
+    password = config.db_password.get_secret_value()
+
+    # Build connection URL
+    return f"postgresql://{config.db_user}:{password}@{config.db_host}:{config.db_port}/{config.db_database}"
 
 
 # General config loading functions (Phase 7)

@@ -1,7 +1,13 @@
 """Event infrastructure for the trading system."""
 
 from polytrader.events.bus import EventBus, Topic
+from polytrader.events.sink import EventSink
 from polytrader.events.store import IEventStore, MemoryEventStore
+from polytrader.events.stores import (
+    PostgreSQLEventStore,
+    get_event_class_by_name,
+    register_event_class,
+)
 
 # Import event types first
 from polytrader.events.types import (
@@ -47,6 +53,7 @@ __all__ = [
     "ConfigLoadedEvent",
     "Event",
     "EventBus",
+    "EventSink",
     "EventSource",
     "EXECUTION_ERRORS",
     "EXECUTION_REQUESTS",
@@ -59,6 +66,10 @@ __all__ = [
     "FILLS",
     "IEventStore",
     "KillSwitchEvent",
+    "MemoryEventStore",
+    "PostgreSQLEventStore",
+    "get_event_class_by_name",
+    "register_event_class",
     "MARKET_CHANGE",
     "MARKET_DATA",
     "MARKET_DISCOVERY",
