@@ -122,7 +122,14 @@ class MarketSupervisor:
             # Initial market discovery
             market = await self.discovery.get_current_market(self.pattern)
             if not market:
-                error_msg = f"No active market found for pattern: {self.pattern}"
+                error_msg = (
+                    f"No active market found for pattern: {self.pattern}. "
+                    "Expected an active market to always exist. "
+                    "This may indicate: (1) API issue marking markets as resolved too early, "
+                    "(2) Market discovery logic not finding tradeable markets, "
+                    "(3) All markets are genuinely resolved (unexpected). "
+                    "Check logs for detailed market state information."
+                )
                 logger.bind(
                     supervisor=SUPERVISOR_TYPE,
                     pattern=self.pattern,
@@ -533,11 +540,18 @@ class MarketSupervisor:
                         market=current,
                     )
                 elif not current:
-                    # No active market (gap between markets)
+                    # No active market (gap between markets) -
+                    # unexpected if markets should always exist
                     logger.bind(
                         supervisor=SUPERVISOR_TYPE,
                         pattern=self.pattern,
-                    ).warning("No active market found, waiting...")
+                        previous_market=self.current_market,
+                    ).warning(
+                        "No active market found (gap between markets), waiting... "
+                        "Previous market: {previous}. "
+                        "This is unexpected if markets should always exist.",
+                        previous=self.current_market,
+                    )
                     # Retry in shorter interval
                     await asyncio.sleep(5.0)
             except Exception as e:

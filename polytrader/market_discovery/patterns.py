@@ -73,50 +73,48 @@ class MarketPattern:
             pattern_str=pattern,
         )
 
-    def generate_slug(self, end_timestamp: int) -> str:
-        """Generate market slug for a given end timestamp.
+    def generate_slug(self, start_timestamp: int) -> str:
+        """Generate market slug for a given start timestamp.
 
         Per Polymarket convention: The slug suffix is the Unix timestamp of the
-        **end** of the measurement window, not the start.
+        **start** of the measurement window.
 
         Example:
-            end_ts = 1768122000 (2026-01-11 09:15:00 UTC)
-            → slug = "btc-updown-15m-1768122000"
+            start_ts = 1768121100 (2026-01-11 09:00:00 UTC)
+            → slug = "btc-updown-15m-1768121100"
             → window: 09:00:00 UTC - 09:15:00 UTC
 
         Args:
-            end_timestamp: Unix timestamp (seconds) for the end of the market window.
+            start_timestamp: Unix timestamp (seconds) for the start of the market window.
                 Must be a multiple of interval_seconds (e.g., 900 for 15m markets).
 
         Returns:
-            Market slug (e.g., "btc-updown-15m-1768122000")
+            Market slug (e.g., "btc-updown-15m-1768121100")
         """
-        return f"{self.pattern_str}-{end_timestamp}"
+        return f"{self.pattern_str}-{start_timestamp}"
 
-    def get_current_window_end(self) -> int:
-        """Get the end timestamp of the current market window.
+    def get_current_window_start(self) -> int:
+        """Get the start timestamp of the current market window.
 
-        Per Polymarket convention: The slug suffix is the end timestamp.
-        This method calculates the end of the currently active window.
+        Per Polymarket convention: The slug suffix is the start timestamp.
+        This method calculates the start of the currently active window.
 
         Calculation:
             window_start = (now // interval_seconds) * interval_seconds
-            window_end = window_start + interval_seconds
 
         Example (15m market, now = 09:10:00 UTC):
             window_start = 09:00:00 UTC
-            window_end = 09:15:00 UTC
-            → slug suffix = 09:15:00 UTC timestamp
+            → slug suffix = 09:00:00 UTC timestamp
+            → window: 09:00:00 UTC - 09:15:00 UTC
 
         Returns:
-            Unix timestamp (seconds) for the end of the current window.
+            Unix timestamp (seconds) for the start of the current window.
             Always a multiple of interval_seconds.
         """
         now = int(time.time())
-        # Round down to current interval boundary, then add interval to get end
+        # Round down to current interval boundary
         # This finds the market that's currently active (not future)
         window_start = (now // self.interval_seconds) * self.interval_seconds
-        window_end = window_start + self.interval_seconds
 
         # Debug logging
         from polytrader.logging_config import logger
@@ -125,44 +123,41 @@ class MarketPattern:
             now=now,
             interval=self.interval_seconds,
             window_start=window_start,
-            window_end=window_end,
         ).debug(
-            "🔍 get_current_window_end: now={now}, interval={interval}, "
-            "window_start={start}, window_end={end}",
+            "🔍 get_current_window_start: now={now}, interval={interval}, window_start={start}",
             now=now,
             interval=self.interval_seconds,
             start=window_start,
-            end=window_end,
         )
 
-        return window_end
+        return window_start
 
-    def get_next_window_end(self) -> int:
-        """Get the end timestamp of the next market window.
+    def get_next_window_start(self) -> int:
+        """Get the start timestamp of the next market window.
 
-        Per Polymarket convention: The slug suffix is the end timestamp.
-        This method calculates the end of the next window (one interval ahead).
+        Per Polymarket convention: The slug suffix is the start timestamp.
+        This method calculates the start of the next window (one interval ahead).
 
         Returns:
-            Unix timestamp (seconds) for the end of the next window.
+            Unix timestamp (seconds) for the start of the next window.
             Always a multiple of interval_seconds.
         """
-        return self.get_current_window_end() + self.interval_seconds
+        return self.get_current_window_start() + self.interval_seconds
 
     @staticmethod
     def extract_window_from_slug(slug: str) -> tuple[int, int] | None:
         """Extract window start and end timestamps from a market slug.
 
-        Per Polymarket convention: The slug suffix is the end timestamp.
-        Window start = end_timestamp - interval_seconds.
+        Per Polymarket convention: The slug suffix is the start timestamp.
+        Window end = start_timestamp + interval_seconds.
 
         Example:
-            slug = "btc-updown-15m-{end_ts}"
-            → end_ts = timestamp for window end (e.g., 09:15:00 UTC)
-            → start_ts = end_ts - interval_seconds (e.g., 09:00:00 UTC for 15m)
+            slug = "btc-updown-15m-{start_ts}"
+            → start_ts = timestamp for window start (e.g., 09:00:00 UTC)
+            → end_ts = start_ts + interval_seconds (e.g., 09:15:00 UTC for 15m)
 
         Args:
-            slug: Market slug (e.g., "btc-updown-15m-1768122000")
+            slug: Market slug (e.g., "btc-updown-15m-1768121100")
 
         Returns:
             Tuple of (start_timestamp, end_timestamp) if valid, None otherwise
@@ -180,11 +175,11 @@ class MarketPattern:
             parsed = MarketPattern.parse(pattern)
             interval_seconds = parsed.interval_seconds
 
-            # Extract end timestamp (last part)
-            end_ts = int(parts[-1])
+            # Extract start timestamp (last part)
+            start_ts = int(parts[-1])
 
-            # Calculate start timestamp
-            start_ts = end_ts - interval_seconds
+            # Calculate end timestamp
+            end_ts = start_ts + interval_seconds
 
             return (start_ts, end_ts)
         except (ValueError, IndexError):

@@ -20,6 +20,7 @@ class Market(BaseModel):
         slug: Market slug
         outcomes: JSON string of outcomes
         clobTokenIds: JSON string of token IDs
+        startDate: Market start date (ISO 8601 UTC timestamp, optional)
         endDate: Market end date (ISO 8601 UTC timestamp)
         active: Whether market is active
         closed: Whether market is closed/resolved
@@ -30,6 +31,9 @@ class Market(BaseModel):
     slug: str
     outcomes: str = Field(..., description="JSON string of outcomes")
     clobTokenIds: str = Field(..., description="JSON string of token IDs")
+    startDate: str | None = Field(
+        default=None, description="Market start date (ISO 8601 UTC timestamp)"
+    )
     endDate: str | None = Field(
         default=None, description="Market end date (ISO 8601 UTC timestamp)"
     )
@@ -155,7 +159,10 @@ class GammaClient:
         base_url: Base URL for Gamma API
     """
 
-    def __init__(self, base_url: str = GAMMA_API_URL) -> None:
+    def __init__(
+        self,
+        base_url: str = GAMMA_API_URL,
+    ) -> None:
         """Initialize Gamma client.
 
         Args:
@@ -168,11 +175,13 @@ class GammaClient:
 
         See https://docs.polymarket.com/api-reference/markets/get-market-by-slug
 
+        The API response includes startDate and endDate fields directly.
+
         Args:
-            slug: Market slug (e.g., "btc-updown-15m")
+            slug: Market slug (e.g., "btc-updown-15m-1768766400")
 
         Returns:
-            Market data model
+            Market data model with startDate and endDate from API
 
         Raises:
             requests.RequestException: If API request fails

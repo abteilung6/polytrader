@@ -1,11 +1,13 @@
 """Tests for enhanced market state validation using Gamma API fields."""
 
+import time
 from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from polytrader.adapters.polymarket.market_data import Market
 from polytrader.market_discovery import MarketDiscoveryService, MarketState
+from polytrader.market_discovery.patterns import MarketPattern
 
 
 @pytest.mark.asyncio
@@ -15,7 +17,12 @@ async def test_market_state_expired() -> None:
 
     from polytrader.adapters.polymarket.market_data import GammaClient
 
-    slug = "btc-updown-15m-12345"
+    # Use a valid slug aligned to 15-minute boundary
+    pattern = MarketPattern.parse("btc-updown-15m")
+    now = int(time.time())
+    window_start = (now // 900) * 900
+    slug = pattern.generate_slug(window_start)
+
     # Market expired 1 hour ago
     expired_date = (datetime.now(UTC) - timedelta(hours=1)).isoformat().replace("+00:00", "Z")
 
@@ -27,7 +34,7 @@ async def test_market_state_expired() -> None:
         endDate=expired_date,
         active=True,
         closed=False,
-        acceptingOrders=True,
+        acceptingOrders=False,  # Not accepting orders (expired)
     )
 
     gamma_client = MagicMock(spec=GammaClient)
@@ -46,20 +53,26 @@ async def test_market_state_resolved() -> None:
     from unittest.mock import MagicMock
 
     from polytrader.adapters.polymarket.market_data import GammaClient
+    from polytrader.market_discovery.patterns import MarketPattern
 
-    slug = "btc-updown-15m-12345"
-    # Market in the future but closed
-    future_date = (datetime.now(UTC) + timedelta(hours=1)).isoformat().replace("+00:00", "Z")
+    # Use a valid slug aligned to 15-minute boundary
+    pattern = MarketPattern.parse("btc-updown-15m")
+    now = int(time.time())
+    window_start = (now // 900) * 900
+    slug = pattern.generate_slug(window_start)
+
+    # Market expired and closed (resolved)
+    expired_date = (datetime.now(UTC) - timedelta(hours=1)).isoformat().replace("+00:00", "Z")
 
     market = Market(
         id="1",
         slug=slug,
         outcomes='["Up", "Down"]',
         clobTokenIds='["1", "2"]',
-        endDate=future_date,
+        endDate=expired_date,
         active=True,
         closed=True,  # Market is resolved
-        acceptingOrders=True,
+        acceptingOrders=False,  # Not accepting orders (fully resolved)
     )
 
     gamma_client = MagicMock(spec=GammaClient)
@@ -79,7 +92,12 @@ async def test_market_state_no_orderbook() -> None:
 
     from polytrader.adapters.polymarket.market_data import GammaClient
 
-    slug = "btc-updown-15m-12345"
+    # Use a valid slug aligned to 15-minute boundary
+    pattern = MarketPattern.parse("btc-updown-15m")
+    now = int(time.time())
+    window_start = (now // 900) * 900
+    slug = pattern.generate_slug(window_start)
+
     # Market in the future, active, but not accepting orders
     future_date = (datetime.now(UTC) + timedelta(hours=1)).isoformat().replace("+00:00", "Z")
 
@@ -111,7 +129,12 @@ async def test_market_state_active() -> None:
 
     from polytrader.adapters.polymarket.market_data import GammaClient
 
-    slug = "btc-updown-15m-12345"
+    # Use a valid slug aligned to 15-minute boundary
+    pattern = MarketPattern.parse("btc-updown-15m")
+    now = int(time.time())
+    window_start = (now // 900) * 900
+    slug = pattern.generate_slug(window_start)
+
     # Market in the future, active, accepting orders
     future_date = (datetime.now(UTC) + timedelta(hours=1)).isoformat().replace("+00:00", "Z")
 
@@ -143,7 +166,12 @@ async def test_market_state_priority_resolved_over_expired() -> None:
 
     from polytrader.adapters.polymarket.market_data import GammaClient
 
-    slug = "btc-updown-15m-12345"
+    # Use a valid slug aligned to 15-minute boundary
+    pattern = MarketPattern.parse("btc-updown-15m")
+    now = int(time.time())
+    window_start = (now // 900) * 900
+    slug = pattern.generate_slug(window_start)
+
     # Market expired and closed (resolved takes priority)
     expired_date = (datetime.now(UTC) - timedelta(hours=1)).isoformat().replace("+00:00", "Z")
 
@@ -155,7 +183,7 @@ async def test_market_state_priority_resolved_over_expired() -> None:
         endDate=expired_date,
         active=True,
         closed=True,  # Resolved takes priority
-        acceptingOrders=True,
+        acceptingOrders=False,  # Not accepting orders (fully resolved)
     )
 
     gamma_client = MagicMock(spec=GammaClient)
@@ -179,7 +207,12 @@ async def test_market_state_priority_expired_over_no_orderbook() -> None:
 
     from polytrader.adapters.polymarket.market_data import GammaClient
 
-    slug = "btc-updown-15m-12345"
+    # Use a valid slug aligned to 15-minute boundary
+    pattern = MarketPattern.parse("btc-updown-15m")
+    now = int(time.time())
+    window_start = (now // 900) * 900
+    slug = pattern.generate_slug(window_start)
+
     # Market expired and not accepting orders (expired takes priority)
     expired_date = (datetime.now(UTC) - timedelta(hours=1)).isoformat().replace("+00:00", "Z")
 
