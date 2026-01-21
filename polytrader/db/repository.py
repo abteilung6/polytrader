@@ -8,11 +8,11 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, select
+from sqlalchemy import and_, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from polytrader.db.models import EventRecord
+from polytrader.db.models import ControlCommandRecord, EventRecord, PlatformStateRecord, StrategyRecord
 
 
 class EventRepository:
@@ -171,3 +171,167 @@ class EventRepository:
         query = select(EventRecord.event_id).where(EventRecord.event_id == event_id)
         result = await self.session.execute(query)
         return result.scalar_one_or_none() is not None
+
+
+class StrategyRepository:
+    """Repository for strategy registry operations."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def upsert_strategy(
+        self,
+        strategy_id: str,
+        name: str,
+        description: str | None = None,
+        config: dict[str, Any] | None = None,
+        enabled: bool = True,
+    ) -> None:
+        """Insert or update a strategy record."""
+        config = config or {}
+        stmt = (
+            insert(StrategyRecord)
+            .values(
+                strategy_id=strategy_id,
+                name=name,
+                description=description,
+                config=config,
+                enabled=enabled,
+            )
+            .on_conflict_do_update(
+                index_elements=["strategy_id"],
+                set_={
+                    "name": name,
+                    "description": description,
+                    "config": config,
+                    "enabled": enabled,
+                    "updated_at": func.now(),
+                },
+            )
+        )
+        await self.session.execute(stmt)
+        await self.session.commit()
+
+    async def list_strategies(self) -> list[StrategyRecord]:
+        """List all strategies."""
+        result = await self.session.execute(select(StrategyRecord).order_by(StrategyRecord.strategy_id))
+        return list(result.scalars().all())
+
+    async def get_strategy(self, strategy_id: str) -> StrategyRecord | None:
+        """Get a strategy by id."""
+        result = await self.session.execute(
+            select(StrategyRecord).where(StrategyRecord.strategy_id == strategy_id)
+        )
+        return result.scalar_one_or_none()
+
+
+class PlatformStateRepository:
+    """Repository for platform state (active strategy, execution)."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def get_state(self) -> PlatformStateRecord:
+        """Get platform state, create default if missing."""
+        result = await self.session.execute(
+            select(PlatformStateRecord).where(PlatformStateRecord.id == 1)
+        )
+        state = result.scalar_one_or_none()
+        if state is None:
+            state = PlatformStateRecord(id=1, execution_enabled=False)
+            self.session.add(state)
+            await self.session.commit()
+        return state
+
+    async def set_active_strategy(
+        self, strategy_id: str | None, updated_by: str | None = None, reason: str | None = None
+    ) -> None:
+        """Set active strategy id."""
+        await self.get_state()
+        stmt = (
+            update(PlatformStateRecord)
+            .where(PlatformStateRecord.id == 1)
+            .values(
+                active_strategy_id=strategy_id,
+                updated_by=updated_by,
+                reason=reason,
+                updated_at=func.now(),
+            )
+        )
+        await self.session.execute(stmt)
+        await self.session.commit()
+
+    async def set_execution_enabled(
+        self, enabled: bool, updated_by: str | None = None, reason: str | None = None
+    ) -> None:
+        """Set execution enabled flag."""
+        await self.get_state()
+        stmt = (
+            update(PlatformStateRecord)
+            .where(PlatformStateRecord.id == 1)
+            .values(
+                execution_enabled=enabled,
+                updated_by=updated_by,
+                reason=reason,
+                updated_at=func.now(),
+            )
+        )
+        await self.session.execute(stmt)
+        await self.session.commit()
+
+
+class ControlCommandRepository:
+    """Repository for control command queue."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def create_command(
+        self,
+        command_id: UUID,
+        command_type: str,
+        strategy_id: str | None,
+        reason: str | None,
+        issued_by: str,
+    ) -> None:
+        record = ControlCommandRecord(
+            command_id=command_id,
+            command_type=command_type,
+            strategy_id=strategy_id,
+            reason=reason,
+            issued_by=issued_by,
+            status="pending",
+        )
+        self.session.add(record)
+        await self.session.commit()
+
+    async def read_pending(self, limit: int = 50) -> list[ControlCommandRecord]:
+        result = await self.session.execute(
+            select(ControlCommandRecord)
+            .where(ControlCommandRecord.status == "pending")
+            .order_by(ControlCommandRecord.created_at)
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
+    async def mark_applied(self, command_id: UUID | str) -> None:
+        if isinstance(command_id, str):
+            command_id = UUID(command_id)
+        stmt = (
+            update(ControlCommandRecord)
+            .where(ControlCommandRecord.command_id == command_id)
+            .values(status="applied", applied_at=func.now())
+        )
+        await self.session.execute(stmt)
+        await self.session.commit()
+
+    async def mark_failed(self, command_id: UUID | str, error_message: str) -> None:
+        if isinstance(command_id, str):
+            command_id = UUID(command_id)
+        stmt = (
+            update(ControlCommandRecord)
+            .where(ControlCommandRecord.command_id == command_id)
+            .values(status="failed", applied_at=func.now(), error_message=error_message)
+        )
+        await self.session.execute(stmt)
+        await self.session.commit()

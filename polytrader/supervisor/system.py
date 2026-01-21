@@ -159,6 +159,7 @@ class SystemSupervisor:
         # EventSink (mandatory, per proposal)
         self._event_sink: EventSink | None = None
         self._control_plane: "ControlPlaneService | None" = None
+        self._control_plane_db: Any | None = None
 
         # Health gate status (set during boot, used in commit 7 for execution permit)
         self._health_gates_passed: bool = True
@@ -406,19 +407,54 @@ class SystemSupervisor:
 
     async def _init_control_plane(self) -> None:
         """Initialize ControlPlaneService for runtime commands."""
-        if self.control_command_path is None:
-            logger.debug("Control plane disabled (no command path configured)")
-            return
         if self._execution_control is None:
             logger.warning("Control plane disabled (no execution control)")
             return
 
         from pathlib import Path
 
-        from polytrader.ops.control_plane import ControlPlaneService, FileControlCommandReader
+        from polytrader.db.session import DatabaseSessionManager
+        from polytrader.ops.control_plane import (
+            ControlPlaneService,
+            DatabaseControlCommandReader,
+            FileControlCommandReader,
+        )
+        from polytrader.db.repository import PlatformStateRepository
 
-        command_path = Path(self.control_command_path)
-        command_reader = FileControlCommandReader(command_path)
+        command_reader = None
+        session_factory = None
+        if self.control_command_path:
+            command_path = Path(self.control_command_path)
+            command_reader = FileControlCommandReader(command_path)
+            logger.info("Control plane using file command path", command_path=str(command_path))
+        else:
+            try:
+                self._control_plane_db = DatabaseSessionManager()
+                session_factory = self._control_plane_db.session_factory()
+                command_reader = DatabaseControlCommandReader(session_factory)
+                logger.info("Control plane using database command queue")
+                async with session_factory() as session:
+                    state_repo = PlatformStateRepository(session)
+                    state = await state_repo.get_state()
+                    if state.active_strategy_id:
+                        self._execution_control.set_active_strategy(state.active_strategy_id)
+                    if state.execution_enabled:
+                        logger.warning(
+                            "Platform state indicates execution enabled; "
+                            "execution remains disabled until permit issued"
+                        )
+            except Exception as exc:
+                logger.warning(
+                    "Control plane disabled (database unavailable)",
+                    error=str(exc),
+                    error_type=type(exc).__name__,
+                )
+                return
+
+        if command_reader is None:
+            logger.debug("Control plane disabled (no command reader)")
+            return
+
         self._control_plane = ControlPlaneService(
             bus=self.bus,
             command_reader=command_reader,
@@ -428,8 +464,8 @@ class SystemSupervisor:
             poll_interval_s=self.control_poll_interval_s,
             get_user_stream_adapter=lambda: self._user_stream_adapter,
             get_circuit_breaker=lambda: self._circuit_breaker,
+            session_factory=session_factory,
         )
-        logger.info("Control plane initialized", command_path=str(command_path))
 
     async def _start_adapters(self) -> None:
         """Start adapters (market data, user stream).
@@ -1250,6 +1286,12 @@ class SystemSupervisor:
                     except (asyncio.CancelledError, TimeoutError):
                         pass
                     self._control_plane_task = None
+                if self._control_plane_db is not None:
+                    try:
+                        await self._control_plane_db.dispose()
+                    except Exception:
+                        logger.exception("Error disposing control plane DB engine")
+                    self._control_plane_db = None
                 self._control_plane = None
 
         # Stop EventSink (should be last to flush remaining events)

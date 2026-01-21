@@ -6,11 +6,30 @@ This module contains database-related infrastructure:
 - Future: Connection pooling, query helpers, etc.
 """
 
-from polytrader.db.models import Base, EventRecord
-from polytrader.db.repository import EventRepository
+from polytrader.db.models import (
+    Base,
+    ControlCommandRecord,
+    EventRecord,
+    PlatformStateRecord,
+    StrategyRecord,
+)
+from polytrader.db.repository import (
+    ControlCommandRepository,
+    EventRepository,
+    PlatformStateRepository,
+    StrategyRepository,
+)
+from polytrader.db.session import DatabaseSessionManager
 
 __all__ = [
     "Base",
+    "ControlCommandRecord",
     "EventRecord",
+    "PlatformStateRecord",
+    "StrategyRecord",
+    "ControlCommandRepository",
     "EventRepository",
+    "PlatformStateRepository",
+    "StrategyRepository",
+    "DatabaseSessionManager",
 ]

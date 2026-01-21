@@ -181,6 +181,40 @@ class ExecutionRouter:
             await self._bus.publish(ORDER_REJECTS, reject_event)
             return
 
+        # Enforce active live strategy selection (if configured)
+        if self._execution_control is not None:
+            active_strategy_id = self._execution_control.active_strategy_id
+            if active_strategy_id is not None:
+                intent_strategy_id = getattr(command.intent, "strategy_id", None)
+                if intent_strategy_id != active_strategy_id:
+                    bind_correlation_context(
+                        logger,
+                        correlation_id=command.correlation_id,
+                        order_id=command.order_id,
+                        client_order_id=command.client_order_id,
+                        market_slug=command.intent.market_slug,
+                        outcome=command.intent.outcome,
+                        side=command.intent.side,
+                        event_type="ExecutionStrategyNotSelected",
+                        error_class="system",
+                    ).warning(
+                        "Order submission rejected: strategy not selected",
+                        active_strategy_id=active_strategy_id,
+                        intent_strategy_id=intent_strategy_id,
+                    )
+
+                    from polytrader.events import ORDER_REJECTS
+                    from polytrader.events.types import OrderRejectedEvent
+
+                    reject_event = OrderRejectedEvent(
+                        order_id=command.order_id,
+                        venue_order_id=None,
+                        reason="Strategy not selected for live trading",
+                        correlation_id=command.correlation_id,
+                    )
+                    await self._bus.publish(ORDER_REJECTS, reject_event)
+                    return
+
         try:
             # Emit ExecutionRequestEvent
             request_event = ExecutionRequestEvent(

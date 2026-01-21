@@ -18,7 +18,6 @@ from polytrader.market_discovery import MarketDiscoveryService
 from polytrader.observer import create_observer_factory
 from polytrader.oms import InMemoryOrderStore, OMSCore
 from polytrader.oms.idempotency import IdempotencyStore
-from polytrader.ops.control_plane import get_default_control_command_path
 from polytrader.portfolio import PortfolioService
 from polytrader.position_manager import IPositionManager, create_position_manager_factory
 from polytrader.position_manager.paper import PaperPositionManager
@@ -484,7 +483,7 @@ class LiveTradingSystemBuilder:
         self._min_history: int = 30
         self._size: float = 1.0
         self._sync_interval: float = 60.0
-        self._control_command_path: str | None = str(get_default_control_command_path())
+        self._control_command_path: str | None = None
         self._control_poll_interval_s: float = 1.0
 
         # Shared dependencies (created on first access)

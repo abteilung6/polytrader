@@ -6,16 +6,16 @@ from pathlib import Path
 import typer
 
 from polytrader.logging_config import logger, setup_logging
-from polytrader.ops.control_plane import (
-    append_control_command,
-    get_default_control_command_path,
-)
+from polytrader.ops.control_plane import append_control_command
 from polytrader.tasks import (
     live_trading_task,
     paper_trading_task,
     watch_task,
 )
 from polytrader.events.types import ControlCommandEvent
+from polytrader.db.repository import ControlCommandRepository
+from polytrader.db.session import DatabaseSessionManager
+import uuid
 
 app = typer.Typer(help="Polymarket trading system")
 
@@ -224,14 +224,12 @@ def control_enable_live(
 ) -> None:
     """Enable live execution during runtime."""
     _setup_logging(None)
-    path = Path(command_path) if command_path else get_default_control_command_path()
     command = ControlCommandEvent(
         command_type="enable_execution",
         reason=reason,
         issued_by=issued_by,
     )
-    append_control_command(path, command)
-    logger.info("Control command written", command_type="enable_execution", path=str(path))
+    _emit_control_command(command, command_path=command_path)
 
 
 @control_app.command("disable-live")
@@ -246,14 +244,12 @@ def control_disable_live(
 ) -> None:
     """Disable live execution during runtime."""
     _setup_logging(None)
-    path = Path(command_path) if command_path else get_default_control_command_path()
     command = ControlCommandEvent(
         command_type="disable_execution",
         reason=reason,
         issued_by=issued_by,
     )
-    append_control_command(path, command)
-    logger.info("Control command written", command_type="disable_execution", path=str(path))
+    _emit_control_command(command, command_path=command_path)
 
 
 @control_app.command("select-live-strategy")
@@ -269,20 +265,52 @@ def control_select_live_strategy(
 ) -> None:
     """Select active live strategy during runtime."""
     _setup_logging(None)
-    path = Path(command_path) if command_path else get_default_control_command_path()
     command = ControlCommandEvent(
         command_type="select_live_strategy",
         strategy_id=strategy_id,
         reason=reason,
         issued_by=issued_by,
     )
-    append_control_command(path, command)
-    logger.info(
-        "Control command written",
-        command_type="select_live_strategy",
-        strategy_id=strategy_id,
-        path=str(path),
-    )
+    _emit_control_command(command, command_path=command_path)
+
+
+@control_app.command("serve-api")
+def control_serve_api(
+    host: str = typer.Option("127.0.0.1", "--host", help="API host"),
+    port: int = typer.Option(8081, "--port", help="API port"),
+) -> None:
+    """Run control API server (HTTP)."""
+    from polytrader.ops.control_api import run_control_api_server
+
+    _setup_logging(None)
+    run_control_api_server(host=host, port=port)
+
+
+def _emit_control_command(command: ControlCommandEvent, command_path: str | None) -> None:
+    """Emit control command to DB (default) or file (if command_path provided)."""
+    if command_path:
+        path = Path(command_path)
+        append_control_command(path, command)
+        logger.info("Control command written", command_type=command.command_type, path=str(path))
+        return
+
+    # Default: write to database command queue
+    async def _write_db() -> None:
+        db = DatabaseSessionManager()
+        session_factory = db.session_factory()
+        async with session_factory() as session:
+            repo = ControlCommandRepository(session)
+            await repo.create_command(
+                command_id=uuid.uuid4(),
+                command_type=command.command_type,
+                strategy_id=command.strategy_id,
+                reason=command.reason,
+                issued_by=command.issued_by,
+            )
+        await db.dispose()
+
+    asyncio.run(_write_db())
+    logger.info("Control command enqueued", command_type=command.command_type, target="db")
 
 
 def _setup_logging(log_file: str | None) -> None:

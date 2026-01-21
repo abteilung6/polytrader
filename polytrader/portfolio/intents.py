@@ -62,6 +62,7 @@ def convert_target_to_intent(
         reason=reason,
         correlation_id=signal.correlation_id,  # Propagate from signal
         ttl_s=60.0,  # Default TTL
+        strategy_id=signal.model_id,
     )
 
     # Emit order intent metric per observability.mdc §4

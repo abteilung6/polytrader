@@ -336,6 +336,11 @@ class TargetEvent(Event):
         description="Human-readable explanation of the target (e.g., 'Signal edge > 0.1')"
     )
 
+    # Strategy identifier (per observability.mdc §1: strategy_id)
+    strategy_id: str | None = Field(
+        default=None, description="Strategy identifier for this target (optional)"
+    )
+
     # Constraint binding (per flows.mdc §5)
     constraint_binding: list[str] = Field(
         default_factory=list,
@@ -687,6 +692,9 @@ class OrderIntentEvent(Event):
     reason: str = Field(description="Human-readable reason for the intent")
     ttl_s: float = Field(
         default=2.0, gt=0, description="Time-to-live in seconds before intent expires"
+    )
+    strategy_id: str | None = Field(
+        default=None, description="Strategy identifier for this intent (optional)"
     )
 
 

@@ -131,6 +131,7 @@ class PortfolioService:
                 constraint_binding=target.constraint_binding,
                 sizing_metadata=target.sizing_metadata,
                 correlation_id=signal.correlation_id,
+                strategy_id=signal.model_id,
             )
             await self.bus.publish(TARGETS, target_event)
 
