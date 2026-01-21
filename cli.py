@@ -6,20 +6,27 @@ from pathlib import Path
 import typer
 
 from polytrader.logging_config import logger, setup_logging
+from polytrader.ops.control_plane import (
+    append_control_command,
+    get_default_control_command_path,
+)
 from polytrader.tasks import (
     live_trading_task,
     paper_trading_task,
     watch_task,
 )
+from polytrader.events.types import ControlCommandEvent
 
 app = typer.Typer(help="Polymarket trading system")
 
 # Create sub-apps for command groups
 market_app = typer.Typer(help="Market operations")
 model_app = typer.Typer(help="Trading model operations")
+control_app = typer.Typer(help="Runtime control commands")
 
 app.add_typer(market_app, name="market")
 app.add_typer(model_app, name="model")
+app.add_typer(control_app, name="control")
 
 
 @market_app.command("watch")
@@ -202,6 +209,79 @@ def model_paper(
             metrics_interval=metrics_interval,
             starting_equity=starting_equity,
         )
+    )
+
+
+@control_app.command("enable-live")
+def control_enable_live(
+    reason: str = typer.Option(
+        "Manual enable", "--reason", help="Reason for enabling execution"
+    ),
+    command_path: str | None = typer.Option(
+        None, "--command-path", help="Path to control command JSONL file"
+    ),
+    issued_by: str = typer.Option("operator", "--issued-by", help="Command issuer"),
+) -> None:
+    """Enable live execution during runtime."""
+    _setup_logging(None)
+    path = Path(command_path) if command_path else get_default_control_command_path()
+    command = ControlCommandEvent(
+        command_type="enable_execution",
+        reason=reason,
+        issued_by=issued_by,
+    )
+    append_control_command(path, command)
+    logger.info("Control command written", command_type="enable_execution", path=str(path))
+
+
+@control_app.command("disable-live")
+def control_disable_live(
+    reason: str = typer.Option(
+        "Manual disable", "--reason", help="Reason for disabling execution"
+    ),
+    command_path: str | None = typer.Option(
+        None, "--command-path", help="Path to control command JSONL file"
+    ),
+    issued_by: str = typer.Option("operator", "--issued-by", help="Command issuer"),
+) -> None:
+    """Disable live execution during runtime."""
+    _setup_logging(None)
+    path = Path(command_path) if command_path else get_default_control_command_path()
+    command = ControlCommandEvent(
+        command_type="disable_execution",
+        reason=reason,
+        issued_by=issued_by,
+    )
+    append_control_command(path, command)
+    logger.info("Control command written", command_type="disable_execution", path=str(path))
+
+
+@control_app.command("select-live-strategy")
+def control_select_live_strategy(
+    strategy_id: str = typer.Option(..., "--strategy-id", help="Strategy identifier"),
+    reason: str = typer.Option(
+        "Select live strategy", "--reason", help="Reason for selecting strategy"
+    ),
+    command_path: str | None = typer.Option(
+        None, "--command-path", help="Path to control command JSONL file"
+    ),
+    issued_by: str = typer.Option("operator", "--issued-by", help="Command issuer"),
+) -> None:
+    """Select active live strategy during runtime."""
+    _setup_logging(None)
+    path = Path(command_path) if command_path else get_default_control_command_path()
+    command = ControlCommandEvent(
+        command_type="select_live_strategy",
+        strategy_id=strategy_id,
+        reason=reason,
+        issued_by=issued_by,
+    )
+    append_control_command(path, command)
+    logger.info(
+        "Control command written",
+        command_type="select_live_strategy",
+        strategy_id=strategy_id,
+        path=str(path),
     )
 
 

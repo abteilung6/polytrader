@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from polytrader.ops.health import HealthStatus
+    from polytrader.ops.control_plane import ControlPlaneService
 
 from polytrader.config import get_database_url, load_config
 from polytrader.events import SYSTEM_LIFECYCLE, EventBus
@@ -92,6 +93,8 @@ class SystemSupervisor:
         health_service_factory: Callable[[], HealthService] | None = None,
         health_gate_thresholds: HealthGateThresholds | None = None,
         config_path: str | None = None,
+        control_command_path: str | None = None,
+        control_poll_interval_s: float = 1.0,
         startup_delay_s: float = STARTUP_DELAY_S,
         startup_timeout_s: float = STARTUP_TIMEOUT_S,
     ) -> None:
@@ -113,6 +116,8 @@ class SystemSupervisor:
             health_service_factory: Factory for HealthService (optional, for live trading)
             health_gate_thresholds: Health gate thresholds (optional, uses defaults if not provided)
             config_path: Path to config file (optional, for live trading)
+            control_command_path: Path to runtime control command file (optional)
+            control_poll_interval_s: Control plane poll interval in seconds
             startup_delay_s: Time between service starts (default: 0.01s)
             startup_timeout_s: Max time to start all services (default: 30.0s)
         """
@@ -132,6 +137,8 @@ class SystemSupervisor:
         self.health_service_factory = health_service_factory
         self.health_gate_thresholds = health_gate_thresholds or HealthGateThresholds()
         self.config_path = config_path
+        self.control_command_path = control_command_path
+        self.control_poll_interval_s = control_poll_interval_s
 
         # Configuration
         self.startup_delay_s = startup_delay_s
@@ -151,6 +158,7 @@ class SystemSupervisor:
 
         # EventSink (mandatory, per proposal)
         self._event_sink: EventSink | None = None
+        self._control_plane: "ControlPlaneService | None" = None
 
         # Health gate status (set during boot, used in commit 7 for execution permit)
         self._health_gates_passed: bool = True
@@ -164,6 +172,7 @@ class SystemSupervisor:
         self._user_stream_task: asyncio.Task | None = None
         self._reconciliation_task: asyncio.Task | None = None
         self._event_sink_task: asyncio.Task | None = None
+        self._control_plane_task: asyncio.Task | None = None
 
     async def start(self) -> None:
         """Start all global services following boot sequence.
@@ -205,6 +214,9 @@ class SystemSupervisor:
 
             # 2.5. Initialize EventSink (mandatory, per proposal)
             await self._init_event_sink()
+
+            # 2.6. Initialize ControlPlane (optional, for runtime commands)
+            await self._init_control_plane()
 
             # Create core components ONCE early (before boot steps that need them)
             # Per review: OMS core and position manager must be created once and reused
@@ -391,6 +403,33 @@ class SystemSupervisor:
             # Continue with startup even if EventSink initialization fails
             # (system can operate without event persistence, though not recommended)
             self._event_sink = None
+
+    async def _init_control_plane(self) -> None:
+        """Initialize ControlPlaneService for runtime commands."""
+        if self.control_command_path is None:
+            logger.debug("Control plane disabled (no command path configured)")
+            return
+        if self._execution_control is None:
+            logger.warning("Control plane disabled (no execution control)")
+            return
+
+        from pathlib import Path
+
+        from polytrader.ops.control_plane import ControlPlaneService, FileControlCommandReader
+
+        command_path = Path(self.control_command_path)
+        command_reader = FileControlCommandReader(command_path)
+        self._control_plane = ControlPlaneService(
+            bus=self.bus,
+            command_reader=command_reader,
+            execution_control=self._execution_control,
+            store=self.store,
+            health_gate_thresholds=self.health_gate_thresholds,
+            poll_interval_s=self.control_poll_interval_s,
+            get_user_stream_adapter=lambda: self._user_stream_adapter,
+            get_circuit_breaker=lambda: self._circuit_breaker,
+        )
+        logger.info("Control plane initialized", command_path=str(command_path))
 
     async def _start_adapters(self) -> None:
         """Start adapters (market data, user stream).
@@ -809,6 +848,16 @@ class SystemSupervisor:
         else:
             logger.warning("EventSink not initialized - events will not be persisted to database")
 
+        # 10. ControlPlaneService (optional, runtime commands)
+        if self._control_plane is not None:
+            await self._start_service_task(
+                "ControlPlaneService",
+                self._control_plane,
+                lambda: self._control_plane.run(),
+                lambda task: setattr(self, "_control_plane_task", task),
+            )
+            services_started += 1
+
         return services_started
 
     async def _start_service(
@@ -1171,6 +1220,38 @@ class SystemSupervisor:
         services_stopped = 0
 
         # Stop in reverse order
+        # Stop ControlPlaneService
+        if self._control_plane is not None:
+            try:
+                self._control_plane.stop()
+                record_service_stopped("ControlPlaneService", SUPERVISOR_TYPE)
+                stopped_event = ServiceStoppedEvent(
+                    service_name="ControlPlaneService",
+                    supervisor_type=SUPERVISOR_TYPE,
+                    reason=None,
+                )
+                await self.bus.publish(SYSTEM_LIFECYCLE, stopped_event)
+                logger.bind(supervisor=SUPERVISOR_TYPE, service="ControlPlaneService").debug(
+                    "ControlPlaneService stopped"
+                )
+                services_stopped += 1
+            except Exception as e:
+                logger.bind(
+                    supervisor=SUPERVISOR_TYPE,
+                    service="ControlPlaneService",
+                    error_type=type(e).__name__,
+                ).exception("Error stopping ControlPlaneService: {error}", error=str(e))
+            finally:
+                if self._control_plane_task is not None:
+                    if not self._control_plane_task.done():
+                        self._control_plane_task.cancel()
+                    try:
+                        await asyncio.wait_for(self._control_plane_task, timeout=5.0)
+                    except (asyncio.CancelledError, TimeoutError):
+                        pass
+                    self._control_plane_task = None
+                self._control_plane = None
+
         # Stop EventSink (should be last to flush remaining events)
         if self._event_sink is not None:
             try:
@@ -1391,6 +1472,7 @@ class SystemSupervisor:
         self._oms_core_task = None
         self._risk_checker_task = None
         self._event_sink_task = None
+        self._control_plane_task = None
 
         set_services_running(SUPERVISOR_TYPE, 0)
 
@@ -1422,6 +1504,7 @@ class SystemSupervisor:
                     self._user_stream_task,
                     self._reconciliation_task,
                     self._event_sink_task,
+                    self._control_plane_task,
                 ]
                 if t is not None
             ]

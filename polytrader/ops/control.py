@@ -79,6 +79,7 @@ class ExecutionControl:
         """
         self.execution_enabled: bool = False
         self.kill_switch_active: bool = False
+        self.active_strategy_id: str | None = None
         self._bus = bus
 
     def enable(self) -> None:
@@ -127,6 +128,15 @@ class ExecutionControl:
         self.execution_enabled = False
         set_execution_enabled(enabled=False)
         logger.warning("Execution disabled")
+
+    def set_active_strategy(self, strategy_id: str | None) -> None:
+        """Set active live strategy identifier.
+
+        Args:
+            strategy_id: Strategy identifier to set, or None to clear
+        """
+        self.active_strategy_id = strategy_id
+        logger.info("Active live strategy updated", active_strategy_id=strategy_id)
 
     async def set_kill_switch(
         self,

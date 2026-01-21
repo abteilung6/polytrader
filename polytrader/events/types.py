@@ -854,6 +854,36 @@ class ExecutionPermitEvent(Event):
     )
 
 
+class ControlCommandEvent(Event):
+    """Event emitted when a runtime control command is issued.
+
+    This event is used to manually control live trading during runtime,
+    such as enabling/disabling execution or selecting a live strategy.
+    Commands are issued by operators and processed by the control plane.
+
+    Attributes:
+        command_type: Command type ("enable_execution", "disable_execution", "select_live_strategy")
+        strategy_id: Strategy identifier for selection commands (optional)
+        reason: Human-readable reason for the command (optional)
+        issued_by: Who issued the command ("operator" | "system")
+    """
+
+    source: EventSource = Field(default=EventSource.OPS)
+
+    command_type: Literal[
+        "enable_execution",
+        "disable_execution",
+        "select_live_strategy",
+    ] = Field(description="Command type")
+    strategy_id: str | None = Field(
+        default=None, description="Strategy identifier for selection commands"
+    )
+    reason: str | None = Field(default=None, description="Reason for the command")
+    issued_by: Literal["operator", "system"] = Field(
+        default="operator", description="Who issued the command"
+    )
+
+
 class KillSwitchEvent(Event):
     """Event emitted when kill switch is triggered or reset.
 

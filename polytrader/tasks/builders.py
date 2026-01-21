@@ -18,6 +18,7 @@ from polytrader.market_discovery import MarketDiscoveryService
 from polytrader.observer import create_observer_factory
 from polytrader.oms import InMemoryOrderStore, OMSCore
 from polytrader.oms.idempotency import IdempotencyStore
+from polytrader.ops.control_plane import get_default_control_command_path
 from polytrader.portfolio import PortfolioService
 from polytrader.position_manager import IPositionManager, create_position_manager_factory
 from polytrader.position_manager.paper import PaperPositionManager
@@ -483,6 +484,8 @@ class LiveTradingSystemBuilder:
         self._min_history: int = 30
         self._size: float = 1.0
         self._sync_interval: float = 60.0
+        self._control_command_path: str | None = str(get_default_control_command_path())
+        self._control_poll_interval_s: float = 1.0
 
         # Shared dependencies (created on first access)
         self._adapter_factory: Callable[[str], IMarketDataAdapter] | None = None
@@ -543,6 +546,27 @@ class LiveTradingSystemBuilder:
 
         self._size = size
         self._sync_interval = sync_interval
+        return self
+
+    def control_plane_config(
+        self,
+        control_command_path: str | None = None,
+        poll_interval_s: float = 1.0,
+    ) -> "LiveTradingSystemBuilder":
+        """Configure runtime control plane.
+
+        Args:
+            control_command_path: Path to control command JSONL file
+                (set to None to disable control plane)
+            poll_interval_s: Poll interval in seconds
+
+        Returns:
+            Self for fluent interface
+        """
+        if poll_interval_s <= 0.0:
+            raise ValueError(f"poll_interval_s must be > 0, got {poll_interval_s}")
+        self._control_command_path = control_command_path
+        self._control_poll_interval_s = poll_interval_s
         return self
 
     def _get_adapter_factory(self) -> Callable[[str], IMarketDataAdapter]:
@@ -793,6 +817,8 @@ class LiveTradingSystemBuilder:
             circuit_breaker_factory=circuit_breaker_factory,
             execution_control=execution_control,
             config_path=self._config_path,
+            control_command_path=self._control_command_path,
+            control_poll_interval_s=self._control_poll_interval_s,
         )
 
     def build_market_supervisor(

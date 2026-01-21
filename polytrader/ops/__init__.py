@@ -5,6 +5,11 @@ This module provides operational controls for the trading system.
 """
 
 from polytrader.ops.control import CircuitBreaker, CircuitBreakerThresholds, ExecutionControl
+from polytrader.ops.control_plane import (
+    ControlPlaneService,
+    append_control_command,
+    get_default_control_command_path,
+)
 from polytrader.ops.health import (
     HealthGateThresholds,
     HealthService,
@@ -15,9 +20,12 @@ from polytrader.ops.replay import StateReconstructionService
 __all__ = [
     "CircuitBreaker",
     "CircuitBreakerThresholds",
+    "ControlPlaneService",
     "ExecutionControl",
     "HealthGateThresholds",
     "HealthService",
     "HealthStatus",
     "StateReconstructionService",
+    "append_control_command",
+    "get_default_control_command_path",
 ]
