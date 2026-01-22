@@ -394,6 +394,29 @@ class ControlCommandRepository:
         record.applied_at = datetime.now(UTC)
         await self.session.commit()
 
+    async def get_command(self, command_id: str) -> ControlCommandRecord | None:
+        """Get command by ID.
+
+        Args:
+            command_id: Command ID (UUID as string)
+
+        Returns:
+            ControlCommandRecord if found, None otherwise
+
+        Example:
+            >>> cmd = await repo.get_command("123e4567-e89b-12d3-a456-426614174000")
+            >>> if cmd:
+            ...     print(f"Status: {cmd.status}")
+        """
+        try:
+            cmd_uuid = UUID(command_id)
+        except ValueError:
+            return None
+
+        query = select(ControlCommandRecord).where(ControlCommandRecord.command_id == cmd_uuid)
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none()
+
     async def mark_failed(self, command_id: str, error_message: str) -> None:
         """Mark command as failed.
 
