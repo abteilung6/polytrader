@@ -35,6 +35,8 @@ class HealthStatus(BaseModel):
         error_rate: Current error rate (0-1, None if not tracked)
         circuit_breaker_triggered: Whether circuit breaker is triggered
         kill_switch_active: Whether kill switch is active
+        tick_storage_healthy: Whether tick storage is healthy (None if not checked)
+        tick_storage_error: Error message from tick storage health check (None if healthy)
     """
 
     market_data_fresh: bool = Field(description="Whether market data is fresh")
@@ -58,6 +60,12 @@ class HealthStatus(BaseModel):
         default=False, description="Whether circuit breaker is triggered"
     )
     kill_switch_active: bool = Field(default=False, description="Whether kill switch is active")
+    tick_storage_healthy: bool | None = Field(
+        default=None, description="Whether tick storage is healthy (None if not checked)"
+    )
+    tick_storage_error: str | None = Field(
+        default=None, description="Error message from tick storage health check"
+    )
 
 
 class HealthGateThresholds(BaseModel):
@@ -127,6 +135,7 @@ class HealthService:
         kill_switch_active: bool = False,
         error_rate: float | None = None,
         recent_reconcile_events: list[Any] | None = None,
+        tick_storage_repository: Any | None = None,  # MarketTickRepository | None
     ) -> None:
         """Initialize health service.
 
@@ -139,6 +148,7 @@ class HealthService:
             kill_switch_active: Whether kill switch is active (default: False)
             error_rate: Current error rate (optional, 0-1)
             recent_reconcile_events: Recent reconciliation events (optional, for divergence count)
+            tick_storage_repository: MarketTickRepository (optional, for tick storage health check)
         """
         self._store = store
         self._thresholds = thresholds
@@ -148,6 +158,7 @@ class HealthService:
         self._kill_switch_active = kill_switch_active
         self._error_rate = error_rate
         self._recent_reconcile_events = recent_reconcile_events or []
+        self._tick_storage_repository = tick_storage_repository
 
     async def evaluate(
         self, market_slug: str | None = None, outcome: Outcome | None = None
@@ -183,6 +194,9 @@ class HealthService:
         # 6. Check kill switch status
         kill_switch_active = self._check_kill_switch()
 
+        # 7. Check tick storage health (if repository provided)
+        tick_storage_healthy, tick_storage_error = await self._check_tick_storage_health()
+
         return HealthStatus(
             market_data_fresh=market_data_fresh,
             market_data_staleness_seconds=staleness_seconds,
@@ -193,6 +207,8 @@ class HealthService:
             error_rate=self._error_rate,
             circuit_breaker_triggered=circuit_breaker_triggered,
             kill_switch_active=kill_switch_active,
+            tick_storage_healthy=tick_storage_healthy,
+            tick_storage_error=tick_storage_error,
         )
 
     def check_gates(self, health_status: HealthStatus) -> tuple[bool, list[str]]:
@@ -246,6 +262,12 @@ class HealthService:
         # Check kill switch
         if health_status.kill_switch_active:
             failed_gates.append("kill_switch_active")
+
+        # Check tick storage (if checked)
+        if health_status.tick_storage_healthy is False:
+            failed_gates.append("tick_storage_unhealthy")
+            if health_status.tick_storage_error:
+                failed_gates.append(f"tick_storage_error: {health_status.tick_storage_error}")
 
         all_passed = len(failed_gates) == 0
         return (all_passed, failed_gates)
@@ -395,3 +417,32 @@ class HealthService:
         # Kill switch is a separate flag (not execution_enabled)
         # Execution can be disabled for other reasons (circuit breaker, etc.)
         return self._kill_switch_active
+
+    async def _check_tick_storage_health(
+        self,
+    ) -> tuple[bool | None, str | None]:
+        """Check tick storage health.
+
+        Per flows.mdc §2: Health checks validate tick storage if enabled.
+
+        Returns:
+            Tuple of (healthy: bool | None, error_message: str | None)
+            - healthy: True if healthy, False if unhealthy, None if not checked
+            - error_message: Error details if unhealthy, None if healthy or not checked
+        """
+        # Only check if repository is provided (PostgreSQL store enabled)
+        if self._tick_storage_repository is None:
+            return None, None
+
+        try:
+            from polytrader.db.health import check_tick_storage_health
+
+            health = await check_tick_storage_health(self._tick_storage_repository)
+
+            # Healthy if connected, write healthy, and read healthy
+            is_healthy = health.connected and health.write_healthy and health.read_healthy
+
+            return is_healthy, health.error_message
+        except Exception as e:
+            # If health check itself fails, consider it unhealthy
+            return False, f"Health check failed: {str(e)}"

@@ -24,7 +24,6 @@ from polytrader.events import (
 from polytrader.events.types import MarketChangeEvent, OrderExecutedEvent
 from polytrader.logging_config import logger
 from polytrader.market_discovery import MarketDiscoveryService
-from polytrader.store import MemoryMarketDataStore
 from polytrader.tasks.builders import LiveTradingSystemBuilder
 
 
@@ -140,7 +139,10 @@ async def live_trading_task(
         market_change_handler = default_market_change_handler
 
     # Initialize core infrastructure
-    store = MemoryMarketDataStore()
+    # Create market data store (with optional PostgreSQL persistence)
+    from polytrader.store_factory import create_market_data_store
+
+    store = create_market_data_store(enable_postgres=True)
     event_store = MemoryEventStore()
     bus = EventBus(store=event_store)
     discovery = MarketDiscoveryService(bus=bus)
@@ -232,6 +234,14 @@ async def live_trading_task(
         # Stop supervisors
         market_supervisor.stop()
         await system_supervisor.stop()
+
+        # Flush and close store (ensures all ticks are persisted)
+        if hasattr(store, "close"):
+            try:
+                await store.close()
+            except Exception:
+                logger.exception("Error closing market data store")
+
         # Emit system stopped event if not already emitted
         if not any(
             isinstance(e, SystemStoppedEvent)

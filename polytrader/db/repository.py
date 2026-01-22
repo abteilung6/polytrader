@@ -5,14 +5,15 @@ Per architecture.mdc: Database operations are separated from business logic.
 """
 
 from datetime import datetime
-from typing import Any
+from decimal import Decimal
+from typing import Any, Protocol
 from uuid import UUID
 
-from sqlalchemy import and_, select
+from sqlalchemy import and_, desc, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from polytrader.db.models import EventRecord
+from polytrader.db.models import EventRecord, MarketTickRecord
 
 
 class EventRepository:
@@ -169,5 +170,378 @@ class EventRepository:
             >>> assert isinstance(exists, bool)
         """
         query = select(EventRecord.event_id).where(EventRecord.event_id == event_id)
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none() is not None
+
+
+class IMarketTickRepository(Protocol):
+    """Protocol for market tick repository implementations.
+
+    Provides type-safe interface for market tick database operations.
+    """
+
+    async def create_tick(
+        self,
+        tick_id: UUID,
+        ts_wall: datetime,
+        ts_mono: float,
+        market_slug: str,
+        outcome: str,
+        best_bid: Decimal,
+        best_ask: Decimal,
+        mid: Decimal,
+        spread: Decimal,
+        spread_bps: Decimal,
+        event_id: UUID | None,
+        run_id: str,
+    ) -> None:
+        """Insert single tick (idempotent)."""
+        ...
+
+    async def bulk_create_ticks(
+        self,
+        ticks: list[dict[str, Any]],
+    ) -> int:
+        """Bulk insert ticks (idempotent). Returns count inserted."""
+        ...
+
+    async def get_latest(
+        self,
+        market_slug: str,
+        outcome: str,
+    ) -> MarketTickRecord | None:
+        """Get latest tick for market/outcome."""
+        ...
+
+    async def get_history(
+        self,
+        market_slug: str | None = None,
+        outcome: str | None = None,
+        from_ts: datetime | None = None,
+        to_ts: datetime | None = None,
+        limit: int | None = None,
+    ) -> list[MarketTickRecord]:
+        """Get historical ticks with filters."""
+        ...
+
+    async def get_markets(self) -> list[tuple[str, str]]:
+        """Get all (market_slug, outcome) pairs with data."""
+        ...
+
+    async def tick_exists(self, tick_id: UUID, ts_wall: datetime) -> bool:
+        """Check if tick exists."""
+        ...
+
+
+class MarketTickRepository:
+    """Repository for market tick database operations.
+
+    Provides type-safe CRUD operations using SQLAlchemy ORM.
+    All type conversions (UUID, datetime, NUMERIC) are handled automatically.
+
+    Example:
+        >>> async with Session() as session:
+        ...     repo = MarketTickRepository(session)
+        ...     await repo.create_tick(...)
+        ...     latest = await repo.get_latest("btc-updown-15m", "UP")
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        """Initialize repository with database session.
+
+        Args:
+            session: SQLAlchemy async session
+        """
+        self.session = session
+
+    async def create_tick(
+        self,
+        tick_id: UUID,
+        ts_wall: datetime,
+        ts_mono: float,
+        market_slug: str,
+        outcome: str,
+        best_bid: Decimal,
+        best_ask: Decimal,
+        mid: Decimal,
+        spread: Decimal,
+        spread_bps: Decimal,
+        event_id: UUID | None,
+        run_id: str,
+    ) -> None:
+        """Insert single tick into database (idempotent).
+
+        Type conversions are handled automatically by SQLAlchemy:
+        - UUID: automatic conversion from UUID object
+        - datetime: automatic conversion from datetime object
+        - NUMERIC: automatic conversion from Decimal
+
+        Args:
+            tick_id: Unique tick identifier (UUID)
+            ts_wall: Wall-clock time (datetime, UTC)
+            ts_mono: Monotonic timestamp (float)
+            market_slug: Polymarket market identifier
+            outcome: Market outcome ("UP" or "DOWN")
+            best_bid: Best bid price (Decimal, 0-1 range)
+            best_ask: Best ask price (Decimal, 0-1 range)
+            mid: Mid-market price (Decimal)
+            spread: Bid-ask spread (Decimal)
+            spread_bps: Spread in basis points (Decimal)
+            event_id: Reference to events.event_id (optional)
+            run_id: Process run ID
+
+        Note:
+            Uses ON CONFLICT DO NOTHING for idempotency. Duplicate ticks
+            (same tick_id and ts_wall) are silently ignored.
+
+        Example:
+            >>> from decimal import Decimal
+            >>> await repo.create_tick(
+            ...     tick_id=UUID("123e4567-e89b-12d3-a456-426614174000"),
+            ...     ts_wall=datetime.now(UTC),
+            ...     ts_mono=12345.678,
+            ...     market_slug="btc-updown-15m",
+            ...     outcome="UP",
+            ...     best_bid=Decimal("0.45"),
+            ...     best_ask=Decimal("0.50"),
+            ...     mid=Decimal("0.475"),
+            ...     spread=Decimal("0.05"),
+            ...     spread_bps=Decimal("500.00"),
+            ...     event_id=None,
+            ...     run_id="run-456",
+            ... )
+        """
+        # Use PostgreSQL-specific INSERT ... ON CONFLICT DO NOTHING for idempotency
+        # Primary key is (tick_id, ts_wall)
+        stmt = (
+            insert(MarketTickRecord)
+            .values(
+                tick_id=tick_id,
+                ts_wall=ts_wall,
+                ts_mono=ts_mono,
+                market_slug=market_slug,
+                outcome=outcome,
+                best_bid=best_bid,
+                best_ask=best_ask,
+                mid=mid,
+                spread=spread,
+                spread_bps=spread_bps,
+                event_id=event_id,
+                run_id=run_id,
+            )
+            .on_conflict_do_nothing(index_elements=["tick_id", "ts_wall"])
+        )
+
+        try:
+            await self.session.execute(stmt)
+            await self.session.commit()
+        except Exception:
+            # Rollback on error to prevent invalid transaction state
+            await self.session.rollback()
+            raise
+
+    async def bulk_create_ticks(
+        self,
+        ticks: list[dict[str, Any]],
+    ) -> int:
+        """Bulk insert ticks (idempotent).
+
+        Args:
+            ticks: List of tick dictionaries. Each dict must contain:
+                - tick_id: UUID
+                - ts_wall: datetime
+                - ts_mono: float
+                - market_slug: str
+                - outcome: str
+                - best_bid: Decimal
+                - best_ask: Decimal
+                - mid: Decimal
+                - spread: Decimal
+                - spread_bps: Decimal
+                - event_id: UUID | None
+                - run_id: str
+
+        Returns:
+            Number of ticks actually inserted (duplicates are ignored)
+
+        Example:
+            >>> ticks = [
+            ...     {
+            ...         "tick_id": UUID("..."),
+            ...         "ts_wall": datetime.now(UTC),
+            ...         "ts_mono": 12345.678,
+            ...         "market_slug": "btc-updown-15m",
+            ...         "outcome": "UP",
+            ...         "best_bid": Decimal("0.45"),
+            ...         "best_ask": Decimal("0.50"),
+            ...         "mid": Decimal("0.475"),
+            ...         "spread": Decimal("0.05"),
+            ...         "spread_bps": Decimal("500.00"),
+            ...         "event_id": None,
+            ...         "run_id": "run-456",
+            ...     },
+            ... ]
+            >>> count = await repo.bulk_create_ticks(ticks)
+            >>> assert count >= 0
+        """
+        if not ticks:
+            return 0
+
+        # Use bulk insert with ON CONFLICT DO NOTHING
+        # Use RETURNING to get actual count of inserted rows
+        # (rowcount returns -1 for ON CONFLICT DO NOTHING in async SQLAlchemy)
+        stmt = (
+            insert(MarketTickRecord)
+            .values(ticks)
+            .on_conflict_do_nothing(index_elements=["tick_id", "ts_wall"])
+            .returning(MarketTickRecord.tick_id)
+        )
+
+        try:
+            result = await self.session.execute(stmt)
+            await self.session.commit()
+
+            # Count returned rows (these are the actually inserted rows)
+            inserted_rows = result.fetchall()
+            return len(inserted_rows)
+        except Exception:
+            # Rollback on error to prevent invalid transaction state
+            try:
+                await self.session.rollback()
+            except Exception:
+                # If rollback fails, session is likely already closed/invalid
+                pass
+            raise
+
+    async def get_latest(
+        self,
+        market_slug: str,
+        outcome: str,
+    ) -> MarketTickRecord | None:
+        """Get latest tick for market/outcome.
+
+        Args:
+            market_slug: Polymarket market identifier
+            outcome: Market outcome ("UP" or "DOWN")
+
+        Returns:
+            Latest MarketTickRecord, or None if no ticks exist
+
+        Example:
+            >>> latest = await repo.get_latest("btc-updown-15m", "UP")
+            >>> if latest:
+            ...     print(f"Latest price: {latest.mid}")
+        """
+        query = (
+            select(MarketTickRecord)
+            .where(
+                and_(
+                    MarketTickRecord.market_slug == market_slug,
+                    MarketTickRecord.outcome == outcome,
+                )
+            )
+            .order_by(desc(MarketTickRecord.ts_wall), desc(MarketTickRecord.ts_mono))
+            .limit(1)
+        )
+
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none()
+
+    async def get_history(
+        self,
+        market_slug: str | None = None,
+        outcome: str | None = None,
+        from_ts: datetime | None = None,
+        to_ts: datetime | None = None,
+        limit: int | None = None,
+    ) -> list[MarketTickRecord]:
+        """Get historical ticks with filters.
+
+        Args:
+            market_slug: Filter by market slug (optional)
+            outcome: Filter by outcome (optional)
+            from_ts: Filter by ts_wall >= from_ts (optional)
+            to_ts: Filter by ts_wall <= to_ts (optional)
+            limit: Maximum number of ticks to return (None = no limit)
+
+        Returns:
+            List of MarketTickRecord objects, ordered by ts_wall ASC, ts_mono ASC
+
+        Example:
+            >>> from datetime import datetime, timedelta, UTC
+            >>> now = datetime.now(UTC)
+            >>> hour_ago = now - timedelta(hours=1)
+            >>> ticks = await repo.get_history(
+            ...     market_slug="btc-updown-15m",
+            ...     outcome="UP",
+            ...     from_ts=hour_ago,
+            ...     to_ts=now,
+            ...     limit=100,
+            ... )
+        """
+        query = select(MarketTickRecord)
+        conditions = []
+
+        if market_slug:
+            conditions.append(MarketTickRecord.market_slug == market_slug)
+        if outcome:
+            conditions.append(MarketTickRecord.outcome == outcome)
+        if from_ts is not None:
+            conditions.append(MarketTickRecord.ts_wall >= from_ts)
+        if to_ts is not None:
+            conditions.append(MarketTickRecord.ts_wall <= to_ts)
+
+        if conditions:
+            query = query.where(and_(*conditions))
+
+        query = query.order_by(MarketTickRecord.ts_wall, MarketTickRecord.ts_mono)
+
+        if limit:
+            query = query.limit(limit)
+
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
+    async def get_markets(self) -> list[tuple[str, str]]:
+        """Get all (market_slug, outcome) pairs that have data.
+
+        Returns:
+            List of (market_slug, outcome) tuples
+
+        Example:
+            >>> markets = await repo.get_markets()
+            >>> for market_slug, outcome in markets:
+            ...     print(f"{market_slug}/{outcome}")
+        """
+        query = select(
+            MarketTickRecord.market_slug,
+            MarketTickRecord.outcome,
+        ).distinct()
+
+        result = await self.session.execute(query)
+        return [(row[0], row[1]) for row in result.all()]
+
+    async def tick_exists(self, tick_id: UUID, ts_wall: datetime) -> bool:
+        """Check if tick with given tick_id and ts_wall exists.
+
+        Args:
+            tick_id: Tick ID to check (UUID)
+            ts_wall: Wall-clock time to check (datetime)
+
+        Returns:
+            True if tick exists, False otherwise
+
+        Example:
+            >>> exists = await repo.tick_exists(
+            ...     UUID("123e4567-..."),
+            ...     datetime.now(UTC)
+            ... )
+        """
+        query = select(MarketTickRecord.tick_id).where(
+            and_(
+                MarketTickRecord.tick_id == tick_id,
+                MarketTickRecord.ts_wall == ts_wall,
+            )
+        )
         result = await self.session.execute(query)
         return result.scalar_one_or_none() is not None

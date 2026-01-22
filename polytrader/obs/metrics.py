@@ -421,6 +421,111 @@ def set_md_spread(spread: float, market_slug: str, outcome: str) -> None:
     )
 
 
+# Tick Storage metrics functions per observability.mdc §4
+
+
+def record_tick_write_latency_ms(latency_ms: float) -> None:
+    """Record tick write latency (time to buffer) per observability.mdc §4.
+
+    Args:
+        latency_ms: Write latency in milliseconds
+    """
+    collector = get_metrics_collector()
+    collector.record_histogram("tick_write_latency_ms", latency_ms)
+
+
+def record_tick_flush(count: int, latency_ms: float) -> None:
+    """Record tick flush operation (counter + latency) per observability.mdc §4.
+
+    Args:
+        count: Number of ticks flushed
+        latency_ms: Flush latency in milliseconds
+    """
+    collector = get_metrics_collector()
+    collector.increment_counter("tick_flushes_total")
+    collector.record_histogram("tick_flush_latency_ms", latency_ms)
+
+
+def set_tick_buffer_size(size: int) -> None:
+    """Set current tick buffer size per observability.mdc §4.
+
+    Args:
+        size: Current buffer size (number of ticks)
+    """
+    collector = get_metrics_collector()
+    collector.set_gauge("tick_buffer_size", float(size))
+
+
+def set_tick_buffer_capacity(capacity: int) -> None:
+    """Set tick buffer capacity per observability.mdc §4.
+
+    Args:
+        capacity: Buffer capacity (batch_size)
+    """
+    collector = get_metrics_collector()
+    collector.set_gauge("tick_buffer_capacity", float(capacity))
+
+
+def increment_tick_write_errors(error_class: str) -> None:
+    """Increment tick write error counter per observability.mdc §4.
+
+    Args:
+        error_class: Error classification (retryable/fatal/unknown)
+    """
+    collector = get_metrics_collector()
+    collector.increment_counter("tick_write_errors_total", labels={"class": error_class})
+
+
+def increment_tick_flush_errors(error_class: str) -> None:
+    """Increment tick flush error counter per observability.mdc §4.
+
+    Args:
+        error_class: Error classification (retryable/fatal/unknown)
+    """
+    collector = get_metrics_collector()
+    collector.increment_counter("tick_flush_errors_total", labels={"class": error_class})
+
+
+def record_tick_db_read(operation: str, latency_ms: float) -> None:
+    """Record database read operation per observability.mdc §4.
+
+    Args:
+        operation: Operation type (latest/history/markets)
+        latency_ms: Read latency in milliseconds
+    """
+    collector = get_metrics_collector()
+    collector.increment_counter("tick_db_reads_total", labels={"operation": operation})
+    collector.record_histogram(
+        "tick_db_read_latency_ms", latency_ms, labels={"operation": operation}
+    )
+
+
+def record_tick_db_read_error(operation: str, error_class: str) -> None:
+    """Record database read error per observability.mdc §4.
+
+    Args:
+        operation: Operation type (latest/history/markets)
+        error_class: Error classification (retryable/fatal/unknown)
+    """
+    collector = get_metrics_collector()
+    collector.increment_counter(
+        "tick_db_read_errors_total",
+        labels={"operation": operation, "class": error_class},
+    )
+
+
+def set_tick_store_health(state: str) -> None:
+    """Set tick store health state per observability.mdc §4.
+
+    Args:
+        state: Health state (open/closed)
+    """
+    collector = get_metrics_collector()
+    collector.set_gauge(
+        "tick_store_health", 1.0 if state == "open" else 0.0, labels={"state": state}
+    )
+
+
 # Strategy metrics functions per observability.mdc §4
 
 
