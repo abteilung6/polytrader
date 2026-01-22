@@ -332,8 +332,13 @@ class MarketTickRepository:
             .on_conflict_do_nothing(index_elements=["tick_id", "ts_wall"])
         )
 
-        await self.session.execute(stmt)
-        await self.session.commit()
+        try:
+            await self.session.execute(stmt)
+            await self.session.commit()
+        except Exception:
+            # Rollback on error to prevent invalid transaction state
+            await self.session.rollback()
+            raise
 
     async def bulk_create_ticks(
         self,
@@ -392,12 +397,21 @@ class MarketTickRepository:
             .returning(MarketTickRecord.tick_id)
         )
 
-        result = await self.session.execute(stmt)
-        await self.session.commit()
+        try:
+            result = await self.session.execute(stmt)
+            await self.session.commit()
 
-        # Count returned rows (these are the actually inserted rows)
-        inserted_rows = result.fetchall()
-        return len(inserted_rows)
+            # Count returned rows (these are the actually inserted rows)
+            inserted_rows = result.fetchall()
+            return len(inserted_rows)
+        except Exception:
+            # Rollback on error to prevent invalid transaction state
+            try:
+                await self.session.rollback()
+            except Exception:
+                # If rollback fails, session is likely already closed/invalid
+                pass
+            raise
 
     async def get_latest(
         self,

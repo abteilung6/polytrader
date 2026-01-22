@@ -1,10 +1,16 @@
 import asyncio
 import concurrent.futures
 import threading
+import time
 from collections import deque
 from typing import TYPE_CHECKING, Protocol
 
 from polytrader.events.types import MarketDataEvent
+from polytrader.obs.metrics import (
+    record_tick_db_read,
+    record_tick_db_read_error,
+    set_tick_store_health,
+)
 from polytrader.types import Outcome
 
 if TYPE_CHECKING:
@@ -325,6 +331,8 @@ class PostgreSQLMarketTickStore(IMarketDataStore):
         Returns:
             Latest MarketDataEvent, or None if no ticks exist
         """
+        # Measure read latency
+        start_time = time.perf_counter()
 
         async def _fetch_latest() -> MarketDataEvent | None:
             record = await self._repository.get_latest(market_slug, outcome)
@@ -348,10 +356,52 @@ class PostgreSQLMarketTickStore(IMarketDataStore):
 
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 future = executor.submit(run_in_thread)
-                return future.result()
+                try:
+                    result = future.result()
+                    latency_ms = (time.perf_counter() - start_time) * 1000.0
+
+                    # Record metrics (non-blocking)
+                    try:
+                        record_tick_db_read(operation="latest", latency_ms=latency_ms)
+                    except Exception:
+                        pass
+
+                    return result
+                except Exception as e:
+                    latency_ms = (time.perf_counter() - start_time) * 1000.0
+                    error_class = _classify_db_error(e)
+
+                    # Record error metrics (non-blocking)
+                    try:
+                        record_tick_db_read_error(operation="latest", error_class=error_class)
+                    except Exception:
+                        pass
+
+                    raise
         except RuntimeError:
             # No running loop, safe to use asyncio.run()
-            return asyncio.run(_fetch_latest())
+            try:
+                result = asyncio.run(_fetch_latest())
+                latency_ms = (time.perf_counter() - start_time) * 1000.0
+
+                # Record metrics (non-blocking)
+                try:
+                    record_tick_db_read(operation="latest", latency_ms=latency_ms)
+                except Exception:
+                    pass
+
+                return result
+            except Exception as e:
+                latency_ms = (time.perf_counter() - start_time) * 1000.0
+                error_class = _classify_db_error(e)
+
+                # Record error metrics (non-blocking)
+                try:
+                    record_tick_db_read_error(operation="latest", error_class=error_class)
+                except Exception:
+                    pass
+
+                raise
 
     def history(self, market_slug: str, outcome: Outcome) -> list[MarketDataEvent]:
         """Get history (sync, queries database).
@@ -363,6 +413,8 @@ class PostgreSQLMarketTickStore(IMarketDataStore):
         Returns:
             List of MarketDataEvent objects (oldest first)
         """
+        # Measure read latency
+        start_time = time.perf_counter()
 
         async def _fetch_history() -> list[MarketDataEvent]:
             records = await self._repository.get_history(
@@ -387,10 +439,52 @@ class PostgreSQLMarketTickStore(IMarketDataStore):
 
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 future = executor.submit(run_in_thread)
-                return future.result()
+                try:
+                    result = future.result()
+                    latency_ms = (time.perf_counter() - start_time) * 1000.0
+
+                    # Record metrics (non-blocking)
+                    try:
+                        record_tick_db_read(operation="history", latency_ms=latency_ms)
+                    except Exception:
+                        pass
+
+                    return result
+                except Exception as e:
+                    latency_ms = (time.perf_counter() - start_time) * 1000.0
+                    error_class = _classify_db_error(e)
+
+                    # Record error metrics (non-blocking)
+                    try:
+                        record_tick_db_read_error(operation="history", error_class=error_class)
+                    except Exception:
+                        pass
+
+                    raise
         except RuntimeError:
             # No running loop, safe to use asyncio.run()
-            return asyncio.run(_fetch_history())
+            try:
+                result = asyncio.run(_fetch_history())
+                latency_ms = (time.perf_counter() - start_time) * 1000.0
+
+                # Record metrics (non-blocking)
+                try:
+                    record_tick_db_read(operation="history", latency_ms=latency_ms)
+                except Exception:
+                    pass
+
+                return result
+            except Exception as e:
+                latency_ms = (time.perf_counter() - start_time) * 1000.0
+                error_class = _classify_db_error(e)
+
+                # Record error metrics (non-blocking)
+                try:
+                    record_tick_db_read_error(operation="history", error_class=error_class)
+                except Exception:
+                    pass
+
+                raise
 
     def get_all_markets(self) -> list[tuple[str, Outcome]]:
         """Get all market/outcome pairs that have data in the store.
@@ -398,6 +492,8 @@ class PostgreSQLMarketTickStore(IMarketDataStore):
         Returns:
             List of (market_slug, outcome) tuples
         """
+        # Measure read latency
+        start_time = time.perf_counter()
 
         async def _fetch_markets() -> list[tuple[str, Outcome]]:
             from typing import cast
@@ -423,10 +519,52 @@ class PostgreSQLMarketTickStore(IMarketDataStore):
 
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 future = executor.submit(run_in_thread)
-                return future.result()
+                try:
+                    result = future.result()
+                    latency_ms = (time.perf_counter() - start_time) * 1000.0
+
+                    # Record metrics (non-blocking)
+                    try:
+                        record_tick_db_read(operation="markets", latency_ms=latency_ms)
+                    except Exception:
+                        pass
+
+                    return result
+                except Exception as e:
+                    latency_ms = (time.perf_counter() - start_time) * 1000.0
+                    error_class = _classify_db_error(e)
+
+                    # Record error metrics (non-blocking)
+                    try:
+                        record_tick_db_read_error(operation="markets", error_class=error_class)
+                    except Exception:
+                        pass
+
+                    raise
         except RuntimeError:
             # No running loop, safe to use asyncio.run()
-            return asyncio.run(_fetch_markets())
+            try:
+                result = asyncio.run(_fetch_markets())
+                latency_ms = (time.perf_counter() - start_time) * 1000.0
+
+                # Record metrics (non-blocking)
+                try:
+                    record_tick_db_read(operation="markets", latency_ms=latency_ms)
+                except Exception:
+                    pass
+
+                return result
+            except Exception as e:
+                latency_ms = (time.perf_counter() - start_time) * 1000.0
+                error_class = _classify_db_error(e)
+
+                # Record error metrics (non-blocking)
+                try:
+                    record_tick_db_read_error(operation="markets", error_class=error_class)
+                except Exception:
+                    pass
+
+                raise
 
     async def flush(self) -> None:
         """Flush buffer (call before shutdown).
@@ -490,6 +628,52 @@ class PostgreSQLMarketTickStore(IMarketDataStore):
         # Dispose of database engine if it exists
         if self._engine is not None:
             await self._engine.dispose()
+
+        # Set store health to closed
+        try:
+            set_tick_store_health("closed")
+        except Exception:
+            pass
+
+
+def _classify_db_error(error: Exception) -> str:
+    """Classify database error as retryable or fatal.
+
+    Per observability.mdc §3: Errors must be classified.
+
+    Args:
+        error: Exception to classify
+
+    Returns:
+        Error classification ("retryable", "fatal", or "unknown")
+    """
+    error_type = type(error).__name__
+    error_msg = str(error).lower()
+
+    # Network/connection errors are retryable
+    if (
+        "Connection" in error_type
+        or "Timeout" in error_type
+        or "network" in error_msg
+        or "connection" in error_msg
+        or "timeout" in error_msg
+    ):
+        return "retryable"
+
+    # SQLAlchemy operational errors (connection issues) are retryable
+    if "OperationalError" in error_type or "InterfaceError" in error_type:
+        return "retryable"
+
+    # Constraint violations are fatal (data issue, won't succeed on retry)
+    if "IntegrityError" in error_type or "constraint" in error_msg:
+        return "fatal"
+
+    # Programming errors (SQL syntax) are fatal
+    if "ProgrammingError" in error_type:
+        return "fatal"
+
+    # Default to unknown for unclassified errors
+    return "unknown"
 
 
 def _convert_record_to_event(record: "MarketTickRecord") -> MarketDataEvent:  # noqa: F821

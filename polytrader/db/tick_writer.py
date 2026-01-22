@@ -16,6 +16,13 @@ from uuid import UUID
 
 from polytrader.events.types import MarketDataEvent
 from polytrader.logging_config import logger
+from polytrader.obs.metrics import (
+    increment_tick_flush_errors,
+    record_tick_flush,
+    record_tick_write_latency_ms,
+    set_tick_buffer_capacity,
+    set_tick_buffer_size,
+)
 
 if TYPE_CHECKING:
     from polytrader.db.repository import IMarketTickRepository
@@ -62,6 +69,9 @@ class BufferedTickWriter:
         self._flush_task: asyncio.Task[None] | None = None
         self._closed = False
 
+        # Set buffer capacity metric
+        set_tick_buffer_capacity(batch_size)
+
     async def add(self, event: MarketDataEvent) -> None:
         """Add tick to buffer. Auto-flushes if threshold reached.
 
@@ -76,7 +86,18 @@ class BufferedTickWriter:
             logger.warning("BufferedTickWriter is closed, ignoring add() call")
             return
 
+        # Measure write latency (time to buffer)
+        start_time = time.perf_counter()
         self._buffer.append(event)
+        latency_ms = (time.perf_counter() - start_time) * 1000.0
+
+        # Record metrics (non-blocking)
+        try:
+            record_tick_write_latency_ms(latency_ms)
+            set_tick_buffer_size(len(self._buffer))
+        except Exception:
+            # Don't let metrics errors break the critical path
+            pass
 
         # Check if we should flush based on size
         if len(self._buffer) >= self._batch_size:
@@ -95,21 +116,47 @@ class BufferedTickWriter:
         if not self._buffer:
             return
 
+        # Measure flush latency
+        start_time = time.perf_counter()
+
         # Copy buffer and clear immediately (non-blocking)
         ticks_to_flush = self._buffer.copy()
         self._buffer.clear()
         self._last_flush_time = time.monotonic()
 
+        # Update buffer size metric
+        try:
+            set_tick_buffer_size(len(self._buffer))
+        except Exception:
+            pass
+
         # Convert MarketDataEvent → database format
         try:
             db_ticks = [_convert_event_to_db_format(event) for event in ticks_to_flush]
             count = await self._repository.bulk_create_ticks(db_ticks)
+            latency_ms = (time.perf_counter() - start_time) * 1000.0
+
+            # Record successful flush metrics
+            try:
+                record_tick_flush(count=count, latency_ms=latency_ms)
+            except Exception:
+                pass
+
             logger.debug(
                 "Flushed {count} ticks to database (buffer_size={buffer_size})",
                 count=count,
                 buffer_size=len(ticks_to_flush),
             )
         except Exception as e:
+            latency_ms = (time.perf_counter() - start_time) * 1000.0
+            error_class = _classify_db_error(e)
+
+            # Record error metrics
+            try:
+                increment_tick_flush_errors(error_class)
+            except Exception:
+                pass
+
             logger.exception(
                 "Error flushing ticks to database: {error}",
                 error=str(e),
@@ -163,6 +210,46 @@ class BufferedTickWriter:
                 error=str(e),
                 error_type=type(e).__name__,
             )
+
+
+def _classify_db_error(error: Exception) -> str:
+    """Classify database error as retryable or fatal.
+
+    Per observability.mdc §3: Errors must be classified.
+
+    Args:
+        error: Exception to classify
+
+    Returns:
+        Error classification ("retryable", "fatal", or "unknown")
+    """
+    error_type = type(error).__name__
+    error_msg = str(error).lower()
+
+    # Network/connection errors are retryable
+    if (
+        "Connection" in error_type
+        or "Timeout" in error_type
+        or "network" in error_msg
+        or "connection" in error_msg
+        or "timeout" in error_msg
+    ):
+        return "retryable"
+
+    # SQLAlchemy operational errors (connection issues) are retryable
+    if "OperationalError" in error_type or "InterfaceError" in error_type:
+        return "retryable"
+
+    # Constraint violations are fatal (data issue, won't succeed on retry)
+    if "IntegrityError" in error_type or "constraint" in error_msg:
+        return "fatal"
+
+    # Programming errors (SQL syntax) are fatal
+    if "ProgrammingError" in error_type:
+        return "fatal"
+
+    # Default to unknown for unclassified errors
+    return "unknown"
 
 
 def _convert_event_to_db_format(event: MarketDataEvent) -> dict[str, Any]:
