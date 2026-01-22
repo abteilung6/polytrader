@@ -8,7 +8,11 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from polytrader.db.tick_writer import BufferedTickWriter, _convert_event_to_db_format
+from polytrader.db.tick_writer import (
+    BufferedTickWriter,
+    TickDbFields,
+    _convert_event_to_db_format,
+)
 from polytrader.events.types import EventSource, MarketDataEvent
 
 
@@ -45,22 +49,24 @@ class TestConvertEventToDbFormat:
         """Test that event is converted correctly."""
         result = _convert_event_to_db_format(sample_event)
 
-        assert result["tick_id"] == UUID(sample_event.event_id)
-        assert result["market_slug"] == "btc-updown-15m"
-        assert result["outcome"] == "UP"
-        assert result["best_bid"] == Decimal("0.45")
-        assert result["best_ask"] == Decimal("0.50")
-        assert result["mid"] == Decimal("0.475")  # (0.45 + 0.50) / 2
-        assert result["spread"] == Decimal("0.05")  # 0.50 - 0.45
-        assert result["spread_bps"] == Decimal("500.00")  # 0.05 * 10000
-        assert result["run_id"] == "test-run"
+        assert isinstance(result, TickDbFields)
+        assert result.tick_id == UUID(sample_event.event_id)
+        assert result.market_slug == "btc-updown-15m"
+        assert result.outcome == "UP"
+        assert result.ts_mono == 12345.678
+        assert result.run_id == "test-run"
+        assert result.best_bid == Decimal("0.45")
+        assert result.best_ask == Decimal("0.50")
+        assert result.mid == Decimal("0.475")  # (0.45 + 0.50) / 2
+        assert result.spread == Decimal("0.05")  # 0.50 - 0.45
+        assert result.spread_bps == Decimal("500.00")  # 0.05 * 10000
 
     def test_converts_iso_timestamp(self, sample_event: MarketDataEvent) -> None:
         """Test that ISO timestamp is parsed correctly."""
         from datetime import datetime
 
         result = _convert_event_to_db_format(sample_event)
-        ts_wall = result["ts_wall"]
+        ts_wall = result.ts_wall
         assert isinstance(ts_wall, datetime)
         assert ts_wall.tzinfo is not None
 
@@ -76,10 +82,10 @@ class TestConvertEventToDbFormat:
             best_ask=0.0,
         )
         result = _convert_event_to_db_format(event)
-        assert result["best_bid"] == Decimal("0")
-        assert result["best_ask"] == Decimal("0")
-        assert result["mid"] == Decimal("0")
-        assert result["spread"] == Decimal("0")
+        assert result.best_bid == Decimal("0")
+        assert result.best_ask == Decimal("0")
+        assert result.mid == Decimal("0")
+        assert result.spread == Decimal("0")
 
 
 class TestBufferedTickWriter:

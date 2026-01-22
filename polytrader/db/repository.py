@@ -6,7 +6,7 @@ Per architecture.mdc: Database operations are separated from business logic.
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 from uuid import UUID
 
 from sqlalchemy import and_, desc, select
@@ -14,6 +14,9 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from polytrader.db.models import EventRecord, MarketTickRecord
+
+if TYPE_CHECKING:
+    pass
 
 
 class EventRepository:
@@ -361,27 +364,33 @@ class MarketTickRepository:
                 - event_id: UUID | None
                 - run_id: str
 
+                Note: This accepts dict for SQLAlchemy compatibility.
+                Use TickDbFields.model_dump() to convert typed models to dict.
+
         Returns:
             Number of ticks actually inserted (duplicates are ignored)
 
         Example:
+            >>> from polytrader.db.tick_writer import TickDbFields
+            >>> from datetime import UTC, datetime
             >>> ticks = [
-            ...     {
-            ...         "tick_id": UUID("..."),
-            ...         "ts_wall": datetime.now(UTC),
-            ...         "ts_mono": 12345.678,
-            ...         "market_slug": "btc-updown-15m",
-            ...         "outcome": "UP",
-            ...         "best_bid": Decimal("0.45"),
-            ...         "best_ask": Decimal("0.50"),
-            ...         "mid": Decimal("0.475"),
-            ...         "spread": Decimal("0.05"),
-            ...         "spread_bps": Decimal("500.00"),
-            ...         "event_id": None,
-            ...         "run_id": "run-456",
-            ...     },
+            ...     TickDbFields(
+            ...         tick_id=UUID("..."),
+            ...         ts_wall=datetime.now(UTC),
+            ...         ts_mono=12345.678,
+            ...         market_slug="btc-updown-15m",
+            ...         outcome="UP",
+            ...         best_bid=Decimal("0.45"),
+            ...         best_ask=Decimal("0.50"),
+            ...         mid=Decimal("0.475"),
+            ...         spread=Decimal("0.05"),
+            ...         spread_bps=Decimal("500.00"),
+            ...         event_id=None,
+            ...         run_id="run-456",
+            ...     ),
             ... ]
-            >>> count = await repo.bulk_create_ticks(ticks)
+            >>> ticks_dicts = [tick.model_dump() for tick in ticks]
+            >>> count = await repo.bulk_create_ticks(ticks_dicts)
             >>> assert count >= 0
         """
         if not ticks:

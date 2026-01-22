@@ -11,8 +11,10 @@ import asyncio
 import time
 from datetime import datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from polytrader.events.types import MarketDataEvent
 from polytrader.logging_config import logger
@@ -133,7 +135,9 @@ class BufferedTickWriter:
         # Convert MarketDataEvent → database format
         try:
             db_ticks = [_convert_event_to_db_format(event) for event in ticks_to_flush]
-            count = await self._repository.bulk_create_ticks(db_ticks)
+            # Convert TickDbFields to dict for SQLAlchemy (use model_dump())
+            db_ticks_dicts = [tick.model_dump() for tick in db_ticks]
+            count = await self._repository.bulk_create_ticks(db_ticks_dicts)
             latency_ms = (time.perf_counter() - start_time) * 1000.0
 
             # Record successful flush metrics
@@ -252,19 +256,50 @@ def _classify_db_error(error: Exception) -> str:
     return "unknown"
 
 
-def _convert_event_to_db_format(event: MarketDataEvent) -> dict[str, Any]:
+class TickDbFields(BaseModel):
+    """Pydantic model for serialized tick fields ready for database insertion.
+
+    This model provides:
+    - Type-safe field definitions matching MarketTickRepository.bulk_create_ticks()
+    - Automatic validation of field types
+    - Clean serialization via model_dump() for **kwargs unpacking
+    - Immutability (frozen) for data integrity
+
+    Per architecture.mdc: Use typed models, not dicts across boundaries.
+    """
+
+    model_config = ConfigDict(frozen=True, strict=True)
+
+    tick_id: UUID = Field(description="Unique tick identifier")
+    ts_wall: datetime = Field(description="Wall-clock time (UTC)")
+    ts_mono: float = Field(ge=0, description="Monotonic timestamp for ordering")
+    market_slug: str = Field(description="Polymarket market identifier")
+    outcome: str = Field(description="Market outcome (UP or DOWN)")
+    best_bid: Decimal = Field(description="Best bid price (0-1 range)")
+    best_ask: Decimal = Field(description="Best ask price (0-1 range)")
+    mid: Decimal = Field(description="Mid-market price")
+    spread: Decimal = Field(description="Bid-ask spread")
+    spread_bps: Decimal = Field(description="Spread in basis points")
+    event_id: UUID | None = Field(default=None, description="Reference to events.event_id")
+    run_id: str = Field(description="Process run ID")
+
+
+def _convert_event_to_db_format(event: MarketDataEvent) -> TickDbFields:
     """Convert MarketDataEvent to database row format.
 
     Args:
         event: MarketDataEvent to convert
 
     Returns:
-        Dictionary with database column names and values
+        TickDbFields model ready for database insertion.
+        Use .model_dump() to convert to dict for SQLAlchemy.
 
     Note:
         - Converts float prices to Decimal for NUMERIC columns
         - Computes mid, spread, spread_bps from best_bid/best_ask
         - Parses ISO timestamp string to datetime
+
+    Per architecture: Use typed models, not dicts across boundaries.
     """
     # Parse ISO timestamp string to datetime
     ts_wall = datetime.fromisoformat(event.ts_wall.replace("Z", "+00:00"))
@@ -278,17 +313,17 @@ def _convert_event_to_db_format(event: MarketDataEvent) -> dict[str, Any]:
     spread = best_ask - best_bid
     spread_bps = spread * Decimal("10000")
 
-    return {
-        "tick_id": UUID(event.event_id),
-        "ts_wall": ts_wall,
-        "ts_mono": event.ts_mono,
-        "market_slug": event.market_slug,
-        "outcome": event.outcome,  # Outcome is already a string (Literal["UP", "DOWN"])
-        "best_bid": best_bid,
-        "best_ask": best_ask,
-        "mid": mid,
-        "spread": spread,
-        "spread_bps": spread_bps,
-        "event_id": UUID(event.event_id),  # Reference to events table
-        "run_id": event.run_id,
-    }
+    return TickDbFields(
+        tick_id=UUID(event.event_id),
+        ts_wall=ts_wall,
+        ts_mono=event.ts_mono,
+        market_slug=event.market_slug,
+        outcome=event.outcome,  # Outcome is already a string (Literal["UP", "DOWN"])
+        best_bid=best_bid,
+        best_ask=best_ask,
+        mid=mid,
+        spread=spread,
+        spread_bps=spread_bps,
+        event_id=UUID(event.event_id),  # Reference to events table
+        run_id=event.run_id,
+    )
