@@ -53,6 +53,8 @@ class ExecutionRouter:
         adapter: IVenueAdapter,
         tactics: ExecutionTactics | None = None,
         execution_control: "ExecutionControl | None" = None,
+        active_strategies: set[str] | None = None,
+        is_paper_mode: bool = True,
     ) -> None:
         """Initialize execution router.
 
@@ -61,6 +63,8 @@ class ExecutionRouter:
             adapter: Venue adapter for order submission (implements IVenueAdapter)
             tactics: Execution tactics engine (defaults to new instance)
             execution_control: Execution control for checking execution_enabled (optional)
+            active_strategies: Set of active strategy IDs for live trading (optional)
+            is_paper_mode: Whether system is in paper mode (default: True)
         """
         from polytrader.execution.tactics import ExecutionTactics
 
@@ -68,6 +72,8 @@ class ExecutionRouter:
         self._adapter = adapter
         self._tactics = tactics or ExecutionTactics()
         self._execution_control = execution_control
+        self._active_strategies = active_strategies or set()
+        self._is_paper_mode = is_paper_mode
         self._running = False
 
     def get_adapter(self) -> IVenueAdapter:
@@ -180,6 +186,40 @@ class ExecutionRouter:
             )
             await self._bus.publish(ORDER_REJECTS, reject_event)
             return
+
+        # Check strategy activation (backstop - should not reach here if Risk works)
+        # Paper mode: always allow (skip check)
+        if not self._is_paper_mode:
+            strategy_id = command.intent.strategy_id
+            if strategy_id not in self._active_strategies:
+                bind_correlation_context(
+                    logger,
+                    correlation_id=command.correlation_id,
+                    order_id=command.order_id,
+                    client_order_id=command.client_order_id,
+                    market_slug=command.intent.market_slug,
+                    outcome=command.intent.outcome,
+                    side=command.intent.side,
+                    strategy_id=strategy_id,
+                    event_type="StrategyNotActive",
+                    error_class="system",
+                ).warning(
+                    "Order submission rejected: strategy not active for live trading",
+                    strategy_id=strategy_id,
+                )
+
+                # Emit OrderRejectedEvent
+                from polytrader.events import ORDER_REJECTS
+                from polytrader.events.types import OrderRejectedEvent
+
+                reject_event = OrderRejectedEvent(
+                    order_id=command.order_id,
+                    venue_order_id=None,
+                    reason="Strategy not active for live trading",
+                    correlation_id=command.correlation_id,
+                )
+                await self._bus.publish(ORDER_REJECTS, reject_event)
+                return
 
         try:
             # Emit ExecutionRequestEvent
