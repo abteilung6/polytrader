@@ -27,16 +27,12 @@ from polytrader.supervisor.system import SystemSupervisor
 
 @pytest.fixture
 async def supervisor_with_sink(
-    postgres_test_url: str,
-    monkeypatch: pytest.MonkeyPatch,
+    postgres_test_url: str, postgres_db: None, monkeypatch: pytest.MonkeyPatch
 ) -> AsyncGenerator[SystemSupervisor, None]:
     """Create SystemSupervisor with EventSink for testing."""
     from urllib.parse import urlparse
 
-    from polytrader.db.migrations import run_migrations
-
-    # Ensure migrations are run
-    await run_migrations(postgres_test_url)
+    # Migrations are run by postgres_db fixture
 
     # Parse database URL and set environment variables for get_database_url()
     parsed = urlparse(postgres_test_url)

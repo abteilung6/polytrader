@@ -24,7 +24,9 @@ from polytrader.db.repository import MarketTickRepository
 
 
 @pytest.fixture
-async def db_session(postgres_test_url: str) -> AsyncGenerator[AsyncSession, None]:
+async def db_session(
+    postgres_test_url: str, postgres_db: None
+) -> AsyncGenerator[AsyncSession, None]:
     """Create database session for testing."""
     from sqlalchemy import text
 
@@ -36,10 +38,7 @@ async def db_session(postgres_test_url: str) -> AsyncGenerator[AsyncSession, Non
     engine: AsyncEngine = create_async_engine(sqlalchemy_url, echo=False)
     Session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
-    # Ensure migrations are run before truncating
-    from polytrader.db.migrations import run_migrations
-
-    await run_migrations(postgres_test_url)
+    # Migrations are run by postgres_db fixture
 
     async with Session() as session:
         # Truncate market_ticks table for clean state (if it exists)

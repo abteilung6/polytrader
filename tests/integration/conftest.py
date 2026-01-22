@@ -212,13 +212,60 @@ async def postgres_db(
     # Run migrations first (idempotent - Alembic handles this)
     from polytrader.db.migrations import run_migrations
 
+    # Check if database is in inconsistent state (tables exist but alembic_version is empty)
+    async with postgres_connection.cursor() as cur:
+        await cur.execute("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables
+                WHERE table_schema = 'public' AND table_name = 'alembic_version'
+            )
+        """)
+        row = await cur.fetchone()
+        assert row is not None
+        alembic_exists = row[0]
+
+        if alembic_exists:
+            await cur.execute("SELECT COUNT(*) FROM alembic_version")
+            row = await cur.fetchone()
+            assert row is not None
+            alembic_count = row[0]
+        else:
+            alembic_count = 0
+
+        await cur.execute("""
+            SELECT COUNT(*) FROM information_schema.tables
+            WHERE table_schema = 'public'
+                AND table_name != 'alembic_version'
+        """)
+        row = await cur.fetchone()
+        assert row is not None
+        other_tables_count = row[0]
+
+    # If tables exist but alembic_version is empty, drop all tables to start fresh
+    # This handles inconsistent database state from previous test runs
+    if other_tables_count > 0 and alembic_count == 0:
+        async with postgres_connection.cursor() as cur:
+            await cur.execute("""
+                SELECT tablename FROM pg_tables
+                WHERE schemaname = 'public'
+                    AND tablename != 'alembic_version'
+            """)
+            tables_to_drop = [row[0] for row in await cur.fetchall()]
+            if tables_to_drop:
+                # Drop tables in reverse dependency order (CASCADE handles most cases)
+                for table in tables_to_drop:
+                    await cur.execute(f'DROP TABLE IF EXISTS "{table}" CASCADE')
+                await postgres_connection.commit()
+
     await run_migrations(postgres_test_url)
 
     # Truncate all tables before test (if any exist)
+    # Exclude alembic_version (Alembic's migration tracking table)
     async with postgres_connection.cursor() as cur:
         await cur.execute("""
             SELECT tablename FROM pg_tables
             WHERE schemaname = 'public'
+                AND tablename != 'alembic_version'
         """)
         tables = [row[0] for row in await cur.fetchall()]
 
@@ -227,17 +274,69 @@ async def postgres_db(
             await cur.execute("TRUNCATE TABLE {} CASCADE".format(", ".join(tables)))
             await postgres_connection.commit()
 
+    # Re-insert initial execution_control row if it was truncated
+    # (migration creates it, but truncation removes it)
+    async with postgres_connection.cursor() as cur:
+        await cur.execute("""
+            SELECT COUNT(*) FROM execution_control WHERE id = 1
+        """)
+        row = await cur.fetchone()
+        assert row is not None
+        count = row[0]
+        if count == 0:
+            await cur.execute("""
+                INSERT INTO execution_control (
+                    id, execution_enabled, updated_by, reason, version
+                )
+                VALUES (1, false, 'system', 'Initial state: execution disabled by default', 1)
+                ON CONFLICT (id) DO NOTHING
+            """)
+            await postgres_connection.commit()
+
     yield
 
     # Cleanup: truncate all tables after test (get fresh list in case new tables were created)
-    async with postgres_connection.cursor() as cur:
-        await cur.execute("""
-            SELECT tablename FROM pg_tables
-            WHERE schemaname = 'public'
-        """)
-        tables_after = [row[0] for row in await cur.fetchall()]
+    # Exclude alembic_version (Alembic's migration tracking table)
+    # Rollback any failed transaction first
+    try:
+        await postgres_connection.rollback()
+    except Exception:
+        pass  # Ignore if no transaction to rollback
 
-    if tables_after:
+    try:
         async with postgres_connection.cursor() as cur:
-            await cur.execute("TRUNCATE TABLE {} CASCADE".format(", ".join(tables_after)))
-            await postgres_connection.commit()
+            await cur.execute("""
+                SELECT tablename FROM pg_tables
+                WHERE schemaname = 'public'
+                    AND tablename != 'alembic_version'
+            """)
+            tables_after = [row[0] for row in await cur.fetchall()]
+
+        if tables_after:
+            async with postgres_connection.cursor() as cur:
+                await cur.execute("TRUNCATE TABLE {} CASCADE".format(", ".join(tables_after)))
+                await postgres_connection.commit()
+
+        # Re-insert initial execution_control row if it was truncated
+        async with postgres_connection.cursor() as cur:
+            await cur.execute("""
+                SELECT COUNT(*) FROM execution_control WHERE id = 1
+            """)
+            row = await cur.fetchone()
+            assert row is not None
+            count = row[0]
+            if count == 0:
+                await cur.execute("""
+                    INSERT INTO execution_control (
+                        id, execution_enabled, updated_by, reason, version
+                    )
+                    VALUES (1, false, 'system', 'Initial state: execution disabled by default', 1)
+                    ON CONFLICT (id) DO NOTHING
+                """)
+                await postgres_connection.commit()
+    except Exception:
+        # If cleanup fails, rollback and continue (test may have left transaction in bad state)
+        try:
+            await postgres_connection.rollback()
+        except Exception:
+            pass

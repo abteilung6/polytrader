@@ -19,16 +19,11 @@ from polytrader.events.types import (
 
 
 @pytest.fixture
-async def event_sink(
-    postgres_test_url: str,
-) -> AsyncGenerator[EventSink, None]:
+async def event_sink(postgres_test_url: str, postgres_db: None) -> AsyncGenerator[EventSink, None]:
     """Create EventSink for testing."""
     from sqlalchemy import text
 
-    from polytrader.db.migrations import run_migrations
-
-    # Ensure migrations are run
-    await run_migrations(postgres_test_url)
+    # Migrations are run by postgres_db fixture
 
     # Create event bus and store
     store = PostgreSQLEventStore(connection_url=postgres_test_url, pool_size=5)
@@ -147,13 +142,9 @@ async def test_event_sink_subscribes_to_all_topics(event_sink: EventSink) -> Non
 
 @pytest.mark.asyncio
 async def test_event_sink_handles_database_errors_gracefully(
-    postgres_test_url: str,
+    postgres_test_url: str, postgres_db: None
 ) -> None:
     """Test that EventSink handles database errors gracefully."""
-    from polytrader.db.migrations import run_migrations
-
-    # Ensure migrations are run
-    await run_migrations(postgres_test_url)
 
     # Create store
     store = PostgreSQLEventStore(connection_url=postgres_test_url, pool_size=5)
@@ -206,11 +197,8 @@ async def test_event_sink_handles_database_errors_gracefully(
 
 
 @pytest.mark.asyncio
-async def test_event_sink_circuit_breaker(postgres_test_url: str) -> None:
+async def test_event_sink_circuit_breaker(postgres_test_url: str, postgres_db: None) -> None:
     """Test that EventSink circuit breaker opens after failures."""
-    from polytrader.db.migrations import run_migrations
-
-    await run_migrations(postgres_test_url)
 
     # Create a store that will fail (invalid connection)
     invalid_store = PostgreSQLEventStore(

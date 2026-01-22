@@ -19,15 +19,11 @@ from polytrader.events.types import (
 
 @pytest.fixture
 async def postgres_store(
-    postgres_test_url: str,
+    postgres_test_url: str, postgres_db: None
 ) -> AsyncGenerator[PostgreSQLEventStore, None]:
     """Create PostgreSQL event store for testing."""
-    # Ensure migrations are run first
+    # Migrations are run by postgres_db fixture
     from sqlalchemy import text
-
-    from polytrader.db.migrations import run_migrations
-
-    await run_migrations(postgres_test_url)
 
     store = PostgreSQLEventStore(connection_url=postgres_test_url, pool_size=5)
     await store.initialize()
@@ -318,15 +314,14 @@ async def test_postgres_store_event_source_enum(
 
 @pytest.mark.asyncio
 async def test_postgres_store_initialize_raises_if_table_missing(
-    postgres_test_url: str,
+    postgres_test_url: str, postgres_db: None
 ) -> None:
     """Test that initialize() raises if events table doesn't exist."""
     from psycopg import AsyncConnection
 
     from polytrader.db.migrations import run_migrations
 
-    # Ensure migrations are run first (so table exists initially)
-    await run_migrations(postgres_test_url)
+    # Migrations are run by postgres_db fixture (table exists initially)
 
     # Drop the events table temporarily
     async with await AsyncConnection.connect(postgres_test_url) as conn:

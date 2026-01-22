@@ -12,17 +12,17 @@ from uuid import UUID
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from polytrader.db.migrations import run_migrations
 from polytrader.db.repository import EventRepository
 
 
 @pytest.fixture
-async def db_session(postgres_test_url: str) -> AsyncGenerator[AsyncSession, None]:
+async def db_session(
+    postgres_test_url: str, postgres_db: None
+) -> AsyncGenerator[AsyncSession, None]:
     """Provide SQLAlchemy session for CRUD tests."""
     from sqlalchemy import text
 
-    # Ensure migrations are run
-    await run_migrations(postgres_test_url)
+    # Migrations are run by postgres_db fixture
 
     # Convert URL to SQLAlchemy async format (postgresql+psycopg://)
     sqlalchemy_url = postgres_test_url
