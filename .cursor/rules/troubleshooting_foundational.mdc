@@ -1,0 +1,303 @@
+---
+alwaysApply: true
+---
+
+# Troubleshooting Guide — Foundational Principles & Agentic Protocol
+
+This guide defines **how humans and agents diagnose, reason about, and resolve issues** in a production-grade trading platform.
+
+The intent is not only to fix problems, but to **preserve system invariants**, **avoid hidden risk**, and **produce learning artifacts**.
+
+This document is **binding** for agents operating in this repository.
+
+---
+
+## 0. First Principles
+
+All troubleshooting MUST preserve the following invariants:
+
+* **Default-safe behavior** (no trading unless explicitly healthy)
+* **Determinism** (replayable, explainable outcomes)
+* **Isolation of concerns** (no cross-layer leakage)
+* **Auditability** (events > logs > metrics)
+
+If a proposed fix violates any of these, it MUST be rejected.
+
+---
+
+## 1. Agentic Troubleshooting Protocol (ATP)
+
+Whenever an agent encounters uncertainty, failure, or ambiguity, it MUST follow this protocol.
+
+### 1.1 Understand Phase (Mandatory)
+
+The agent MUST explicitly state:
+
+1. **Observed symptoms** (what is failing, where, how often)
+2. **System layer** involved (MDP, Strategy, Risk, OMS, Execution, Post-Trade, Control Plane)
+3. **Failure mode classification**:
+   * Logic error
+   * State divergence
+   * Contract violation
+   * Data freshness / staleness
+   * Infrastructure / dependency
+
+If any of the above is unclear → STOP.
+
+---
+
+### 1.2 Hypothesis Phase
+
+The agent MUST enumerate:
+
+* Primary hypothesis (most likely cause)
+* Secondary hypotheses (plausible alternatives)
+* Evidence supporting each hypothesis
+* Evidence that would falsify each hypothesis
+
+⚠️ Agents MUST NOT jump directly to implementation.
+
+---
+
+### 1.3 Safety Gate (Hard Stop)
+
+The agent MUST STOP and request confirmation if:
+
+* The change affects **Risk**, **OMS**, or **Execution**
+* The fix alters **event semantics**
+* The fix changes **state ownership**
+* The fix cannot be covered by deterministic tests
+
+No exceptions.
+
+---
+
+### 1.4 Resolution Phase
+
+Only after approval:
+
+* Apply the **minimal fix**
+* Prefer **structural correctness** over speed
+* Avoid tactical hacks (flags, sleeps, retries) unless explicitly approved
+
+---
+
+### 1.5 Verification Phase
+
+Every fix MUST include:
+
+* Reproduction before fix
+* Proof of fix (tests, replay, metrics)
+* Regression coverage if applicable
+
+---
+
+## 2. Stop-Work Triggers (Non-Negotiable)
+
+Immediately STOP if:
+
+* Same failure occurs **3 times consecutively**
+* Root cause cannot be articulated clearly
+* Multiple fixes appear equivalent but with different risk profiles
+* You are unsure which layer owns the state
+* The fix feels "clever" rather than correct
+
+Escalate with hypotheses and evidence.
+
+---
+
+## 3. Layer-Specific Troubleshooting
+
+### 3.1 Strategy / Alpha Layer
+
+Allowed:
+
+* Pure signal computation
+* Feature engineering
+* Deterministic decision logic
+
+Forbidden:
+
+* Venue calls
+* Order state mutation
+* Risk checks
+
+**Common Failures**:
+
+* Non-deterministic signals
+* Hidden state in strategy objects
+* Time leakage
+
+**Action**:
+
+* Add deterministic tests
+* Verify replay behavior
+* Ensure inputs are event-driven
+
+---
+
+### 3.2 Risk Layer
+
+Risk is a **hard gate**, never advisory.
+
+Failures here are **SEV-0**.
+
+**Common Failures**:
+
+* Missing risk events
+* Implicit allow behavior
+* Incorrect aggregation
+
+**Action**:
+
+* Add explicit deny paths
+* Emit structured RiskDecision events
+* Require tests per risk rule
+
+---
+
+### 3.3 OMS Layer
+
+OMS is the **sole owner of order state**.
+
+**Common Failures**:
+
+* State divergence vs venue
+* Missing reconciliation
+* Illegal state transitions
+
+**Action**:
+
+* Validate state machine transitions
+* Compare internal vs external state
+* Trigger reconciliation workflows
+
+---
+
+### 3.4 Execution Layer
+
+Execution MUST be stateless and idempotent.
+
+**Common Failures**:
+
+* Duplicate sends
+* Partial fills not propagated
+* Venue timeouts
+
+**Action**:
+
+* Enforce idempotency keys
+* Emit execution events for every action
+* Never mutate OMS state directly
+
+---
+
+## 4. Events First Debugging
+
+### 4.1 Debug Order (Strict)
+
+1. Events (source of truth)
+2. State projections
+3. Logs
+4. Metrics
+
+Skipping events is an anti-pattern.
+
+---
+
+### 4.2 Correlation Discipline
+
+Every investigation MUST:
+
+* Identify `correlation_id`
+* Trace across components
+* Verify causal ordering
+
+If correlation is missing → architecture violation.
+
+---
+
+## 5. Testing as a Debugging Tool
+
+Tests are not validation; they are **diagnostics**.
+
+### Required Test Types
+
+* Unit: local invariants
+* Integration: cross-layer contracts
+* Replay tests: determinism
+* Property tests (where applicable)
+
+If a bug cannot be expressed as a test, it is not understood.
+
+---
+
+## 6. Infrastructure & Environment
+
+### Database Issues
+
+Golden rule:
+
+> Production reads must never disturb the control plane.
+
+**Action**:
+
+* Verify append-only behavior
+* Separate runtime state from analytical reads
+
+---
+
+## 7. Anti-Patterns (Immediate Rejection)
+
+❌ Adding sleeps or retries without causality  
+❌ Fixing symptoms instead of invariants  
+❌ Cross-layer shortcuts  
+❌ Silent failure handling  
+❌ Feature flags to mask broken logic  
+
+---
+
+## 8. Knowledge Capture (Mandatory)
+
+Every resolved incident SHOULD produce one of:
+
+* Test case
+* ADR
+* Runbook update
+* Rule clarification
+
+Uncaptured knowledge is considered lost.
+
+---
+
+## 9. Agent Quality Bar
+
+An agent is considered **high-tier** only if it:
+
+* Explains failures clearly
+* Chooses safety over speed
+* Produces artifacts (tests/docs)
+* Refuses unsafe changes
+* Improves the system beyond the immediate fix
+
+---
+
+## 10. Final Reminder
+
+> If you are unsure, STOP.  
+> If you are confident but cannot prove it, STOP.  
+> If the fix reduces observability, STOP.
+
+Trading systems reward correctness — not cleverness.
+
+---
+
+## 11. Integration with Technical Troubleshooting
+
+This foundational guide establishes **principles and protocols**. For specific technical issues, commands, and solutions, see:
+
+- **`troubleshooting_technical.md`** → Make commands, error messages, database issues, code quality
+- **`environment.md`** → Environment setup and configuration
+- **`testing-guidelines.md`** → Test writing patterns and requirements
+
+The foundational protocol (ATP) applies to ALL troubleshooting, regardless of the technical domain.

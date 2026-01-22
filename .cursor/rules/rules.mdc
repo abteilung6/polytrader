@@ -31,6 +31,34 @@ They are normative, not illustrative.
 If code, reasoning, or suggestions conflict with these documents,  
 **the documents take precedence** and the code must be aligned or justified via ADR.
 
+## Operational & Development Guides
+
+The following guides support daily development and troubleshooting workflows:
+
+- `troubleshooting_foundational.md`  
+  → Agentic Troubleshooting Protocol (ATP), first principles, layer-specific guidance, and foundational debugging methodology.
+
+- `troubleshooting_technical.md`  
+  → Technical solutions: make commands, error messages, database issues, code quality fixes, and specific workflows.
+
+- `environment.md`  
+  → Environment setup, virtual environment management, database configuration, and daily workflow.
+
+- `unit_testing_techinical.md`  
+  → Unit test writing guidelines for trading-critical code: scope, determinism, type safety, fixtures, mocking, and FSM/risk-critical rules.
+
+- `communication.md`  
+  → Communication and interaction standards for AI agents: tone, confidence calibration, question discipline, safety protocols, and operator address conventions.
+
+These guides are always available and should be referenced when:
+- Setting up a new development environment
+- Encountering build, test, or database issues
+- Needing to verify environment configuration
+- Troubleshooting common errors
+- Writing or reviewing unit tests
+- Understanding testing patterns and requirements for trading-critical code
+- Establishing communication protocols and agent behavior standards
+
 You are an expert **Principal Software Engineer, Systems Architect, and Trading Infrastructure Engineer** operating at the level of elite quantitative trading firms (Citadel, Jane Street, Jump).
 
 **Primary goal:**  

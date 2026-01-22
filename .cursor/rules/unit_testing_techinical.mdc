@@ -1,0 +1,329 @@
+---
+
+description: Unit test writing guidelines for polytrader trading system
+globs: tests/unit/test_*.py
+alwaysApply: true
+-----------------
+
+# Unit Testing Guidelines — Polytrader Trading System (Institutional Standard)
+
+Unit tests in Polytrader are **risk controls**, not developer conveniences.
+They encode **contracts, invariants, and failure boundaries** for trading‑critical logic.
+
+Any trading‑critical code without unit tests is considered **architecturally incomplete**.
+
+**Authoritative references**:
+
+* `testing.mdc` — testing contract, CI gates, replay policy
+* `flow.md` — canonical trading pipeline
+* `architecture.mdc` — ownership & boundaries
+
+---
+
+## 0. Scope (Strict)
+
+This document governs **UNIT TESTS ONLY**.
+
+Unit tests MUST be:
+
+* deterministic
+* fast
+* isolated
+* free of external I/O
+
+### Forbidden in unit tests
+
+❌ PostgreSQL / databases of any kind
+❌ Network calls
+❌ Real clocks or wall time
+❌ `sleep()` or retries
+❌ Cross‑component wiring
+
+Anything involving DBs, adapters, or multiple pipeline stages is **NOT a unit test** and MUST:
+
+* live under `tests/integration/` or `tests/replay/`
+* be marked with `@pytest.mark.integration` or `@pytest.mark.replay`
+
+---
+
+## 1. Test Planning (Mandatory)
+
+Before writing a unit test, explicitly identify:
+
+1. **Component under test**
+2. **Pipeline stage** (per `flow.md`)
+3. **Contract being asserted** (invariant, boundary, or rule)
+4. **Failure mode** being guarded against
+
+If you cannot articulate these, STOP.
+
+---
+
+## 2. Determinism Rules (Non‑Negotiable)
+
+### Time
+
+* Never call `time.time()`, `datetime.now()`, or equivalents
+* All time MUST be injected via a `Clock` interface
+
+```python
+class FixedClock(Clock):
+    def now(self) -> datetime:
+        return datetime(2024, 1, 1, tzinfo=UTC)
+```
+
+### Randomness
+
+* No randomness without a seeded RNG
+* Prefer fixed values over randomness
+
+### Concurrency
+
+* No reliance on scheduling order
+* No sleeps or polling
+
+---
+
+## 3. File & Naming Conventions
+
+### File structure
+
+* Unit tests live under `tests/unit/`
+* File names mirror source structure
+
+```
+polytrader/oms/fsm.py
+→ tests/unit/oms/test_fsm.py
+```
+
+### Test classes
+
+```python
+class TestOmsStateMachine:
+    """OMS FSM invariants and transitions."""
+```
+
+### Test functions
+
+Naming pattern:
+
+```
+test_<behavior>_<condition>_<expected_outcome>
+```
+
+Example:
+
+```python
+def test_transition_rejects_terminal_state(self) -> None:
+```
+
+---
+
+## 4. Type Safety (Mandatory)
+
+All tests MUST be fully typed.
+
+```python
+def test_risk_denies_excess_position(
+    risk_engine: RiskEngine,
+    intent: OrderIntentEvent,
+) -> None:
+```
+
+Rules:
+
+* No untyped test functions
+* No untyped fixtures
+* No `Any` unless justified
+* `# type: ignore` requires explanation
+
+Run and fix:
+
+```bash
+make type-check
+```
+
+---
+
+## 5. Fixtures & Factories
+
+### Factories (Preferred)
+
+All domain objects MUST be created via factories:
+
+```
+tests/factories/orders.py
+tests/factories/events.py
+```
+
+Factories MUST:
+
+* have deterministic defaults
+* require explicit overrides for risk/size/price fields
+
+```python
+def create_order(
+    state: OrderState = OrderState.NEW,
+    size: float = 1.0,
+) -> Order:
+```
+
+### Fixtures
+
+* Default scope: `function`
+* `session` scope only with justification
+* Autouse fixtures MUST be documented
+
+---
+
+## 6. Mocking Rules
+
+### What may be mocked
+
+✅ External dependencies
+✅ Interfaces at the boundary of the unit
+
+### What may NOT be mocked
+
+❌ The code under test
+❌ Internal helpers
+❌ Domain logic
+
+Patch **at point of use**, never at definition.
+
+---
+
+## 7. Assertions (Institutional Style)
+
+### Prefer domain‑level assertions
+
+```python
+assert result.allowed is False
+assert RiskReasonCode.MAX_POSITION in result.reasons
+```
+
+### Prefer events over internals
+
+```python
+events = capture.events()
+assert_event_emitted(
+    events,
+    RiskCheckEvent,
+    allowed=False,
+    reason=RiskReasonCode.MAX_POSITION,
+)
+```
+
+### Avoid
+
+❌ Asserting call order unless explicitly required
+❌ Asserting on private attributes
+
+---
+
+## 8. Parameterization
+
+Use `pytest.mark.parametrize` for boundary exploration.
+
+```python
+@pytest.mark.parametrize(
+    "state,allowed",
+    [
+        (OrderState.NEW, True),
+        (OrderState.FILLED, False),
+    ],
+)
+def test_terminal_states(state: OrderState, allowed: bool) -> None:
+    assert can_transition(state) is allowed
+```
+
+Use dataclasses for complex cases.
+
+---
+
+## 9. FSM & Risk‑Critical Rules
+
+### OMS FSM
+
+Unit tests MUST cover:
+
+* all valid transitions
+* all invalid transitions
+* idempotency
+* terminal state enforcement
+
+### Risk Engine
+
+Unit tests MUST cover:
+
+* hard veto behavior
+* reason codes
+* aggregation semantics (ANY deny ⇒ deny)
+
+A missing test here is a **SEV‑0 risk defect**.
+
+---
+
+## 10. Flaky Test Policy (Hard Rule)
+
+A flaky unit test is treated as a **production reliability issue**.
+
+Forbidden fixes:
+❌ sleeps
+❌ retries
+❌ weakened assertions
+
+Allowed actions:
+
+1. make deterministic
+2. quarantine with:
+
+   * marker
+   * owner
+   * issue link
+   * removal deadline
+
+---
+
+## 11. Agentic Workflow (Enforced)
+
+When a bug is found:
+
+1. Write the smallest failing unit test (RED)
+2. Apply minimal fix (GREEN)
+3. Refactor if needed
+4. Add regression coverage
+5. Capture knowledge (comment, ADR, or replay test)
+
+If a bug cannot be expressed as a unit test, it is **not yet understood**.
+
+---
+
+## 12. CI Expectations
+
+Unit tests MUST:
+
+* run in isolation
+* complete quickly
+* pass deterministically
+
+CI gates MAY reject tests that:
+
+* exceed time budgets
+* show nondeterminism
+* violate scope rules
+
+---
+
+## 13. Summary
+
+Unit tests are **contracts**.
+
+They protect:
+
+* capital
+* correctness
+* confidence
+
+If a test feels annoying to write, it is probably important.
+If a test feels clever, it is probably wrong.

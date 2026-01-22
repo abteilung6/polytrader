@@ -1,0 +1,276 @@
+---
+alwaysApply: true
+---
+
+# Troubleshooting Guide — Technical Issues & Solutions
+
+This guide provides **specific technical solutions** for common issues: make commands, error messages, database problems, and code quality issues.
+
+**Before using this guide:** Review `troubleshooting_foundational.md` for the **Agentic Troubleshooting Protocol (ATP)** and foundational principles that apply to all troubleshooting.
+
+---
+
+## When Stuck or Uncertain
+
+**⚠️ First:** Follow the **Agentic Troubleshooting Protocol (ATP)** in `troubleshooting_foundational.md`:
+- Understand Phase: Identify symptoms, system layer, failure mode
+- Hypothesis Phase: Enumerate hypotheses with evidence
+- Safety Gate: STOP if affecting Risk/OMS/Execution
+- Resolution Phase: Apply minimal fix
+- Verification Phase: Include tests and proof
+
+**Quick Reference:**
+- **State what you understand** the task to be (in your own words)
+- **Outline your proposed approach** with specific risks and tradeoffs
+- **Ask for confirmation** before proceeding with non-trivial changes
+- **Reference authoritative docs** (`flow.md`, `architecture.md`) when proposing architectural changes
+
+**Stop-Work Triggers:**
+- Same error occurs 3 times → STOP and ask for clarification
+- Change affects risk/OMS/execution without tests → STOP and request test requirements
+- Unclear which stage of the pipeline a change belongs to → STOP and clarify
+
+---
+
+## Common Issues & Solutions
+
+### Code Quality & Formatting
+
+| Situation | Action | Make Command |
+|-----------|--------|--------------|
+| Ruff linting errors | Check and fix linting issues | `make lint` |
+| Code formatting needed | Auto-format code with ruff | `make format` |
+| Type checking errors | Run mypy type checker | `make type-check` |
+| Pre-commit checks | Run all quality checks | `make lint && make type-check` |
+
+**Workflow:**
+```bash
+# After making changes, run:
+make format      # Auto-fix formatting
+make lint        # Check for remaining issues
+make type-check  # Verify types
+```
+
+### Testing Issues
+
+| Situation | Action | Make Command |
+|-----------|--------|--------------|
+| Unit tests failing | Run tests with verbose output | `make test` |
+| Integration tests failing | Run integration suite | `make test-integration` |
+| Test database not running | Start test database | `make test-db-up` |
+| Test database needs migration | Migrate test database | `make test-db-migrate` |
+| Test database cleanup | Stop test database | `make test-db-down` |
+
+**Debugging Tests:**
+```bash
+# Run specific test file
+pytest tests/path/to/test_file.py -v
+
+# Run with debug output
+pytest tests/ -v -s
+
+# Run single test
+pytest tests/path/to/test_file.py::test_function -v
+```
+
+### Database Issues
+
+| Situation | Action | Make Command |
+|-----------|--------|--------------|
+| Development DB not running | Start PostgreSQL container | `make db-up` |
+| Database connection errors | Check DB logs | `make db-logs` |
+| Database needs migration | Run Alembic migrations | `make db-migrate` |
+| Need to inspect database | Connect with psql | `make db-psql` |
+| Stop development database | Stop PostgreSQL container | `make db-down` |
+
+**Database Troubleshooting:**
+```bash
+# Check if database is running
+docker ps | grep polytrader-postgres
+
+# View database logs
+make db-logs
+
+# Connect and inspect
+make db-psql
+# Then: \dt (list tables), \d events (describe table), etc.
+```
+
+### Dependency & Environment Issues
+
+| Situation | Action | Make Command |
+|-----------|--------|--------------|
+| Missing dependencies | Install production deps | `make install` |
+| Missing dev tools | Install dev dependencies | `make install-dev` |
+| Virtual environment not activated | Activate venv | `source venv/bin/activate` |
+| Environment variables missing | Check `.env` file | See `environment.md` |
+
+### Build & CI Issues
+
+| Situation | Action | Notes |
+|-----------|--------|-------|
+| CI failures on existing code | Note the failure, ask if known issue | Don't fix unrelated failures |
+| Pre-merge validation | Run full check suite | `make lint && make type-check && make test` |
+| Migration conflicts | Check Alembic version history | `alembic history` |
+
+---
+
+## Common Error Messages & Solutions
+
+### Python & Type Errors
+
+| Error | Solution |
+|-------|----------|
+| `mypy` errors after editing | Add type hints; check `pyproject.toml` mypy config |
+| `ruff` formatting changes | Run `make format` |
+| Import errors | Check `PYTHONPATH`; ensure venv is activated |
+| Module not found | Run `make install-dev` to install dependencies |
+
+### Database Errors
+
+| Error | Solution |
+|-------|----------|
+| `Connection refused` | Run `make db-up` to start PostgreSQL |
+| `relation does not exist` | Run `make db-migrate` to create tables |
+| `database does not exist` | Check `.env` DB_DATABASE matches docker-compose |
+| Migration conflicts | Check `alembic/versions/` for conflicts; may need to resolve manually |
+
+### Trading System Errors
+
+| Error | Solution |
+|-------|----------|
+| `execution_enabled = false` | Check health gates; verify market data freshness |
+| `RiskCheckEvent` denied | Review risk limits and reason codes in logs |
+| `ReconcileEvent` divergence | Check venue vs internal state; may require manual intervention |
+| `CircuitBreakerEvent` triggered | Review circuit breaker logs; system disabled for safety |
+
+---
+
+## Architecture & Flow Compliance
+
+### When Proposing Changes
+
+**Before implementing, verify:**
+1. Which exact section of `flow.md` does this change belong to?
+2. Which upstream and downstream stages does it interact with?
+3. Which events are emitted as a result?
+4. How would this behave during replay or restart?
+
+**If unclear:** STOP and ask for clarification.
+
+### Boundary Violations (Forbidden)
+
+❌ Strategy/Alpha calling venue adapters  
+❌ Risk logic inside strategies  
+❌ OMS state mutated outside OMS module  
+❌ Business logic in adapters  
+
+**If you see these:** Flag as architecture violation and propose refactor.
+
+---
+
+## Debugging Workflow (Recommended)
+
+### 1. Reproduce the Issue
+```bash
+# Ensure clean state
+make db-up
+make db-migrate
+make test  # Verify baseline
+```
+
+### 2. Isolate the Problem
+- Check logs for correlation_ids
+- Review event store for recent events
+- Verify database state vs projections
+
+### 3. Fix & Verify
+```bash
+# Make changes
+make format
+make lint
+make type-check
+make test
+```
+
+### 4. Integration Check
+```bash
+# For integration changes
+make test-integration
+```
+
+---
+
+## Getting Help
+
+### When to Ask
+
+- **Unclear requirements** → Ask for clarification with specific questions
+- **Multiple valid approaches** → Present options with tradeoffs (safety, performance, complexity)
+- **Test failures you can't diagnose** → Share error output, relevant code, and what you've tried
+- **Unfamiliar code area** → Check `docs/` for ADRs or architecture notes
+- **Change seems risky** → Refer to `architecture.md` and `flow.md`; ask before proceeding
+- **Build/lint errors persist** → Share full error output and context
+
+### What to Include When Asking
+
+- **Error message** (full traceback if available)
+- **What you were trying to do**
+- **What you've already tried**
+- **Relevant code/files** (use code references)
+- **Environment info** (Python version, venv activated, DB running)
+
+---
+
+## Safety Reminders
+
+⚠️ **Trading System Critical Rules:**
+- Default safe state is **no trading** (`execution_enabled = false`)
+- Risk is a **hard gate** (never advisory)
+- OMS is the **sole owner** of order state
+- Every significant action must emit an **event**
+
+If a change affects these areas, **tests are mandatory**.
+
+---
+
+## Quick Reference: All Make Commands
+
+```bash
+# Dependencies
+make install          # Install production dependencies
+make install-dev      # Install dev dependencies (includes production)
+
+# Code Quality
+make lint             # Run ruff linting
+make format           # Auto-format with ruff
+make type-check       # Run mypy type checking
+
+# Testing
+make test             # Run unit tests (parallel)
+make test-integration # Run integration tests (parallel)
+
+# Development Database
+make db-up            # Start PostgreSQL container
+make db-down          # Stop PostgreSQL container
+make db-migrate       # Run Alembic migrations
+make db-logs          # View database logs
+make db-psql          # Connect to database with psql
+
+# Test Database
+make test-db-up       # Start test PostgreSQL container
+make test-db-down     # Stop test PostgreSQL container
+make test-db-migrate  # Run migrations on test database
+```
+
+---
+
+## Best Practices for Agents
+
+1. **Always run `make format`** after code changes
+2. **Run `make lint && make type-check`** before proposing changes
+3. **Run `make test`** for any code that affects trading logic
+4. **Check database state** with `make db-psql` when debugging data issues
+5. **Reference authoritative docs** (`flow.md`, `architecture.md`) when proposing architectural changes
+6. **Emit events** for all significant actions (see `observability.md`)
+7. **Write tests** for risk, OMS, and execution changes (see `testing.md`)

@@ -1,0 +1,403 @@
+---
+alwaysApply: true
+---
+
+# Environment Setup Guide — Polytrader Development
+
+This guide ensures consistent development environments for agents and developers working on the trading system.
+
+---
+
+## Prerequisites
+
+- **Python 3.12+** (required; check with `python3 --version`)
+- **Docker & Docker Compose** (for PostgreSQL)
+- **Git** (for version control)
+- **Make** (for running build commands)
+
+---
+
+## Initial Setup
+
+### 1. Clone and Navigate
+
+```bash
+cd /home/tilman.moeller/projects/polytrader
+# Or if cloning:
+# git clone <repository-url>
+# cd polytrader
+```
+
+### 2. Create Virtual Environment
+
+```bash
+# Create virtual environment (if not already created)
+python3 -m venv venv
+
+# Activate virtual environment
+source venv/bin/activate
+
+# Verify activation (should show venv path)
+which python
+# Should output: /home/tilman.moeller/projects/polytrader/venv/bin/python
+```
+
+**Note for Windows:**
+```bash
+# Windows PowerShell
+venv\Scripts\Activate.ps1
+
+# Windows CMD
+venv\Scripts\activate.bat
+```
+
+### 3. Install Dependencies
+
+```bash
+# Ensure venv is activated (you should see (venv) in prompt)
+source venv/bin/activate
+
+# Install all dependencies (production + dev)
+make install-dev
+
+# Verify installation
+python -c "import polytrader; print('OK')"
+```
+
+### 4. Configure Environment Variables
+
+```bash
+# Copy example environment file
+cp env.example .env
+
+# Edit .env with your values
+# Required for database:
+#   DB_PASSWORD=your_secure_password
+#   DB_USER=polytrader (default)
+#   DB_DATABASE=polytrader (default)
+#   DB_HOST=localhost (default)
+#   DB_PORT=5432 (default)
+#
+# Required for live trading (optional for paper trading):
+#   PRIVATE_KEY=your_polymarket_private_key
+#   FUNDER=your_magic_wallet_address
+#   SIGNATURE_TYPE=1
+```
+
+**Security Note:** Never commit `.env` to git. It's already in `.gitignore`.
+
+### 5. Start Development Database
+
+```bash
+# Start PostgreSQL container
+make db-up
+
+# Wait for database to be ready (make command handles this)
+# Verify it's running
+docker ps | grep polytrader-postgres
+
+# Run migrations to create tables
+make db-migrate
+```
+
+### 6. Verify Setup
+
+```bash
+# Run tests to verify everything works
+make test
+
+# Or run a quick paper trading test
+python -m cli model paper --market btc-updown-15m --max-trades 1
+```
+
+---
+
+## Daily Workflow
+
+### Starting a Work Session
+
+```bash
+# 1. Navigate to project
+cd /home/tilman.moeller/projects/polytrader
+
+# 2. Activate virtual environment
+source venv/bin/activate
+
+# 3. Ensure database is running
+make db-up
+
+# 4. Verify database is migrated
+make db-migrate
+
+# 5. Run quick sanity check
+make lint  # Should pass
+```
+
+### Ending a Work Session
+
+```bash
+# Optional: Stop database (saves resources)
+make db-down
+
+# Deactivate virtual environment (optional)
+deactivate
+```
+
+---
+
+## Environment Variables Reference
+
+### Database Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DB_HOST` | `localhost` | PostgreSQL host |
+| `DB_PORT` | `5432` | PostgreSQL port |
+| `DB_DATABASE` | `polytrader` | Database name |
+| `DB_USER` | `polytrader` | Database user |
+| `DB_PASSWORD` | (required) | Database password (set in `.env`) |
+
+### Polymarket API (Live Trading)
+
+| Variable | Required For | Description |
+|----------|--------------|-------------|
+| `PRIVATE_KEY` | Live trading | Polymarket wallet private key |
+| `FUNDER` | Live trading | Magic wallet funder address |
+| `SIGNATURE_TYPE` | Live trading | Signature type (typically `1` for EIP712) |
+
+**Note:** Paper trading does not require API credentials.
+
+### Environment Detection
+
+The system automatically detects:
+- **Paper mode:** No API credentials → uses simulated execution
+- **Live mode:** API credentials present → uses real order execution
+
+---
+
+## Virtual Environment Management
+
+### Activation
+
+**Linux/macOS:**
+```bash
+source venv/bin/activate
+```
+
+**Windows:**
+```bash
+# PowerShell
+venv\Scripts\Activate.ps1
+
+# CMD
+venv\Scripts\activate.bat
+```
+
+### Verification
+
+```bash
+# Check Python path (should point to venv)
+which python
+# Output: /home/tilman.moeller/projects/polytrader/venv/bin/python
+
+# Check Python version (should be 3.12+)
+python --version
+# Output: Python 3.12.x
+
+# Check if packages are installed
+pip list | grep polytrader
+```
+
+### Recreating Virtual Environment
+
+If the environment is corrupted:
+
+```bash
+# Remove old venv
+rm -rf venv
+
+# Create new venv
+python3 -m venv venv
+
+# Activate
+source venv/bin/activate
+
+# Reinstall dependencies
+make install-dev
+```
+
+---
+
+## Database Management
+
+### Development Database
+
+```bash
+# Start database
+make db-up
+
+# Stop database
+make db-down
+
+# View logs
+make db-logs
+
+# Connect with psql
+make db-psql
+
+# Run migrations
+make db-migrate
+```
+
+### Test Database
+
+```bash
+# Start test database (separate container)
+make test-db-up
+
+# Stop test database
+make test-db-down
+
+# Migrate test database
+make test-db-migrate
+```
+
+### Database Connection String Format
+
+The system uses SQLAlchemy connection strings:
+```
+postgresql+psycopg://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_DATABASE}
+```
+
+Example:
+```
+postgresql+psycopg://polytrader:password@localhost:5432/polytrader
+```
+
+---
+
+## Troubleshooting Environment Issues
+
+### Virtual Environment Not Activating
+
+```bash
+# Check if venv exists
+ls -la venv/
+
+# If missing, recreate:
+python3 -m venv venv
+source venv/bin/activate
+make install-dev
+```
+
+### Python Version Mismatch
+
+```bash
+# Check current version
+python3 --version
+
+# If < 3.12, install Python 3.12+
+# Ubuntu/Debian:
+sudo apt install python3.12 python3.12-venv
+
+# macOS (Homebrew):
+brew install python@3.12
+
+# Then recreate venv with correct version:
+python3.12 -m venv venv
+```
+
+### Import Errors
+
+```bash
+# Ensure venv is activated
+source venv/bin/activate
+
+# Reinstall dependencies
+make install-dev
+
+# Verify installation
+python -c "import polytrader; print('OK')"
+```
+
+### Database Connection Issues
+
+```bash
+# Check if database is running
+docker ps | grep polytrader-postgres
+
+# If not running:
+make db-up
+
+# Check database logs
+make db-logs
+
+# Verify environment variables
+cat .env | grep DB_
+```
+
+### Docker Issues
+
+```bash
+# Check Docker is running
+docker ps
+
+# If Docker is not running:
+# Linux:
+sudo systemctl start docker
+
+# macOS: Start Docker Desktop application
+
+# Check docker-compose version
+docker compose version
+```
+
+---
+
+## CI/CD Environment
+
+The CI environment uses the same setup:
+
+```bash
+# CI typically runs:
+make install-dev
+make lint
+make type-check
+make test
+make test-integration  # If integration tests exist
+```
+
+Ensure all make commands work in a clean environment.
+
+---
+
+## Best Practices
+
+1. **Always activate venv** before running Python commands
+2. **Never commit `.env`** (already in `.gitignore`)
+3. **Use `make` commands** instead of direct tool invocations
+4. **Keep dependencies updated** with `make install-dev` after pulling changes
+5. **Run `make db-migrate`** after pulling database changes
+6. **Verify setup** with `make test` after environment changes
+
+---
+
+## Quick Reference
+
+```bash
+# Full setup (first time)
+python3 -m venv venv
+source venv/bin/activate
+make install-dev
+cp env.example .env
+# Edit .env with your values
+make db-up
+make db-migrate
+make test
+
+# Daily workflow
+source venv/bin/activate
+make db-up
+# ... work ...
+make format && make lint && make type-check && make test
+```
