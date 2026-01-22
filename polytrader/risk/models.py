@@ -61,6 +61,9 @@ class RiskReasonCode(str, Enum):
     RISK_KILL_SWITCH = "RISK_KILL_SWITCH"  # Per trading.mdc §4
     RISK_RECONCILE_DIVERGENCE = "RISK_RECONCILE_DIVERGENCE"  # Per trading.mdc §4
 
+    # Strategy activation
+    RISK_STRATEGY_NOT_ACTIVE = "RISK_STRATEGY_NOT_ACTIVE"  # Strategy not active for live trading
+
     # Allow reason (for allowed checks)
     RISK_ALLOWED = "RISK_ALLOWED"
 
@@ -246,6 +249,14 @@ class RiskContext(BaseModel):
     limits_version: str = Field(
         default="1.0",
         description="Version of the risk limits being used",
+    )
+    active_strategies: set[str] = Field(
+        default_factory=set,
+        description="Set of active strategy IDs for live trading (empty set = paper mode)",
+    )
+    is_paper_mode: bool = Field(
+        default=True,
+        description="Whether system is in paper mode (True) or live mode (False)",
     )
 
 

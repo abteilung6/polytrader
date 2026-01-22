@@ -461,6 +461,52 @@ def check_system_health(context: RiskContext, limits: RiskLimits) -> RiskResult:
     )
 
 
+def check_strategy_activation(context: RiskContext, limits: RiskLimits) -> RiskResult:
+    """Check if strategy is active for live execution per Platform_Proposal.md §2.3.
+
+    Paper mode: always allow (skip check).
+    Live mode: deny if strategy_id not in active_strategies set.
+
+    Args:
+        context: Risk context with order intent and active strategies
+        limits: Risk limits (unused, but kept for consistency)
+
+    Returns:
+        RiskResult with allowed=False if strategy not active (live mode only)
+    """
+    intent = context.intent
+    reasons: list[RiskReasonCode] = []
+    metadata: dict[str, Any] = {}
+
+    # Paper mode: always allow (no check)
+    if context.is_paper_mode:
+        return RiskResult(
+            allowed=True,  # Partial result - other policies may deny
+            reason_codes=[RiskReasonCode.RISK_ALLOWED],
+            metadata=metadata,
+        )
+
+    # Live mode: must be in active set
+    strategy_id = intent.strategy_id
+    if strategy_id not in context.active_strategies:
+        reasons.append(RiskReasonCode.RISK_STRATEGY_NOT_ACTIVE)
+        metadata["strategy_id"] = strategy_id
+        metadata["active_strategies"] = list(context.active_strategies)
+        metadata["is_paper_mode"] = False
+        return RiskResult(
+            allowed=False,
+            reason_codes=reasons,
+            metadata=metadata,
+        )
+
+    # Strategy is active, continue with other checks
+    return RiskResult(
+        allowed=True,  # Partial result - other policies may deny
+        reason_codes=[RiskReasonCode.RISK_ALLOWED],
+        metadata=metadata,
+    )
+
+
 def check_rate_limits(context: RiskContext, limits: RiskLimits) -> RiskResult:
     """Check order and cancel rate limits per flows.mdc §6.
 
