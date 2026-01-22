@@ -279,7 +279,9 @@ class TestPlatformSchema:
         e = exc_info.value
         assert "idx_control_commands_idempotency" in str(e) or "unique" in str(e).lower()
 
-    async def test_partial_indexes_exist(self, postgres_connection: AsyncConnection) -> None:
+    async def test_partial_indexes_exist(
+        self, postgres_db: None, postgres_connection: AsyncConnection
+    ) -> None:
         """Test that partial indexes (WHERE clauses) exist."""
         async with postgres_connection.cursor() as cur:
             # Check pending commands index
