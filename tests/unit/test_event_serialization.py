@@ -70,6 +70,7 @@ class TestSerializeEventForDb:
             limit_price=0.45,
             size=100.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
         event = OrderCreatedEvent(
             order_id="order-123",

@@ -25,6 +25,7 @@ class TestRiskEngineBasic:
             size=1.0,
             reason="Test",
             ttl_s=2.0,
+            strategy_id="simple_threshold",
         )
 
         market_data = MarketDataEvent(
@@ -68,6 +69,7 @@ class TestRiskEngineBasic:
             size=1.0,
             reason="Test",
             ttl_s=2.0,
+            strategy_id="simple_threshold",
         )
 
         # Make intent expired by setting clock 3 seconds in the future
@@ -97,6 +99,7 @@ class TestRiskEngineBasic:
             size=5.0,  # Will violate position limit
             reason="Test",
             ttl_s=2.0,
+            strategy_id="simple_threshold",
         )
 
         clock = MagicMock()
@@ -135,6 +138,7 @@ class TestRiskEnginePolicyOrder:
             size=1.0,
             reason="Test",
             ttl_s=2.0,
+            strategy_id="simple_threshold",
         )
 
         context = RiskContext(intent=intent)
@@ -169,6 +173,7 @@ class TestRiskEnginePolicyOrder:
             size=1.0,
             reason="Test",
             ttl_s=2.0,
+            strategy_id="simple_threshold",
         )
 
         context = RiskContext(intent=intent)
@@ -209,6 +214,7 @@ class TestRiskEngineAggregation:
             size=1.0,
             reason="Test",
             ttl_s=2.0,
+            strategy_id="simple_threshold",
         )
 
         context = RiskContext(intent=intent)
@@ -247,6 +253,7 @@ class TestRiskEngineAggregation:
             size=1.0,
             reason="Test",
             ttl_s=2.0,
+            strategy_id="simple_threshold",
         )
 
         context = RiskContext(intent=intent)
@@ -285,6 +292,7 @@ class TestRiskEngineAggregation:
             size=1.0,
             reason="Test",
             ttl_s=2.0,
+            strategy_id="simple_threshold",
         )
 
         context = RiskContext(intent=intent)
@@ -323,6 +331,7 @@ class TestRiskEngineAggregation:
             size=1.0,
             reason="Test",
             ttl_s=2.0,
+            strategy_id="simple_threshold",
         )
 
         context = RiskContext(intent=intent)
@@ -367,6 +376,7 @@ class TestRiskEngineClock:
             size=1.0,
             reason="Test",
             ttl_s=2.0,
+            strategy_id="simple_threshold",
         )
 
         clock = MagicMock()
@@ -392,6 +402,7 @@ class TestRiskEngineClock:
             size=1.0,
             reason="Test",
             ttl_s=2.0,
+            strategy_id="simple_threshold",
         )
 
         market_data = MarketDataEvent(
@@ -438,6 +449,7 @@ class TestRiskEngineCustomPolicies:
             size=1.0,
             reason="Test",
             ttl_s=2.0,
+            strategy_id="simple_threshold",
         )
 
         context = RiskContext(intent=intent)
@@ -473,6 +485,7 @@ class TestRiskEngineEdgeCases:
             size=1.0,
             reason="Test",
             ttl_s=2.0,
+            strategy_id="simple_threshold",
         )
 
         context = RiskContext(intent=intent)
@@ -498,6 +511,7 @@ class TestRiskEngineEdgeCases:
             size=1.0,
             reason="Test",
             ttl_s=2.0,
+            strategy_id="simple_threshold",
         )
 
         context = RiskContext(intent=intent)

@@ -21,6 +21,7 @@ class TestCheckPositionLimits:
             limit_price=0.45,
             size=5.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         context = RiskContext(
@@ -52,6 +53,7 @@ class TestCheckPositionLimits:
             limit_price=0.45,
             size=5.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         context = RiskContext(
@@ -83,6 +85,7 @@ class TestCheckPositionLimits:
             limit_price=0.45,
             size=50.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         context = RiskContext(
@@ -113,6 +116,7 @@ class TestCheckPositionLimits:
             limit_price=0.45,
             size=2.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         market_data = MarketDataEvent(
@@ -156,6 +160,7 @@ class TestCheckPositionLimits:
             limit_price=0.65,
             size=2.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         context = RiskContext(
@@ -185,6 +190,7 @@ class TestCheckPositionLimits:
             limit_price=0.65,
             size=10.0,  # Selling more than we have
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         context = RiskContext(
@@ -214,6 +220,7 @@ class TestCheckPositionLimits:
             limit_price=0.45,
             size=3.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         context = RiskContext(
@@ -243,6 +250,7 @@ class TestCheckPositionLimits:
             limit_price=0.45,
             size=5.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         context = RiskContext(
@@ -275,6 +283,7 @@ class TestCheckMaxTradesPerMarket:
             limit_price=0.45,
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         context = RiskContext(
@@ -302,6 +311,7 @@ class TestCheckMaxTradesPerMarket:
             limit_price=0.45,
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         context = RiskContext(
@@ -325,6 +335,7 @@ class TestCheckMaxTradesPerMarket:
             limit_price=0.65,
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         context = RiskContext(
@@ -348,6 +359,7 @@ class TestCheckMaxTradesPerMarket:
             limit_price=0.45,
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         context = RiskContext(
@@ -371,6 +383,7 @@ class TestCheckMaxTradesPerMarket:
             limit_price=0.45,
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         context = RiskContext(

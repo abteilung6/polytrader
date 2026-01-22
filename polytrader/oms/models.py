@@ -112,6 +112,12 @@ class Order(BaseModel):
         description="Rejection reason (None unless REJECTED)",
     )
     correlation_id: str = Field(description="Correlation ID from intent (for tracing)")
+    strategy_id: str | None = Field(
+        default=None,
+        description=(
+            "Strategy identifier (derived from intent.strategy_id, optional for convenience)"
+        ),
+    )
 
     @property
     def remaining_size(self) -> float:

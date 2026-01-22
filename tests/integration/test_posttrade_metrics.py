@@ -68,6 +68,7 @@ class TestPositionMetrics:
             target_price=0.5,
             reason="Test order",
             correlation_id="corr-123",
+            strategy_id="simple_threshold",
         )
         order = await order_store.create_order(intent, "client-123")
 
@@ -79,6 +80,7 @@ class TestPositionMetrics:
             price=0.5,
             fee=0.0,
             correlation_id="corr-123",
+            strategy_id="simple_threshold",
         )
 
         # Start position manager
@@ -127,6 +129,7 @@ class TestPositionMetrics:
             target_price=0.5,
             reason="Test buy order",
             correlation_id="corr-123",
+            strategy_id="simple_threshold",
         )
         buy_order = await order_store.create_order(buy_intent, "client-123")
 
@@ -138,6 +141,7 @@ class TestPositionMetrics:
             price=0.5,
             fee=0.0,
             correlation_id="corr-123",
+            strategy_id="simple_threshold",
         )
 
         # Create SELL order
@@ -150,6 +154,7 @@ class TestPositionMetrics:
             target_price=0.6,
             reason="Test sell",
             correlation_id="corr-456",
+            strategy_id="simple_threshold",
         )
         sell_order = await order_store.create_order(sell_intent, "client-456")
 
@@ -161,6 +166,7 @@ class TestPositionMetrics:
             price=0.6,
             fee=0.0,
             correlation_id="corr-456",
+            strategy_id="simple_threshold",
         )
 
         # Start position manager
@@ -219,6 +225,7 @@ class TestPositionMetrics:
             target_price=0.5,
             reason="Test buy",
             correlation_id="corr-123",
+            strategy_id="simple_threshold",
         )
         buy_order = await order_store.create_order(buy_intent, "client-123")
 
@@ -232,6 +239,7 @@ class TestPositionMetrics:
             target_price=0.6,
             reason="Test sell",
             correlation_id="corr-456",
+            strategy_id="simple_threshold",
         )
         sell_order = await order_store.create_order(sell_intent, "client-456")
 
@@ -243,6 +251,7 @@ class TestPositionMetrics:
             price=0.5,
             fee=0.0,
             correlation_id="corr-123",
+            strategy_id="simple_threshold",
         )
         sell_fill = FillEvent(
             order_id=sell_order.order_id,
@@ -251,6 +260,7 @@ class TestPositionMetrics:
             price=0.6,
             fee=0.0,
             correlation_id="corr-456",
+            strategy_id="simple_threshold",
         )
 
         # Start position manager
@@ -305,6 +315,7 @@ class TestUnrealizedPnLMetrics:
             target_price=0.5,
             reason="Test order",
             correlation_id="corr-123",
+            strategy_id="simple_threshold",
         )
         order = await order_store.create_order(intent, "client-123")
 
@@ -316,6 +327,7 @@ class TestUnrealizedPnLMetrics:
             price=0.5,  # Entry price
             fee=0.0,
             correlation_id="corr-123",
+            strategy_id="simple_threshold",
         )
 
         # Start position manager
@@ -369,6 +381,7 @@ class TestUnrealizedPnLMetrics:
             target_price=0.5,
             reason="Test order",
             correlation_id="corr-123",
+            strategy_id="simple_threshold",
         )
         order = await order_store.create_order(intent, "client-123")
 
@@ -380,6 +393,7 @@ class TestUnrealizedPnLMetrics:
             price=0.5,  # Entry price
             fee=0.0,
             correlation_id="corr-123",
+            strategy_id="simple_threshold",
         )
 
         # Start position manager

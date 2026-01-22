@@ -79,6 +79,7 @@ class TestExecutionRouterAdapterErrorMetrics:
             target_price=0.5,
             reason="Test order",
             correlation_id="corr-123",
+            strategy_id="simple_threshold",
         )
         command = SubmitOrderCommand(
             order_id="order-123",
@@ -138,6 +139,7 @@ class TestExecutionRouterAdapterErrorMetrics:
             target_price=0.5,
             reason="Test order",
             correlation_id="corr-123",
+            strategy_id="simple_threshold",
         )
         command = SubmitOrderCommand(
             order_id="order-123",
@@ -197,6 +199,7 @@ class TestExecutionRouterAdapterErrorMetrics:
             target_price=0.5,
             reason="Test order",
             correlation_id="corr-123",
+            strategy_id="simple_threshold",
         )
         command = SubmitOrderCommand(
             order_id="order-123",
@@ -322,6 +325,7 @@ class TestAdapterErrorMetrics:
             target_price=0.5,
             reason="Test order",
             correlation_id="corr-123",
+            strategy_id="simple_threshold",
         )
 
         # Submit order (should raise VenueError)
@@ -370,6 +374,7 @@ class TestAdapterErrorMetrics:
             target_price=0.5,
             reason="Test order",
             correlation_id="corr-123",
+            strategy_id="simple_threshold",
         )
 
         # Submit order (should raise ValueError for insufficient balance)

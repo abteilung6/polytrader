@@ -399,6 +399,7 @@ async def test_supervisor_without_execution_router_does_not_execute_orders() -> 
         size=1.0,
         reason="Test proposal",
         ttl_s=10.0,
+        strategy_id="simple_threshold",
     )
     await bus.publish(PROPOSALS, proposal)
 
@@ -544,6 +545,7 @@ async def test_supervisor_with_position_manager_end_to_end() -> None:
                             size=1.0,
                             reason="Test BUY proposal",
                             ttl_s=10.0,
+                            strategy_id="simple_threshold",
                         )
                         await self.bus.publish(PROPOSALS, proposal)
                         self._proposal_sent = True

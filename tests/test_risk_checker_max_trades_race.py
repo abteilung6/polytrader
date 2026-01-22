@@ -58,6 +58,7 @@ class TestRiskCheckerMaxTradesRaceCondition:
             size=1.0,
             reason="First order",
             ttl_s=60.0,
+            strategy_id="simple_threshold",
         )
 
         # Publish first order
@@ -78,6 +79,7 @@ class TestRiskCheckerMaxTradesRaceCondition:
             size=1.0,
             reason="Second order",
             ttl_s=60.0,
+            strategy_id="simple_threshold",
         )
 
         # Publish second order (should be denied)
@@ -136,6 +138,7 @@ class TestRiskCheckerMaxTradesRaceCondition:
                 size=1.0,
                 reason=f"Order {i + 1}",
                 ttl_s=60.0,
+                strategy_id="simple_threshold",
             )
             intents.append(intent)
             await bus.publish(PROPOSALS, intent)
@@ -198,6 +201,7 @@ class TestRiskCheckerMaxTradesRaceCondition:
             size=1.0,
             reason="First order",
             ttl_s=60.0,
+            strategy_id="simple_threshold",
         )
 
         await bus.publish(PROPOSALS, intent1)
@@ -233,6 +237,7 @@ class TestRiskCheckerMaxTradesRaceCondition:
             size=1.0,
             reason="Second order",
             ttl_s=60.0,
+            strategy_id="simple_threshold",
         )
 
         await bus.publish(PROPOSALS, intent2)
@@ -295,6 +300,7 @@ class TestRiskCheckerMaxTradesRaceCondition:
             size=1.0,
             reason="Market 1 order",
             ttl_s=60.0,
+            strategy_id="simple_threshold",
         )
 
         await bus.publish(PROPOSALS, intent1)
@@ -313,6 +319,7 @@ class TestRiskCheckerMaxTradesRaceCondition:
             size=1.0,
             reason="Market 2 order",
             ttl_s=60.0,
+            strategy_id="simple_threshold",
         )
 
         await bus.publish(PROPOSALS, intent2)
@@ -367,6 +374,7 @@ class TestRiskCheckerMaxTradesRaceCondition:
             size=1.0,
             reason="BUY order",
             ttl_s=60.0,
+            strategy_id="simple_threshold",
         )
 
         await bus.publish(PROPOSALS, buy_intent)
@@ -400,6 +408,7 @@ class TestRiskCheckerMaxTradesRaceCondition:
             size=1.0,
             reason="SELL order",
             ttl_s=60.0,
+            strategy_id="simple_threshold",
         )
 
         await bus.publish(PROPOSALS, sell_intent)

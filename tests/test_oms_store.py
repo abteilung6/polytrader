@@ -27,6 +27,7 @@ def create_test_intent(
     size: float = 10.0,
     limit_price: float = 0.5,
     reason: str = "Test intent",
+    strategy_id: str = "simple_threshold",
 ) -> OrderIntentEvent:
     """Create a test OrderIntentEvent."""
     return OrderIntentEvent(
@@ -37,6 +38,7 @@ def create_test_intent(
         limit_price=limit_price,
         size=size,
         reason=reason,
+        strategy_id=strategy_id,
     )
 
 

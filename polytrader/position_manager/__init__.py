@@ -379,6 +379,8 @@ class PositionManager(IPositionManager):
             )
 
             # Generate SELL proposal
+            # Note: strategy_id defaults to "position_manager" for system-generated proposals
+            # In the future, Position could store strategy_id from the original BUY order
             proposal = OrderIntentEvent(
                 market_slug=event.market_slug,
                 outcome=event.outcome,
@@ -391,6 +393,7 @@ class PositionManager(IPositionManager):
                     f"(entry: {position.entry_price:.4f})"
                 ),
                 correlation_id=event.correlation_id,  # Propagate from MarketDataEvent
+                strategy_id="position_manager",  # System-generated proposal
             )
 
             await self.bus.publish(PROPOSALS, proposal)

@@ -91,6 +91,7 @@ async def test_postgres_store_read_stream_filter_by_type(
         limit_price=0.45,
         size=100.0,
         reason="Test order",
+        strategy_id="simple_threshold",
     )
     event3 = OrderCreatedEvent(
         order_id="order-123",
@@ -143,6 +144,7 @@ async def test_postgres_store_read_stream_filter_by_time(
         limit_price=0.45,
         size=100.0,
         reason="Test order",
+        strategy_id="simple_threshold",
     )
     event3 = OrderCreatedEvent.model_construct(
         order_id="order-123",
@@ -191,6 +193,7 @@ async def test_postgres_store_read_stream_filter_by_correlation_id(
         limit_price=0.45,
         size=100.0,
         reason="Test order",
+        strategy_id="simple_threshold",
     )
     event3 = OrderCreatedEvent(
         order_id="order-123",
@@ -238,6 +241,7 @@ async def test_postgres_store_replay_chronological(
         limit_price=0.45,
         size=100.0,
         reason="Test order",
+        strategy_id="simple_threshold",
     )
     event3 = OrderCreatedEvent.model_construct(
         order_id="order-123",
@@ -272,6 +276,7 @@ async def test_postgres_store_event_data_jsonb(
         limit_price=0.45,
         size=100.0,
         reason="Test order",
+        strategy_id="simple_threshold",
     )
     event = OrderCreatedEvent(
         order_id="order-123",

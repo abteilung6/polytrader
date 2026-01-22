@@ -23,6 +23,7 @@ def create_test_order(state: OrderState = OrderState.NEW) -> Order:
         limit_price=0.5,
         size=10.0,
         reason="Test order",
+        strategy_id="simple_threshold",
     )
     return Order(
         client_order_id="test-client-id",

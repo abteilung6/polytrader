@@ -34,6 +34,7 @@ class TestRiskCheckerMetrics:
             limit_price=0.45,
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         market_data = MarketDataEvent(
@@ -75,6 +76,7 @@ class TestRiskCheckerMetrics:
             limit_price=0.45,
             size=1.0,  # Larger than max_order_size
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         context = RiskContext(intent=intent)
@@ -112,6 +114,7 @@ class TestRiskCheckerMetrics:
             limit_price=0.45,
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         market_data = MarketDataEvent(

@@ -667,11 +667,13 @@ class OrderIntentEvent(Event):
         size: Trade size in USD
         reason: Human-readable reason for the intent
         ttl_s: Time-to-live in seconds before intent expires (default: 2.0)
+        strategy_id: Strategy identifier (propagated from SignalEvent.model_id)
 
     Note:
         - Timestamps come from Event base class (ts_wall, ts_mono)
         - Source is automatically set to EventSource.PORTFOLIO
         - All Event base class fields are inherited (event_id, correlation_id, run_id, etc.)
+        - strategy_id is propagated from SignalEvent.model_id in portfolio layer
     """
 
     source: EventSource = Field(default=EventSource.PORTFOLIO)
@@ -685,6 +687,7 @@ class OrderIntentEvent(Event):
     )
     size: float = Field(gt=0, description="Trade size in USD")
     reason: str = Field(description="Human-readable reason for the intent")
+    strategy_id: str = Field(description="Strategy identifier (from SignalEvent.model_id)")
     ttl_s: float = Field(
         default=2.0, gt=0, description="Time-to-live in seconds before intent expires"
     )

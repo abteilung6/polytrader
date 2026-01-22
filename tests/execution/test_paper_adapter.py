@@ -44,6 +44,7 @@ class TestPaperExecutionAdapter:
             limit_price=0.55,
             reason="Test",
             ttl_s=60.0,
+            strategy_id="simple_threshold",
         )
 
         response = await adapter.submit_order("client-123", intent)
@@ -85,6 +86,7 @@ class TestPaperExecutionAdapter:
             limit_price=0.55,
             reason="Test",
             ttl_s=60.0,
+            strategy_id="simple_threshold",
         )
 
         response = await adapter.submit_order("client-123", intent)
@@ -119,6 +121,7 @@ class TestPaperExecutionAdapter:
             limit_price=0.55,
             reason="Test",
             ttl_s=60.0,
+            strategy_id="simple_threshold",
         )
 
         # Subscribe to FILLS topic to verify adapter does NOT publish
@@ -163,6 +166,7 @@ class TestPaperExecutionAdapter:
             limit_price=0.55,
             reason="Test",
             ttl_s=60.0,
+            strategy_id="simple_threshold",
         )
 
         with pytest.raises(VenueError) as exc_info:
@@ -194,6 +198,7 @@ class TestPaperExecutionAdapter:
             limit_price=0.55,
             reason="Test",
             ttl_s=60.0,
+            strategy_id="simple_threshold",
         )
 
         response = await adapter.submit_order("client-123", intent)
@@ -224,6 +229,7 @@ class TestPaperExecutionAdapter:
             limit_price=0.55,
             reason="Test",
             ttl_s=60.0,
+            strategy_id="simple_threshold",
         )
 
         start_time = asyncio.get_event_loop().time()
@@ -314,6 +320,7 @@ class TestPaperExecutionAdapter:
             limit_price=0.55,
             reason="Test",
             ttl_s=60.0,
+            strategy_id="simple_threshold",
         )
 
         # With seeded RNG, results should be deterministic

@@ -78,6 +78,7 @@ class TestStructuredLoggingHelpers:
             limit_price=0.45,
             size=1.0,
             reason="Test intent",
+            strategy_id="simple_threshold",
         )
 
         order = Order(
@@ -131,6 +132,7 @@ class TestStructuredLoggingHelpers:
             limit_price=0.45,
             size=1.0,
             reason="Test intent",
+            strategy_id="simple_threshold",
         )
 
         order = Order(
@@ -172,6 +174,7 @@ class TestStructuredLoggingHelpers:
             limit_price=0.45,
             size=1.0,
             reason="Test intent",
+            strategy_id="simple_threshold",
         )
 
         order = Order(
@@ -298,6 +301,7 @@ class TestStructuredLoggingHelpers:
             limit_price=0.45,
             size=1.0,
             reason="Test intent",
+            strategy_id="simple_threshold",
         )
 
         order = Order(

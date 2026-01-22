@@ -24,6 +24,7 @@ class TestCheckProposalValidity:
             size=1.0,
             reason="Test",
             ttl_s=2.0,
+            strategy_id="simple_threshold",
         )
 
         # Create context with intent that's 3 seconds old (expired)
@@ -52,6 +53,7 @@ class TestCheckProposalValidity:
             limit_price=0.45,
             size=0.0,  # Invalid size
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         clock = MagicMock()
@@ -76,6 +78,7 @@ class TestCheckProposalValidity:
             limit_price=0.45,
             size=15.0,  # Exceeds max_order_size
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         clock = MagicMock()
@@ -102,6 +105,7 @@ class TestCheckProposalValidity:
             limit_price=0.45,
             size=5.0,  # Valid size
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         clock = MagicMock()
@@ -126,6 +130,7 @@ class TestCheckProposalValidity:
             limit_price=0.45,
             size=5.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         # Use deterministic clock
@@ -150,6 +155,7 @@ class TestCheckProposalValidity:
             limit_price=0.45,
             size=5.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         context = RiskContext(intent=intent)
@@ -171,6 +177,7 @@ class TestCheckProposalValidity:
             limit_price=0.45,
             size=10.0,  # Exactly max_order_size
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         clock = MagicMock()
@@ -198,6 +205,7 @@ class TestCheckTokenOwnership:
             limit_price=0.65,
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         context = RiskContext(
@@ -223,6 +231,7 @@ class TestCheckTokenOwnership:
             limit_price=0.65,
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         context = RiskContext(
@@ -246,6 +255,7 @@ class TestCheckTokenOwnership:
             limit_price=0.45,
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         context = RiskContext(
@@ -269,6 +279,7 @@ class TestCheckTokenOwnership:
             limit_price=0.65,
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         context = RiskContext(
@@ -292,6 +303,7 @@ class TestCheckTokenOwnership:
             limit_price=0.65,
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         context = RiskContext(

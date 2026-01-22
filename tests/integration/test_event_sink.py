@@ -89,12 +89,14 @@ async def test_event_sink_batch_writing(event_sink: EventSink) -> None:
         events_published.append(event)
         await event_sink._bus.publish(SYSTEM_LIFECYCLE, event)
 
-    # Wait for flush
-    await asyncio.sleep(0.2)
+    # Wait for flush (flush_interval is 0.1s, wait longer to ensure completion)
+    await asyncio.sleep(0.5)
 
     # Verify all events were persisted
     events = list(event_sink._store.read_stream())
-    assert len(events) >= 5
+    # Filter to only SystemStartedEvent to avoid counting other events
+    system_events = [e for e in events if isinstance(e, SystemStartedEvent)]
+    assert len(system_events) >= 5
 
     # Verify all published events are in database
     published_ids = {e.event_id for e in events_published}
@@ -122,6 +124,7 @@ async def test_event_sink_subscribes_to_all_topics(event_sink: EventSink) -> Non
         limit_price=0.45,
         size=100.0,
         reason="Test",
+        strategy_id="simple_threshold",
     )
     event2 = OrderCreatedEvent(
         order_id="order-123",

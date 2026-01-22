@@ -74,6 +74,7 @@ def sample_intent() -> OrderIntentEvent:
         correlation_id=str(uuid.uuid4()),
         ttl_s=60.0,
         reason="Test order",
+        strategy_id="simple_threshold",
     )
 
 
@@ -471,6 +472,7 @@ class TestRestartReplay:
             limit_price=0.5,
             reason="Test",
             ttl_s=60.0,
+            strategy_id="simple_threshold",
         )
 
         # Simulate events from previous run
@@ -545,6 +547,7 @@ class TestRestartReplay:
             limit_price=0.5,
             reason="Test",
             ttl_s=60.0,
+            strategy_id="simple_threshold",
         )
 
         # Simulate in-flight order (created and submitted, but not acked)

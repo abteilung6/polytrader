@@ -228,6 +228,7 @@ class TestRiskCheckEvent:
             limit_price=0.45,
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         result = RiskResult(
@@ -254,6 +255,7 @@ class TestRiskCheckEvent:
             limit_price=0.45,
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         result = RiskResult(
@@ -285,6 +287,7 @@ class TestRiskCheckEvent:
             limit_price=0.45,
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         # Test allowed=True
@@ -316,6 +319,7 @@ class TestRiskCheckEvent:
             limit_price=0.45,
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         result = RiskResult(
@@ -345,6 +349,7 @@ class TestRiskCheckEvent:
             limit_price=0.45,
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         result = RiskResult(
@@ -377,6 +382,7 @@ class TestRiskCheckEvent:
             limit_price=0.45,
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         result = RiskResult(
@@ -416,6 +422,7 @@ class TestOrderCreatedEvent:
             limit_price=0.45,
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         order_id = str(uuid.uuid4())
@@ -444,6 +451,7 @@ class TestOrderCreatedEvent:
             limit_price=0.45,
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         event = OrderCreatedEvent(
@@ -472,6 +480,7 @@ class TestOrderCreatedEvent:
             limit_price=0.45,
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         # Use the same correlation_id as the intent
@@ -498,6 +507,7 @@ class TestOrderCreatedEvent:
             limit_price=0.45,
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         event = OrderCreatedEvent(

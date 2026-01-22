@@ -198,6 +198,7 @@ class TestRiskContext:
             limit_price=0.45,
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         context = RiskContext(intent=intent)
@@ -227,6 +228,7 @@ class TestRiskContext:
             limit_price=0.45,
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         positions = {
@@ -255,6 +257,7 @@ class TestRiskContext:
             limit_price=0.45,
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         market_data = MarketDataEvent(
@@ -281,6 +284,7 @@ class TestRiskContext:
             limit_price=0.65,
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         owned_tokens = {("test-market", "UP")}
@@ -301,6 +305,7 @@ class TestRiskContext:
             limit_price=0.45,
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         context = RiskContext(
@@ -326,6 +331,7 @@ class TestRiskContext:
             limit_price=0.45,
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         context = RiskContext(
@@ -349,6 +355,7 @@ class TestRiskContext:
             limit_price=0.45,
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         # Valid: >= 0
@@ -374,6 +381,7 @@ class TestRiskContext:
             limit_price=0.45,
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         # Valid: >= 0
