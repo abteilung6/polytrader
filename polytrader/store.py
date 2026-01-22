@@ -97,6 +97,129 @@ class MemoryMarketDataStore(IMarketDataStore):
         return list(self._events.keys())
 
 
+class CompositeMarketDataStore(IMarketDataStore):
+    """Composite store that writes to multiple stores and reads from the primary store.
+
+    Per architecture: Enables dual-write pattern (memory + PostgreSQL) for validation
+    and gradual migration. Writes go to all stores, reads come from primary (fast path).
+
+    Example:
+        >>> memory_store = MemoryMarketDataStore()
+        >>> postgres_store = PostgreSQLMarketTickStore(...)
+        >>> composite = CompositeMarketDataStore(memory_store, postgres_store)
+        >>> composite.add(event)  # Writes to both
+        >>> latest = composite.latest("market", "UP")  # Reads from memory (fast)
+    """
+
+    def __init__(self, primary: IMarketDataStore, *secondary: IMarketDataStore) -> None:
+        """Initialize composite store.
+
+        Args:
+            primary: Primary store (used for reads, must be fast)
+            secondary: Additional stores (used for writes only)
+        """
+        self._primary = primary
+        self._secondary = list(secondary)
+
+    def add(self, event: MarketDataEvent) -> None:
+        """Add event to all stores (primary + secondary).
+
+        Args:
+            event: Market data event to add
+        """
+        # Write to primary (fast, in-memory)
+        self._primary.add(event)
+
+        # Write to secondary stores (persistence)
+        for store in self._secondary:
+            try:
+                store.add(event)
+            except Exception:
+                # Log but don't fail - persistence failures shouldn't block trading
+                from polytrader.logging_config import logger
+
+                logger.exception(
+                    "Error writing to secondary store: {store_type}",
+                    store_type=type(store).__name__,
+                )
+
+    def latest(self, market_slug: str, outcome: Outcome) -> MarketDataEvent | None:
+        """Get latest tick from primary store (fast path).
+
+        Args:
+            market_slug: Market identifier
+            outcome: Market outcome
+
+        Returns:
+            Latest MarketDataEvent from primary store, or None
+        """
+        return self._primary.latest(market_slug, outcome)
+
+    def history(self, market_slug: str, outcome: Outcome) -> list[MarketDataEvent]:
+        """Get history from primary store (fast path).
+
+        Args:
+            market_slug: Market identifier
+            outcome: Market outcome
+
+        Returns:
+            List of MarketDataEvent from primary store
+        """
+        return self._primary.history(market_slug, outcome)
+
+    def get_all_markets(self) -> list[tuple[str, Outcome]]:
+        """Get all markets from primary store (fast path).
+
+        Returns:
+            List of (market_slug, outcome) tuples from primary store
+        """
+        return self._primary.get_all_markets()
+
+    async def flush(self) -> None:
+        """Flush all stores that support flushing.
+
+        This should be called before shutdown to ensure all data is persisted.
+        """
+        # Flush primary if it supports flushing
+        if hasattr(self._primary, "flush"):
+            await self._primary.flush()
+
+        # Flush secondary stores
+        for store in self._secondary:
+            if hasattr(store, "flush"):
+                try:
+                    await store.flush()
+                except Exception:
+                    from polytrader.logging_config import logger
+
+                    logger.exception(
+                        "Error flushing secondary store: {store_type}",
+                        store_type=type(store).__name__,
+                    )
+
+    async def close(self) -> None:
+        """Close all stores that support closing.
+
+        This should be called before shutdown to ensure all data is persisted.
+        """
+        # Close primary if it supports closing
+        if hasattr(self._primary, "close"):
+            await self._primary.close()
+
+        # Close secondary stores
+        for store in self._secondary:
+            if hasattr(store, "close"):
+                try:
+                    await store.close()
+                except Exception:
+                    from polytrader.logging_config import logger
+
+                    logger.exception(
+                        "Error closing secondary store: {store_type}",
+                        store_type=type(store).__name__,
+                    )
+
+
 class PostgreSQLMarketTickStore(IMarketDataStore):
     """PostgreSQL-backed market data store.
 
@@ -144,6 +267,11 @@ class PostgreSQLMarketTickStore(IMarketDataStore):
         self._closed = False
         self._background_loop: asyncio.AbstractEventLoop | None = None
         self._background_thread: threading.Thread | None = None
+        # Engine is set by factory after creation (for cleanup)
+        # Import at runtime since it's used in __init__
+        from sqlalchemy.ext.asyncio import AsyncEngine
+
+        self._engine: AsyncEngine | None = None
 
     def add(self, event: MarketDataEvent) -> None:
         """Add market data event (non-blocking, buffered).
@@ -315,13 +443,53 @@ class PostgreSQLMarketTickStore(IMarketDataStore):
         if self._closed:
             return
         self._closed = True
-        await self._writer.close()
+
+        # Close writer (this will cancel the periodic flush task)
+        # If we're in the background loop, close directly
+        # Otherwise, schedule close in the background loop
+        if self._background_loop is not None and not self._background_loop.is_closed():
+            try:
+                # Check if we're in the background loop
+                if asyncio.get_running_loop() is self._background_loop:
+                    # We're in the background loop, close directly
+                    await self._writer.close()
+                else:
+                    # We're in a different loop, schedule close in background loop
+                    future = asyncio.run_coroutine_threadsafe(
+                        self._writer.close(), self._background_loop
+                    )
+                    # Wait for close to complete (with timeout)
+                    try:
+                        future.result(timeout=2.0)
+                    except Exception:
+                        # If close fails, log but continue
+                        from polytrader.logging_config import logger
+
+                        logger.exception("Error closing writer in background loop")
+            except RuntimeError:
+                # No running loop, schedule in background loop
+                future = asyncio.run_coroutine_threadsafe(
+                    self._writer.close(), self._background_loop
+                )
+                try:
+                    future.result(timeout=2.0)
+                except Exception:
+                    from polytrader.logging_config import logger
+
+                    logger.exception("Error closing writer in background loop")
+        else:
+            # No background loop, close directly
+            await self._writer.close()
 
         # Stop background thread if it exists
         if self._background_loop is not None and not self._background_loop.is_closed():
             self._background_loop.call_soon_threadsafe(self._background_loop.stop)
             if self._background_thread is not None:
                 self._background_thread.join(timeout=1.0)
+
+        # Dispose of database engine if it exists
+        if self._engine is not None:
+            await self._engine.dispose()
 
 
 def _convert_record_to_event(record: "MarketTickRecord") -> MarketDataEvent:  # noqa: F821

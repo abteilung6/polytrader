@@ -16,7 +16,8 @@ from polytrader.events.types import MarketChangeEvent, MarketDataEvent
 from polytrader.logging_config import logger
 from polytrader.market_discovery import MarketDiscoveryService
 from polytrader.observer import create_observer_factory
-from polytrader.store import MemoryMarketDataStore
+
+# Store is created via factory (see create_market_data_store call below)
 
 
 def default_tick_handler(event: MarketDataEvent, count: int) -> None:
@@ -81,7 +82,10 @@ async def watch_task(
     if market_change_handler is None:
         market_change_handler = default_market_change_handler
 
-    store = MemoryMarketDataStore()
+    # Create market data store (with optional PostgreSQL persistence)
+    from polytrader.store_factory import create_market_data_store
+
+    store = create_market_data_store(enable_postgres=True)
     event_store = MemoryEventStore()
     bus = EventBus(store=event_store)
     discovery = MarketDiscoveryService(bus=bus)
@@ -153,6 +157,15 @@ async def watch_task(
             await market_changes_task
         except asyncio.CancelledError:
             pass
+        # Flush and close store (ensures all ticks are persisted)
+        if hasattr(store, "close"):
+            try:
+                from polytrader.logging_config import logger
+
+                await store.close()
+            except Exception:
+                logger.exception("Error closing market data store")
+
         # Emit system stopped event if not already emitted (auto-persisted by EventBus)
         if not any(
             isinstance(e, SystemStoppedEvent)

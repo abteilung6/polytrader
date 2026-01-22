@@ -155,7 +155,8 @@ class BufferedTickWriter:
                 if elapsed >= self._flush_interval and self._buffer:
                     await self.flush()
         except asyncio.CancelledError:
-            pass
+            # Task was cancelled, exit gracefully
+            return
         except Exception as e:
             logger.exception(
                 "Error in periodic flush task: {error}",
