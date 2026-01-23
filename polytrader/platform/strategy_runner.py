@@ -274,7 +274,7 @@ class StrategyRunner:
             raise
 
     def is_running(self) -> bool:
-        """Check if the runner is active.
+        """Check if runner is active.
 
         Returns:
             True if running, False otherwise

@@ -420,3 +420,138 @@ class PlatformOrchestrator:
             True if running, False otherwise
         """
         return self._running
+
+    async def add_strategy(self, strategy_id: str) -> None:
+        """Add a strategy at runtime.
+
+        Per Commit 2.1: Dynamically add a strategy without restarting the platform.
+        Loads strategy from database, gets or creates shared supervisor for pattern,
+        creates and starts StrategyRunner.
+
+        Args:
+            strategy_id: Strategy identifier to add
+
+        Raises:
+            ValueError: If strategy not found in database or not enabled
+            RuntimeError: If orchestrator is not running
+
+        Example:
+            >>> await orchestrator.add_strategy("new_strategy")
+        """
+        if not self._running:
+            raise RuntimeError("Cannot add strategy: orchestrator is not running")
+
+        # Load strategy from database
+        registry = StrategyRegistry(self._session)
+        strategy = await registry.get_strategy(strategy_id)
+
+        if strategy is None:
+            raise ValueError(f"Strategy not found: {strategy_id}")
+
+        if not strategy.enabled:
+            raise ValueError(f"Strategy is not enabled: {strategy_id}")
+
+        # Check if strategy already running (idempotent)
+        if strategy_id in self._strategy_runners:
+            logger.bind(strategy_id=strategy_id).debug(
+                "Strategy already running, skipping add: {strategy_id}",
+                strategy_id=strategy_id,
+            )
+            return
+
+        try:
+            # Get market pattern for this strategy
+            pattern = strategy.config.get("market_pattern", "btc-updown-15m")
+
+            # Get or create shared supervisor for pattern
+            supervisor = await self._supervisor_registry.get_or_create(pattern)
+
+            # Update pattern mapping
+            if pattern not in self._pattern_to_strategies:
+                self._pattern_to_strategies[pattern] = []
+            if strategy_id not in self._pattern_to_strategies[pattern]:
+                self._pattern_to_strategies[pattern].append(strategy_id)
+
+            # Create and start StrategyRunner
+            runner = await self._create_strategy_runner(strategy, supervisor)
+            await runner.start()
+            self._strategy_runners[strategy_id] = runner
+
+            logger.bind(
+                strategy_id=strategy_id,
+                pattern=pattern,
+            ).info(
+                "Added strategy at runtime: {strategy_id} (pattern: {pattern})",
+                strategy_id=strategy_id,
+                pattern=pattern,
+            )
+        except Exception:
+            logger.bind(
+                strategy_id=strategy_id,
+                error_class="fatal",
+            ).exception("Failed to add strategy at runtime: {strategy_id}")
+            raise
+
+    async def remove_strategy(self, strategy_id: str) -> None:
+        """Remove a strategy at runtime.
+
+        Per Commit 2.1: Dynamically remove a strategy without restarting the platform.
+        Stops and removes StrategyRunner, releases supervisor reference.
+
+        Args:
+            strategy_id: Strategy identifier to remove
+
+        Raises:
+            RuntimeError: If orchestrator is not running
+
+        Example:
+            >>> await orchestrator.remove_strategy("old_strategy")
+        """
+        if not self._running:
+            raise RuntimeError("Cannot remove strategy: orchestrator is not running")
+
+        # Check if strategy is running
+        runner = self._strategy_runners.get(strategy_id)
+        if runner is None:
+            logger.bind(strategy_id=strategy_id).debug(
+                "Strategy not running, skipping remove: {strategy_id}",
+                strategy_id=strategy_id,
+            )
+            return
+
+        try:
+            # Stop runner
+            if runner.is_running():
+                await runner.stop()
+
+            # Get pattern for supervisor release
+            pattern = runner.market_supervisor.pattern
+
+            # Remove runner
+            del self._strategy_runners[strategy_id]
+
+            # Update pattern mapping
+            if pattern in self._pattern_to_strategies:
+                if strategy_id in self._pattern_to_strategies[pattern]:
+                    self._pattern_to_strategies[pattern].remove(strategy_id)
+                # Clean up empty pattern entry
+                if not self._pattern_to_strategies[pattern]:
+                    del self._pattern_to_strategies[pattern]
+
+            # Release supervisor reference
+            await self._supervisor_registry.release(pattern)
+
+            logger.bind(
+                strategy_id=strategy_id,
+                pattern=pattern,
+            ).info(
+                "Removed strategy at runtime: {strategy_id} (pattern: {pattern})",
+                strategy_id=strategy_id,
+                pattern=pattern,
+            )
+        except Exception:
+            logger.bind(
+                strategy_id=strategy_id,
+                error_class="fatal",
+            ).exception("Failed to remove strategy at runtime: {strategy_id}")
+            raise
