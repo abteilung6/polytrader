@@ -20,6 +20,8 @@ from polytrader.oms.store import InMemoryOrderStore
 from polytrader.ops.replay import StateReconstructionService
 from polytrader.types import Outcome, Position
 
+pytestmark = pytest.mark.replay
+
 
 class FakePositionManager:
     """Fake position manager for testing."""
