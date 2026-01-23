@@ -76,6 +76,23 @@ async def supervisor_with_sink(
     # Start supervisor
     await supervisor.start()
 
+    # Verify EventSink was initialized (required for these tests)
+    if supervisor._event_sink is None:
+        pytest.skip("EventSink not initialized - database config may be missing")
+
+    # Wait for EventSink task to be created (needed when running in parallel)
+    # Poll for up to 1 second to ensure task is initialized
+    for _ in range(20):
+        if supervisor._event_sink_task is not None:
+            break
+        await asyncio.sleep(0.05)
+    else:
+        # If still None after waiting, this is a test failure
+        pytest.fail(
+            "EventSink task was not created after supervisor.start() - "
+            "this may indicate a bug in _start_event_sink_task() or a timing issue"
+        )
+
     yield supervisor
 
     # Stop supervisor
@@ -120,9 +137,13 @@ async def test_supervisor_stops_event_sink_cleanly(
     supervisor_with_sink: SystemSupervisor,
 ) -> None:
     """Test that EventSink is stopped cleanly when supervisor stops."""
+    # Wait a bit to ensure EventSink task is fully initialized
+    # (needed when running in parallel with other tests)
+    await asyncio.sleep(0.05)
+
     # Verify EventSink is running
-    assert supervisor_with_sink._event_sink is not None
-    assert supervisor_with_sink._event_sink_task is not None
+    assert supervisor_with_sink._event_sink is not None, "EventSink should be initialized"
+    assert supervisor_with_sink._event_sink_task is not None, "EventSink task should be created"
     assert not supervisor_with_sink._event_sink_task.done()
 
     # Stop supervisor
@@ -193,8 +214,15 @@ async def test_supervisor_event_sink_task_runs_independently(
     supervisor_with_sink: SystemSupervisor,
 ) -> None:
     """Test that EventSink task runs independently of other services."""
+    # Wait a bit to ensure EventSink task is fully initialized
+    # (needed when running in parallel with other tests)
+    await asyncio.sleep(0.05)
+
+    # Verify EventSink is initialized
+    assert supervisor_with_sink._event_sink is not None, "EventSink should be initialized"
+
     # Verify EventSink task is running
-    assert supervisor_with_sink._event_sink_task is not None
+    assert supervisor_with_sink._event_sink_task is not None, "EventSink task should be created"
     assert not supervisor_with_sink._event_sink_task.done()
 
     # Verify other service tasks are also running

@@ -555,3 +555,116 @@ class PlatformOrchestrator:
                 error_class="fatal",
             ).exception("Failed to remove strategy at runtime: {strategy_id}")
             raise
+
+    async def update_strategy(self, strategy_id: str) -> None:
+        """Update a strategy at runtime.
+
+        Per Commit 2.2: Dynamically update a strategy without restarting the platform.
+        Detects pattern changes and migrates StrategyRunner to new supervisor if needed.
+
+        Args:
+            strategy_id: Strategy identifier to update
+
+        Raises:
+            ValueError: If strategy not found in database or not enabled
+            RuntimeError: If orchestrator is not running
+
+        Example:
+            >>> await orchestrator.update_strategy("updated_strategy")
+        """
+        if not self._running:
+            raise RuntimeError("Cannot update strategy: orchestrator is not running")
+
+        # Load strategy from database
+        registry = StrategyRegistry(self._session)
+        strategy = await registry.get_strategy(strategy_id)
+
+        if strategy is None:
+            raise ValueError(f"Strategy not found: {strategy_id}")
+
+        if not strategy.enabled:
+            raise ValueError(f"Strategy is not enabled: {strategy_id}")
+
+        # Check if strategy is running
+        runner = self._strategy_runners.get(strategy_id)
+        if runner is None:
+            # Strategy not running, just add it
+            await self.add_strategy(strategy_id)
+            return
+
+        try:
+            # Get current and new patterns
+            old_pattern = runner.market_supervisor.pattern
+            new_pattern = strategy.config.get("market_pattern", "btc-updown-15m")
+
+            # Check if pattern changed
+            if old_pattern == new_pattern:
+                # Pattern unchanged, just update strategy record in runner
+                # (StrategyRunner will use new config on next evaluation)
+                runner.strategy = strategy
+                logger.bind(
+                    strategy_id=strategy_id,
+                    pattern=new_pattern,
+                ).debug(
+                    "Updated strategy config (pattern unchanged): {strategy_id}",
+                    strategy_id=strategy_id,
+                )
+                return
+
+            # Pattern changed: migrate runner to new supervisor
+            logger.bind(
+                strategy_id=strategy_id,
+                old_pattern=old_pattern,
+                new_pattern=new_pattern,
+            ).info(
+                "Migrating strategy pattern: {strategy_id} ({old_pattern} → {new_pattern})",
+                strategy_id=strategy_id,
+                old_pattern=old_pattern,
+                new_pattern=new_pattern,
+            )
+
+            # Stop current runner
+            if runner.is_running():
+                await runner.stop()
+
+            # Release old supervisor
+            await self._supervisor_registry.release(old_pattern)
+
+            # Update pattern mapping
+            if old_pattern in self._pattern_to_strategies:
+                if strategy_id in self._pattern_to_strategies[old_pattern]:
+                    self._pattern_to_strategies[old_pattern].remove(strategy_id)
+                # Clean up empty pattern entry
+                if not self._pattern_to_strategies[old_pattern]:
+                    del self._pattern_to_strategies[old_pattern]
+
+            # Get or create new supervisor
+            new_supervisor = await self._supervisor_registry.get_or_create(new_pattern)
+
+            # Update pattern mapping for new pattern
+            if new_pattern not in self._pattern_to_strategies:
+                self._pattern_to_strategies[new_pattern] = []
+            if strategy_id not in self._pattern_to_strategies[new_pattern]:
+                self._pattern_to_strategies[new_pattern].append(strategy_id)
+
+            # Create new runner with new supervisor
+            new_runner = await self._create_strategy_runner(strategy, new_supervisor)
+            await new_runner.start()
+            self._strategy_runners[strategy_id] = new_runner
+
+            logger.bind(
+                strategy_id=strategy_id,
+                old_pattern=old_pattern,
+                new_pattern=new_pattern,
+            ).info(
+                "Migrated strategy to new pattern: {strategy_id} ({old_pattern} → {new_pattern})",
+                strategy_id=strategy_id,
+                old_pattern=old_pattern,
+                new_pattern=new_pattern,
+            )
+        except Exception:
+            logger.bind(
+                strategy_id=strategy_id,
+                error_class="fatal",
+            ).exception("Failed to update strategy at runtime: {strategy_id}")
+            raise

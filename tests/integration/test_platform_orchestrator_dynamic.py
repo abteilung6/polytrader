@@ -8,6 +8,7 @@ real StrategyRegistry, mock factories, and EventBus.
 """
 
 from collections.abc import AsyncGenerator, Callable
+from typing import TYPE_CHECKING, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -17,6 +18,10 @@ from polytrader.db.models import StrategyRecord
 from polytrader.events import EventBus
 from polytrader.platform.orchestrator import PlatformOrchestrator
 from polytrader.store import IMarketDataStore, MemoryMarketDataStore
+
+if TYPE_CHECKING:
+    from polytrader.adapters import IMarketDataAdapter
+    from polytrader.observer import IObserver
 
 
 @pytest.fixture
@@ -84,16 +89,16 @@ def adapter_factory() -> Callable[[str], MagicMock]:
 
 
 @pytest.fixture
-def observer_factory() -> Callable[[MagicMock], MagicMock]:
+def observer_factory() -> "Callable[[IMarketDataAdapter], IObserver]":
     """Create mock observer factory."""
     observer = MagicMock()
     observer.run = AsyncMock()
     observer.stop = MagicMock()
 
-    def factory(adapter: MagicMock) -> MagicMock:  # noqa: ARG001
-        return observer
+    def factory(adapter: "IMarketDataAdapter") -> "IObserver":  # noqa: ARG001
+        return cast("IObserver", observer)
 
-    return factory
+    return cast("Callable[[IMarketDataAdapter], IObserver]", factory)
 
 
 @pytest.fixture
@@ -146,7 +151,7 @@ async def test_add_strategy_creates_runner(
         session=db_session,
         discovery_service=discovery_service,
         adapter_factory=adapter_factory,
-        observer_factory=observer_factory,
+        observer_factory=observer_factory,  # type: ignore[arg-type]
     )
 
     await orchestrator.start()
@@ -202,7 +207,7 @@ async def test_add_strategy_uses_existing_supervisor(
         session=db_session,
         discovery_service=discovery_service,
         adapter_factory=adapter_factory,
-        observer_factory=observer_factory,
+        observer_factory=observer_factory,  # type: ignore[arg-type]
     )
 
     await orchestrator.start()
@@ -255,7 +260,7 @@ async def test_add_strategy_creates_new_supervisor_for_different_pattern(
         session=db_session,
         discovery_service=discovery_service,
         adapter_factory=adapter_factory,
-        observer_factory=observer_factory,
+        observer_factory=observer_factory,  # type: ignore[arg-type]
     )
 
     await orchestrator.start()
@@ -311,7 +316,7 @@ async def test_remove_strategy_stops_runner(
         session=db_session,
         discovery_service=discovery_service,
         adapter_factory=adapter_factory,
-        observer_factory=observer_factory,
+        observer_factory=observer_factory,  # type: ignore[arg-type]
     )
 
     await orchestrator.start()
@@ -352,7 +357,7 @@ async def test_remove_strategy_releases_supervisor(
         session=db_session,
         discovery_service=discovery_service,
         adapter_factory=adapter_factory,
-        observer_factory=observer_factory,
+        observer_factory=observer_factory,  # type: ignore[arg-type]
     )
 
     await orchestrator.start()
@@ -405,7 +410,7 @@ async def test_remove_last_strategy_destroys_supervisor(
         session=db_session,
         discovery_service=discovery_service,
         adapter_factory=adapter_factory,
-        observer_factory=observer_factory,
+        observer_factory=observer_factory,  # type: ignore[arg-type]
     )
 
     await orchestrator.start()
@@ -449,7 +454,7 @@ async def test_add_strategy_idempotent(
         session=db_session,
         discovery_service=discovery_service,
         adapter_factory=adapter_factory,
-        observer_factory=observer_factory,
+        observer_factory=observer_factory,  # type: ignore[arg-type]
     )
 
     await orchestrator.start()
@@ -490,7 +495,7 @@ async def test_remove_nonexistent_strategy_no_error(
         session=db_session,
         discovery_service=discovery_service,
         adapter_factory=adapter_factory,
-        observer_factory=observer_factory,
+        observer_factory=observer_factory,  # type: ignore[arg-type]
     )
 
     await orchestrator.start()
