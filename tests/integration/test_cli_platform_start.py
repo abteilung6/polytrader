@@ -9,7 +9,7 @@ Note: Full platform startup tests are complex and may require
 separate test infrastructure. This test verifies basic functionality.
 """
 
-import asyncio
+import inspect
 import subprocess
 from collections.abc import AsyncGenerator
 
@@ -122,7 +122,7 @@ async def test_platform_start_task_imports() -> None:
 
     # Verify function exists and is callable
     assert callable(platform_start_task)
-    assert asyncio.iscoroutinefunction(platform_start_task)
+    assert inspect.iscoroutinefunction(platform_start_task)
 
 
 @pytest.mark.integration
