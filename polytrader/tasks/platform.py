@@ -105,6 +105,7 @@ async def platform_start_task(
             adapter_factory=adapter_factory,
             observer_factory=observer_factory,
             position_manager=position_manager,
+            paper_oms_store=oms_store_paper,
         )
 
         # Start orchestrator (loads strategies, creates runners)

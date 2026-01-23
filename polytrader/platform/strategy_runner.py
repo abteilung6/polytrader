@@ -142,6 +142,10 @@ class StrategyRunner:
                 # Create strategy instance on first market data if not created yet
                 if self._strategy_instance is None:
                     self._strategy_instance = self.strategy_factory(event.market_slug)
+                    logger.bind(
+                        strategy_id=self.strategy.strategy_id,
+                        market=event.market_slug,
+                    ).info("Created strategy instance for market: {market}")
                     # Start background tasks now that strategy exists
                     if self._background_task is None:
                         self._background_task = asyncio.create_task(self._run_strategy_background())
@@ -152,6 +156,16 @@ class StrategyRunner:
                     signal = self._strategy_instance.evaluate(event, positions=positions)
 
                     if signal is not None:
+                        logger.bind(
+                            strategy_id=self.strategy.strategy_id,
+                            market=event.market_slug,
+                            outcome=signal.outcome,
+                            edge=signal.edge,
+                            confidence=signal.confidence,
+                        ).info(
+                            "Generated signal: {outcome} "
+                            "(edge={edge:.4f}, confidence={confidence:.4f})"
+                        )
                         # Ensure signal has correct model_id (strategy_id from registry)
                         # Note: strategy.evaluate() may return SignalEvent with different model_id
                         # We override it to use strategy_id from registry

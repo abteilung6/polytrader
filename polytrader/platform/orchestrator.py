@@ -19,6 +19,9 @@ from polytrader.oms.store import InMemoryOrderStore
 from polytrader.platform.registry import StrategyRegistry
 from polytrader.platform.strategy_runner import StrategyRunner
 from polytrader.platform.supervisor_registry import MarketSupervisorRegistry
+from polytrader.portfolio.service import PortfolioService
+from polytrader.risk.engine import RiskChecker, RiskEngine
+from polytrader.risk.limits_store import get_default_limits
 from polytrader.store import IMarketDataStore
 from polytrader.strategies import create_simple_threshold_factory
 from polytrader.supervisor.market import MarketSupervisor
@@ -29,6 +32,7 @@ if TYPE_CHECKING:
     from polytrader.adapters import IMarketDataAdapter
     from polytrader.market_discovery import IMarketDiscoveryService
     from polytrader.observer import IObserver
+    from polytrader.oms.store import IEventHandlingOrderStore
     from polytrader.position_manager import IPositionManager
     from polytrader.strategies.base import IStrategy
 
@@ -77,6 +81,7 @@ class PlatformOrchestrator:
         _store: Market data store
         _session: Database session for registry access
         _strategy_runners: Dict mapping strategy_id -> StrategyRunner
+        _portfolio_service: PortfolioService (converts signals to order intents)
         _paper_oms: OMS core for paper trading
         _live_oms: OMS core for live trading
         _paper_execution: Execution router for paper trading
@@ -94,6 +99,7 @@ class PlatformOrchestrator:
         observer_factory: Callable[["IMarketDataAdapter"], "IObserver"],
         position_manager: "IPositionManager | None" = None,
         live_execution_router_factory: Callable[[], ExecutionRouter] | None = None,
+        paper_oms_store: "IEventHandlingOrderStore | None" = None,
     ) -> None:
         """Initialize platform orchestrator.
 
@@ -106,6 +112,7 @@ class PlatformOrchestrator:
             observer_factory: Factory for creating observers
             position_manager: Position manager (optional)
             live_execution_router_factory: Factory for live execution router (optional)
+            paper_oms_store: Order store for paper OMS (must match position_manager's store)
         """
         self._bus = bus
         self._store = store
@@ -115,6 +122,7 @@ class PlatformOrchestrator:
         self._observer_factory = observer_factory
         self._position_manager = position_manager
         self._live_execution_router_factory = live_execution_router_factory
+        self._paper_oms_store = paper_oms_store
 
         # MarketSupervisorRegistry for shared supervisors (Commit 1.4)
         self._supervisor_registry = MarketSupervisorRegistry(
@@ -124,6 +132,23 @@ class PlatformOrchestrator:
             bus=bus,
             store=store,
             position_manager=position_manager,
+        )
+
+        # PortfolioService to convert signals to order intents
+        self._portfolio_service = PortfolioService(
+            bus=bus,
+            store=store,
+            position_manager=position_manager,
+            fixed_size_usd=1.0,  # Default fixed size
+        )
+
+        # RiskChecker to check order intents and publish approved proposals
+        risk_limits = get_default_limits()
+        risk_engine = RiskEngine(limits=risk_limits)
+        self._risk_checker = RiskChecker(
+            bus=bus,
+            engine=risk_engine,
+            store=store,
         )
 
         # Strategy runners (created in start())
@@ -172,14 +197,31 @@ class PlatformOrchestrator:
                 enabled=enabled_count,
             )
 
-            # Step 2: Create paper OMS and execution
+            # Step 2: Start PortfolioService (converts signals to order intents)
+            # Must start before OMS/execution so it can subscribe to SIGNALS
+            await self._portfolio_service.start()
+            logger.info("PortfolioService started")
+
+            # Step 3: Start RiskChecker (checks order intents, publishes approved proposals)
+            # Must start before PortfolioService publishes to PROPOSALS
+            risk_task = asyncio.create_task(self._risk_checker.run())
+            self._oms_tasks.append(risk_task)  # Track for cleanup
+            logger.info("RiskChecker started")
+
+            # Step 4: Start PositionManager (tracks positions from fills)
+            if self._position_manager is not None:
+                position_task = asyncio.create_task(self._position_manager.run())
+                self._oms_tasks.append(position_task)  # Track for cleanup
+                logger.info("PositionManager started")
+
+            # Step 5: Create paper OMS and execution
             await self._create_paper_lane()
 
-            # Step 3: Create live OMS and execution (if factory provided)
+            # Step 5: Create live OMS and execution (if factory provided)
             if self._live_execution_router_factory:
                 await self._create_live_lane()
 
-            # Step 4: Group strategies by market_pattern and create shared supervisors
+            # Step 6: Group strategies by market_pattern and create shared supervisors
             enabled_list = [s for s in strategies if s.enabled]
             logger.info(
                 "Starting {count} enabled strategies...",
@@ -287,6 +329,13 @@ class PlatformOrchestrator:
             # Stop all supervisors (registry will stop when ref_count reaches 0)
             await self._supervisor_registry.stop_all()
 
+            # Stop PortfolioService
+            await self._portfolio_service.stop()
+
+            # Stop RiskChecker
+            self._risk_checker._running = False  # Stop the run loop
+            # RiskChecker task is in _oms_tasks, will be cancelled below
+
             # Stop OMS and execution tasks
             all_tasks = self._oms_tasks + self._execution_tasks
             for task in all_tasks:
@@ -307,8 +356,11 @@ class PlatformOrchestrator:
 
         Paper lane is always created for all strategies.
         """
-        # Create paper OMS
-        paper_oms_store = InMemoryOrderStore(self._bus)
+        # Create paper OMS (use shared store if provided, otherwise create new one)
+        if self._paper_oms_store is None:
+            paper_oms_store: IEventHandlingOrderStore = InMemoryOrderStore(self._bus)
+        else:
+            paper_oms_store = self._paper_oms_store
         paper_idempotency = IdempotencyStore()
         self._paper_oms = OMSCore(
             bus=self._bus,

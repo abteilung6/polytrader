@@ -72,7 +72,19 @@ class SimpleThresholdStrategy(IStrategy):
 
             # Check history requirement
             history = self.store.history(market_data.market_slug, market_data.outcome)
-            if len(history) < self.min_history:
+            history_count = len(history)
+            if history_count < self.min_history:
+                from polytrader.logging_config import logger
+
+                logger.bind(
+                    market=market_data.market_slug,
+                    outcome=market_data.outcome,
+                    history_count=history_count,
+                    min_history=self.min_history,
+                ).debug(
+                    "Insufficient history: {history_count}/{min_history} "
+                    "ticks for {market}/{outcome}",
+                )
                 return None
 
             mid_price = market_data.mid
