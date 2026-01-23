@@ -4,11 +4,9 @@ Per testing.mdc §1.A: Unit tests for risk engine (fast, deterministic).
 Per testing.mdc §2: Test hard veto works and emits reason codes.
 """
 
-from unittest.mock import MagicMock
-
-from polytrader.events.types import MarketDataEvent, OrderIntentEvent
-from polytrader.risk.engine import RiskEngine
 from polytrader.risk.models import RiskContext, RiskLimits, RiskReasonCode, RiskResult
+from tests.factories.events import create_market_data_event, create_order_intent_event
+from tests.factories.risk import create_risk_context, create_risk_engine, create_risk_limits
 
 
 class TestRiskEngineBasic:
@@ -16,32 +14,29 @@ class TestRiskEngineBasic:
 
     def test_risk_engine_allows_valid_order(self) -> None:
         """Test that valid orders pass all policies."""
-        intent = OrderIntentEvent(
+        intent = create_order_intent_event(
             market_slug="test-market",
             outcome="UP",
             side="BUY",
-            target_price=0.5,
             limit_price=0.45,
             size=1.0,
-            reason="Test",
             ttl_s=2.0,
-            strategy_id="simple_threshold",
         )
 
-        market_data = MarketDataEvent(
+        market_data = create_market_data_event(
             market_slug="test-market",
             outcome="UP",
             best_bid=0.44,
             best_ask=0.46,
         )
 
-        context = RiskContext(
+        context = create_risk_context(
             intent=intent,
             market_data=market_data,
             reconciliation_healthy=True,
         )
 
-        limits = RiskLimits(
+        limits = create_risk_limits(
             max_order_size=10.0,
             max_position_per_market=100.0,
             max_position_global=1000.0,
@@ -51,7 +46,7 @@ class TestRiskEngineBasic:
             order_rate_limit_per_minute=60,
         )
 
-        engine = RiskEngine(limits=limits)
+        engine = create_risk_engine(limits=limits)
         result = engine.check(context)
 
         assert result.allowed is True
@@ -60,26 +55,24 @@ class TestRiskEngineBasic:
     def test_risk_engine_denies_invalid_order(self) -> None:
         """Test that invalid orders are denied by at least one policy."""
         # Create an expired intent
-        intent = OrderIntentEvent(
+        intent = create_order_intent_event(
             market_slug="test-market",
             outcome="UP",
             side="BUY",
-            target_price=0.5,
             limit_price=0.45,
             size=1.0,
-            reason="Test",
             ttl_s=2.0,
-            strategy_id="simple_threshold",
         )
 
         # Make intent expired by setting clock 3 seconds in the future
-        clock = MagicMock()
-        clock.monotonic.return_value = intent.ts_mono + 3.0
+        from tests.factories.clocks import create_mock_clock
 
-        context = RiskContext(intent=intent)
-        limits = RiskLimits(max_order_size=10.0)
+        clock = create_mock_clock(base_monotonic=intent.ts_mono + 3.0)
 
-        engine = RiskEngine(limits=limits, clock=clock)
+        context = create_risk_context(intent=intent)
+        limits = create_risk_limits(max_order_size=10.0)
+
+        engine = create_risk_engine(limits=limits, clock=clock)
         result = engine.check(context)
 
         assert result.allowed is False
@@ -90,32 +83,30 @@ class TestRiskEngineBasic:
         # Create intent that violates multiple policies:
         # 1. Expired (via clock) - from check_proposal_validity
         # 2. Position limit violation - from check_position_limits
-        intent = OrderIntentEvent(
+        intent = create_order_intent_event(
             market_slug="test-market",
             outcome="UP",
             side="BUY",
-            target_price=0.5,
             limit_price=0.45,
             size=5.0,  # Will violate position limit
-            reason="Test",
             ttl_s=2.0,
-            strategy_id="simple_threshold",
         )
 
-        clock = MagicMock()
-        clock.monotonic.return_value = intent.ts_mono + 3.0  # Expired
+        from tests.factories.clocks import create_mock_clock
+
+        clock = create_mock_clock(base_monotonic=intent.ts_mono + 3.0)  # Expired
 
         # Set up context with existing position that will cause limit violation
-        context = RiskContext(
+        context = create_risk_context(
             intent=intent,
             current_positions={("test-market", "UP"): 0.5},  # Already have position
         )
-        limits = RiskLimits(
+        limits = create_risk_limits(
             max_order_size=10.0,
             max_position_per_market=1.0,  # Will be exceeded (0.5 + 5.0 = 5.5 > 1.0)
         )
 
-        engine = RiskEngine(limits=limits, clock=clock)
+        engine = create_risk_engine(limits=limits, clock=clock)
         result = engine.check(context)
 
         assert result.allowed is False
@@ -129,20 +120,17 @@ class TestRiskEnginePolicyOrder:
 
     def test_risk_engine_policy_order(self) -> None:
         """Test that policies run in fixed order."""
-        intent = OrderIntentEvent(
+        intent = create_order_intent_event(
             market_slug="test-market",
             outcome="UP",
             side="BUY",
-            target_price=0.5,
             limit_price=0.45,
             size=1.0,
-            reason="Test",
             ttl_s=2.0,
-            strategy_id="simple_threshold",
         )
 
-        context = RiskContext(intent=intent)
-        limits = RiskLimits(max_order_size=10.0)
+        context = create_risk_context(intent=intent)
+        limits = create_risk_limits(max_order_size=10.0)
 
         # Track policy execution order
         execution_order: list[str] = []
@@ -155,7 +143,7 @@ class TestRiskEnginePolicyOrder:
             execution_order.append("policy_2")
             return RiskResult(allowed=True, reason_codes=[RiskReasonCode.RISK_ALLOWED])
 
-        engine = RiskEngine(limits=limits)
+        engine = create_risk_engine(limits=limits)
         engine.policies = [mock_policy_1, mock_policy_2]
 
         engine.check(context)
@@ -164,20 +152,17 @@ class TestRiskEnginePolicyOrder:
 
     def test_risk_engine_continues_after_denial(self) -> None:
         """Test that all policies run even after one denies."""
-        intent = OrderIntentEvent(
+        intent = create_order_intent_event(
             market_slug="test-market",
             outcome="UP",
             side="BUY",
-            target_price=0.5,
             limit_price=0.45,
             size=1.0,
-            reason="Test",
             ttl_s=2.0,
-            strategy_id="simple_threshold",
         )
 
-        context = RiskContext(intent=intent)
-        limits = RiskLimits(max_order_size=10.0)
+        context = create_risk_context(intent=intent)
+        limits = create_risk_limits(max_order_size=10.0)
 
         execution_count = 0
 
@@ -191,7 +176,7 @@ class TestRiskEnginePolicyOrder:
             execution_count += 1
             return RiskResult(allowed=True, reason_codes=[RiskReasonCode.RISK_ALLOWED])
 
-        engine = RiskEngine(limits=limits)
+        engine = create_risk_engine(limits=limits)
         engine.policies = [mock_policy_deny, mock_policy_allow]
 
         result = engine.check(context)
@@ -205,20 +190,17 @@ class TestRiskEngineAggregation:
 
     def test_risk_engine_aggregates_reason_codes(self) -> None:
         """Test that reason codes from all policies are aggregated."""
-        intent = OrderIntentEvent(
+        intent = create_order_intent_event(
             market_slug="test-market",
             outcome="UP",
             side="BUY",
-            target_price=0.5,
             limit_price=0.45,
             size=1.0,
-            reason="Test",
             ttl_s=2.0,
-            strategy_id="simple_threshold",
         )
 
-        context = RiskContext(intent=intent)
-        limits = RiskLimits(max_order_size=10.0)
+        context = create_risk_context(intent=intent)
+        limits = create_risk_limits(max_order_size=10.0)
 
         def mock_policy_1(ctx: RiskContext, lims: RiskLimits) -> RiskResult:
             return RiskResult(
@@ -232,7 +214,7 @@ class TestRiskEngineAggregation:
                 reason_codes=[RiskReasonCode.RISK_ALLOWED, RiskReasonCode.RISK_RATE_LIMIT],
             )
 
-        engine = RiskEngine(limits=limits)
+        engine = create_risk_engine(limits=limits)
         engine.policies = [mock_policy_1, mock_policy_2]
 
         result = engine.check(context)
@@ -244,20 +226,17 @@ class TestRiskEngineAggregation:
 
     def test_risk_engine_aggregates_projections(self) -> None:
         """Test that projections from all policies are merged."""
-        intent = OrderIntentEvent(
+        intent = create_order_intent_event(
             market_slug="test-market",
             outcome="UP",
             side="BUY",
-            target_price=0.5,
             limit_price=0.45,
             size=1.0,
-            reason="Test",
             ttl_s=2.0,
-            strategy_id="simple_threshold",
         )
 
-        context = RiskContext(intent=intent)
-        limits = RiskLimits(max_order_size=10.0)
+        context = create_risk_context(intent=intent)
+        limits = create_risk_limits(max_order_size=10.0)
 
         def mock_policy_1(ctx: RiskContext, lims: RiskLimits) -> RiskResult:
             return RiskResult(
@@ -273,7 +252,7 @@ class TestRiskEngineAggregation:
                 projections={"projection_2": 200.0},
             )
 
-        engine = RiskEngine(limits=limits)
+        engine = create_risk_engine(limits=limits)
         engine.policies = [mock_policy_1, mock_policy_2]
 
         result = engine.check(context)
@@ -283,20 +262,17 @@ class TestRiskEngineAggregation:
 
     def test_risk_engine_aggregates_metadata(self) -> None:
         """Test that metadata from all policies is merged."""
-        intent = OrderIntentEvent(
+        intent = create_order_intent_event(
             market_slug="test-market",
             outcome="UP",
             side="BUY",
-            target_price=0.5,
             limit_price=0.45,
             size=1.0,
-            reason="Test",
             ttl_s=2.0,
-            strategy_id="simple_threshold",
         )
 
-        context = RiskContext(intent=intent)
-        limits = RiskLimits(max_order_size=10.0)
+        context = create_risk_context(intent=intent)
+        limits = create_risk_limits(max_order_size=10.0)
 
         def mock_policy_1(ctx: RiskContext, lims: RiskLimits) -> RiskResult:
             return RiskResult(
@@ -312,7 +288,7 @@ class TestRiskEngineAggregation:
                 metadata={"metadata_2": "value_2"},
             )
 
-        engine = RiskEngine(limits=limits)
+        engine = create_risk_engine(limits=limits)
         engine.policies = [mock_policy_1, mock_policy_2]
 
         result = engine.check(context)
@@ -322,20 +298,17 @@ class TestRiskEngineAggregation:
 
     def test_risk_engine_deduplicates_reason_codes(self) -> None:
         """Test that duplicate reason codes are removed (first occurrence kept)."""
-        intent = OrderIntentEvent(
+        intent = create_order_intent_event(
             market_slug="test-market",
             outcome="UP",
             side="BUY",
-            target_price=0.5,
             limit_price=0.45,
             size=1.0,
-            reason="Test",
             ttl_s=2.0,
-            strategy_id="simple_threshold",
         )
 
-        context = RiskContext(intent=intent)
-        limits = RiskLimits(max_order_size=10.0)
+        context = create_risk_context(intent=intent)
+        limits = create_risk_limits(max_order_size=10.0)
 
         def mock_policy_1(ctx: RiskContext, lims: RiskLimits) -> RiskResult:
             return RiskResult(
@@ -349,7 +322,7 @@ class TestRiskEngineAggregation:
                 reason_codes=[RiskReasonCode.RISK_ALLOWED, RiskReasonCode.RISK_MAX_POSITION],
             )
 
-        engine = RiskEngine(limits=limits)
+        engine = create_risk_engine(limits=limits)
         engine.policies = [mock_policy_1, mock_policy_2]
 
         result = engine.check(context)
@@ -367,25 +340,23 @@ class TestRiskEngineClock:
 
     def test_risk_engine_with_clock(self) -> None:
         """Test that clock is passed to policies that need it."""
-        intent = OrderIntentEvent(
+        intent = create_order_intent_event(
             market_slug="test-market",
             outcome="UP",
             side="BUY",
-            target_price=0.5,
             limit_price=0.45,
             size=1.0,
-            reason="Test",
             ttl_s=2.0,
-            strategy_id="simple_threshold",
         )
 
-        clock = MagicMock()
-        clock.monotonic.return_value = intent.ts_mono + 1.0  # Not expired
+        from tests.factories.clocks import create_mock_clock
 
-        context = RiskContext(intent=intent)
-        limits = RiskLimits(max_order_size=10.0)
+        clock = create_mock_clock(base_monotonic=intent.ts_mono + 1.0)  # Not expired
 
-        engine = RiskEngine(limits=limits, clock=clock)
+        context = create_risk_context(intent=intent)
+        limits = create_risk_limits(max_order_size=10.0)
+
+        engine = create_risk_engine(limits=limits, clock=clock)
         engine.check(context)
 
         # Clock should have been called by check_proposal_validity
@@ -393,32 +364,29 @@ class TestRiskEngineClock:
 
     def test_risk_engine_without_clock(self) -> None:
         """Test that engine works without clock (uses time.monotonic())."""
-        intent = OrderIntentEvent(
+        intent = create_order_intent_event(
             market_slug="test-market",
             outcome="UP",
             side="BUY",
-            target_price=0.5,
             limit_price=0.45,
             size=1.0,
-            reason="Test",
             ttl_s=2.0,
-            strategy_id="simple_threshold",
         )
 
-        market_data = MarketDataEvent(
+        market_data = create_market_data_event(
             market_slug="test-market",
             outcome="UP",
             best_bid=0.44,
             best_ask=0.46,
         )
 
-        context = RiskContext(
+        context = create_risk_context(
             intent=intent,
             market_data=market_data,
             reconciliation_healthy=True,
         )
 
-        limits = RiskLimits(
+        limits = create_risk_limits(
             max_order_size=10.0,
             max_position_per_market=100.0,
             max_position_global=1000.0,
@@ -428,7 +396,7 @@ class TestRiskEngineClock:
             order_rate_limit_per_minute=60,
         )
 
-        engine = RiskEngine(limits=limits)
+        engine = create_risk_engine(limits=limits)
         result = engine.check(context)
 
         # Should work without explicit clock
@@ -440,20 +408,17 @@ class TestRiskEngineCustomPolicies:
 
     def test_risk_engine_custom_policies(self) -> None:
         """Test that custom policy list can be used."""
-        intent = OrderIntentEvent(
+        intent = create_order_intent_event(
             market_slug="test-market",
             outcome="UP",
             side="BUY",
-            target_price=0.5,
             limit_price=0.45,
             size=1.0,
-            reason="Test",
             ttl_s=2.0,
-            strategy_id="simple_threshold",
         )
 
-        context = RiskContext(intent=intent)
-        limits = RiskLimits(max_order_size=10.0)
+        context = create_risk_context(intent=intent)
+        limits = create_risk_limits(max_order_size=10.0)
 
         custom_policy_called = False
 
@@ -462,7 +427,7 @@ class TestRiskEngineCustomPolicies:
             custom_policy_called = True
             return RiskResult(allowed=True, reason_codes=[RiskReasonCode.RISK_ALLOWED])
 
-        engine = RiskEngine(limits=limits)
+        engine = create_risk_engine(limits=limits)
         engine.policies = [custom_policy]
 
         result = engine.check(context)
@@ -476,22 +441,19 @@ class TestRiskEngineEdgeCases:
 
     def test_risk_engine_empty_policies(self) -> None:
         """Test that engine handles empty policy list."""
-        intent = OrderIntentEvent(
+        intent = create_order_intent_event(
             market_slug="test-market",
             outcome="UP",
             side="BUY",
-            target_price=0.5,
             limit_price=0.45,
             size=1.0,
-            reason="Test",
             ttl_s=2.0,
-            strategy_id="simple_threshold",
         )
 
-        context = RiskContext(intent=intent)
-        limits = RiskLimits(max_order_size=10.0)
+        context = create_risk_context(intent=intent)
+        limits = create_risk_limits(max_order_size=10.0)
 
-        engine = RiskEngine(limits=limits)
+        engine = create_risk_engine(limits=limits)
         engine.policies = []
 
         result = engine.check(context)
@@ -502,25 +464,22 @@ class TestRiskEngineEdgeCases:
 
     def test_risk_engine_all_policies_deny(self) -> None:
         """Test that engine denies when all policies deny."""
-        intent = OrderIntentEvent(
+        intent = create_order_intent_event(
             market_slug="test-market",
             outcome="UP",
             side="BUY",
-            target_price=0.5,
             limit_price=0.45,
             size=1.0,
-            reason="Test",
             ttl_s=2.0,
-            strategy_id="simple_threshold",
         )
 
-        context = RiskContext(intent=intent)
-        limits = RiskLimits(max_order_size=10.0)
+        context = create_risk_context(intent=intent)
+        limits = create_risk_limits(max_order_size=10.0)
 
         def mock_policy_deny(ctx: RiskContext, lims: RiskLimits) -> RiskResult:
             return RiskResult(allowed=False, reason_codes=[RiskReasonCode.RISK_PROPOSAL_EXPIRED])
 
-        engine = RiskEngine(limits=limits)
+        engine = create_risk_engine(limits=limits)
         engine.policies = [mock_policy_deny, mock_policy_deny]
 
         result = engine.check(context)
