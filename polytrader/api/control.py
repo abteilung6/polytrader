@@ -212,9 +212,11 @@ async def enable_execution(
         "enable_execution", None, request.client_request_id
     )
     if existing:
+        # Return existing command, but always return "pending" status in envelope
+        # (actual status can be checked via GET /state/commands/{command_id})
         return CommandEnvelopeResponse(
             command_id=str(existing.command_id),
-            status=existing.status,
+            status="pending",  # Always return "pending" for idempotency (per API contract)
             submitted_at=existing.created_at,
             links={"status": f"/api/v1/state/commands/{existing.command_id}"},
         )
@@ -277,9 +279,11 @@ async def disable_execution(
         "disable_execution", None, request.client_request_id
     )
     if existing:
+        # Return existing command, but always return "pending" status in envelope
+        # (actual status can be checked via GET /state/commands/{command_id})
         return CommandEnvelopeResponse(
             command_id=str(existing.command_id),
-            status=existing.status,
+            status="pending",  # Always return "pending" for idempotency (per API contract)
             submitted_at=existing.created_at,
             links={"status": f"/api/v1/state/commands/{existing.command_id}"},
         )
@@ -340,9 +344,11 @@ async def activate_strategy(
         "add_active_strategy", strategy_id, request.client_request_id
     )
     if existing:
+        # Return existing command, but always return "pending" status in envelope
+        # (actual status can be checked via GET /state/commands/{command_id})
         return CommandEnvelopeResponse(
             command_id=str(existing.command_id),
-            status=existing.status,
+            status="pending",  # Always return "pending" for idempotency (per API contract)
             submitted_at=existing.created_at,
             links={"status": f"/api/v1/state/commands/{existing.command_id}"},
         )
@@ -387,9 +393,11 @@ async def deactivate_strategy(
         "remove_active_strategy", strategy_id, request.client_request_id
     )
     if existing:
+        # Return existing command, but always return "pending" status in envelope
+        # (actual status can be checked via GET /state/commands/{command_id})
         return CommandEnvelopeResponse(
             command_id=str(existing.command_id),
-            status=existing.status,
+            status="pending",  # Always return "pending" for idempotency (per API contract)
             submitted_at=existing.created_at,
             links={"status": f"/api/v1/state/commands/{existing.command_id}"},
         )
