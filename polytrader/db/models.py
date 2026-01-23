@@ -9,7 +9,19 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import TIMESTAMP, CheckConstraint, Float, Index, Numeric, String, Text, func
+from sqlalchemy import (
+    TIMESTAMP,
+    Boolean,
+    CheckConstraint,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    func,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -232,4 +244,294 @@ class MarketTickRecord(Base):
             "ts_mono >= 0",
             name="market_ticks_ts_mono_check",
         ),
+    )
+
+
+class StrategyRecord(Base):
+    """SQLAlchemy ORM model for strategies table.
+
+    This model provides:
+    - Type-safe database operations for strategy registry
+    - Automatic type conversions (JSONB, timestamps)
+    - Clean query interface
+    - Integration with Alembic autogenerate
+
+    Per Platform_Proposal.md: Strategies table stores strategy definitions
+    with configuration in JSONB format.
+    """
+
+    __tablename__ = "strategies"
+
+    # Primary key
+    strategy_id: Mapped[str] = mapped_column(
+        String(100),
+        primary_key=True,
+        comment="Unique strategy identifier",
+    )
+
+    # Strategy metadata
+    name: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        comment="Human-readable strategy name",
+    )
+    description: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Strategy description",
+    )
+    config: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+        comment="Strategy configuration (JSONB)",
+    )
+    enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default="true",
+        comment="Whether strategy is enabled",
+    )
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+        comment="Record creation timestamp",
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+        comment="Record update timestamp",
+    )
+
+
+class ExecutionControlRecord(Base):
+    """SQLAlchemy ORM model for execution_control table.
+
+    This model provides:
+    - Type-safe database operations for execution control (singleton)
+    - Optimistic concurrency control via version field
+    - Automatic type conversions (timestamps)
+
+    Per Platform_Proposal.md: Execution control is a singleton table
+    (id = 1 only) that tracks whether live execution is enabled.
+    The version field enables optimistic concurrency control.
+    """
+
+    __tablename__ = "execution_control"
+
+    # Singleton primary key (id = 1 only)
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        default=1,
+        comment="Singleton ID (always 1)",
+    )
+
+    # Execution state
+    execution_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default="false",
+        comment="Whether live execution is enabled",
+    )
+    version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default="1",
+        comment="Version for optimistic concurrency control",
+    )
+
+    # Audit fields
+    updated_by: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        comment="User/system that made the update",
+    )
+    reason: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        comment="Reason for the update",
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+        comment="Update timestamp",
+    )
+
+    # Table constraints
+    __table_args__ = (CheckConstraint("id = 1", name="execution_control_singleton_check"),)
+
+
+class LiveStrategyActivationRecord(Base):
+    """SQLAlchemy ORM model for live_strategy_activation table.
+
+    This model provides:
+    - Type-safe database operations for live strategy activation
+    - Foreign key relationship to strategies table
+    - Automatic type conversions (timestamps)
+
+    Per Platform_Proposal.md: Tracks which strategies are active
+    for live trading. Only active strategies can execute live orders.
+    """
+
+    __tablename__ = "live_strategy_activation"
+
+    # Primary key (foreign key to strategies)
+    strategy_id: Mapped[str] = mapped_column(
+        String(100),
+        ForeignKey("strategies.strategy_id", ondelete="CASCADE"),
+        primary_key=True,
+        comment="Strategy identifier (FK to strategies.strategy_id)",
+    )
+
+    # Activation state
+    active: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default="false",
+        comment="Whether strategy is active for live trading",
+    )
+    activated_at: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=True,
+        comment="Timestamp when strategy was activated",
+    )
+    activated_by: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        comment="User/system that activated the strategy",
+    )
+    reason: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Reason for activation",
+    )
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+        comment="Record creation timestamp",
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+        comment="Record update timestamp",
+    )
+
+    # Table constraints and indexes
+    # Note: Partial index (WHERE active = true) will be created in migration
+    __table_args__ = (Index("idx_live_strategy_active", "active"),)
+
+
+class ControlCommandRecord(Base):
+    """SQLAlchemy ORM model for control_commands table.
+
+    This model provides:
+    - Type-safe database operations for control command queue
+    - Idempotency support via client_request_id
+    - Optimistic concurrency control via expected_version
+    - Automatic type conversions (UUID, timestamps)
+
+    Per Platform_Proposal.md: Control commands queue stores pending
+    commands for execution control and strategy activation. Commands
+    are processed asynchronously by the control plane service.
+    """
+
+    __tablename__ = "control_commands"
+
+    # Primary key
+    command_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        server_default=func.gen_random_uuid(),
+        comment="Unique command identifier (UUID)",
+    )
+
+    # Command details
+    command_type: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        comment="Command type: enable_execution, disable_execution, "
+        "add_active_strategy, remove_active_strategy",
+    )
+    strategy_id: Mapped[str | None] = mapped_column(
+        String(100),
+        ForeignKey("strategies.strategy_id", ondelete="SET NULL"),
+        nullable=True,
+        comment="Strategy identifier (nullable for enable/disable commands)",
+    )
+
+    # Idempotency and concurrency control
+    client_request_id: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        comment="Client request ID for idempotency (nullable)",
+    )
+    expected_version: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        comment="Expected version for optimistic concurrency control",
+    )
+
+    # Command metadata
+    reason: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        comment="Reason for the command",
+    )
+    issued_by: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        comment="User/system that issued the command",
+    )
+
+    # Command status
+    status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        server_default="pending",
+        comment="Command status: pending, applied, failed",
+    )
+    error_message: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Error message if command failed",
+    )
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+        comment="Command creation timestamp",
+    )
+    applied_at: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=True,
+        comment="Timestamp when command was applied",
+    )
+
+    # Table constraints and indexes
+    __table_args__ = (
+        CheckConstraint(
+            "command_type IN ('enable_execution', 'disable_execution', "
+            "'add_active_strategy', 'remove_active_strategy')",
+            name="control_commands_command_type_check",
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'applied', 'failed')",
+            name="control_commands_status_check",
+        ),
+        Index("idx_control_commands_pending", "status"),
+        # Note: Unique index for idempotency will be created in migration
+        # with COALESCE for NULL strategy_id and WHERE clause for client_request_id
     )

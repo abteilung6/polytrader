@@ -52,6 +52,7 @@ async def test_market_change_closes_positions(
             limit_price=0.30,
             reason="Test",
             ttl_s=60.0,
+            strategy_id="simple_threshold",
         )
         order = await order_store.create_order(intent, "client-1")
         order.state = OrderState.FILLED
@@ -213,6 +214,7 @@ async def test_settlement_price_up_wins(
             limit_price=0.30,
             reason="Test",
             ttl_s=60.0,
+            strategy_id="simple_threshold",
         )
         order = await order_store.create_order(intent, "client-1")
         order.state = OrderState.FILLED
@@ -298,6 +300,7 @@ async def test_settlement_price_down_wins(
             limit_price=0.30,
             reason="Test",
             ttl_s=60.0,
+            strategy_id="simple_threshold",
         )
         order = await order_store.create_order(intent, "client-1")
         order.state = OrderState.FILLED
@@ -383,6 +386,7 @@ async def test_settlement_price_no_market_data_uses_entry_price(
             limit_price=0.30,
             reason="Test",
             ttl_s=60.0,
+            strategy_id="simple_threshold",
         )
         order = await order_store.create_order(intent, "client-1")
         order.state = OrderState.FILLED
@@ -445,6 +449,7 @@ async def test_settlement_price_single_outcome_price(
             limit_price=0.30,
             reason="Test",
             ttl_s=60.0,
+            strategy_id="simple_threshold",
         )
         order = await order_store.create_order(intent, "client-1")
         order.state = OrderState.FILLED
@@ -518,6 +523,7 @@ async def test_market_change_multiple_positions_same_market(
             limit_price=0.30,
             reason="Test UP",
             ttl_s=60.0,
+            strategy_id="simple_threshold",
         )
         order_up = await order_store.create_order(intent_up, "client-1")
         order_up.state = OrderState.FILLED
@@ -545,6 +551,7 @@ async def test_market_change_multiple_positions_same_market(
             limit_price=0.30,
             reason="Test DOWN",
             ttl_s=60.0,
+            strategy_id="simple_threshold",
         )
         order_down = await order_store.create_order(intent_down, "client-2")
         order_down.state = OrderState.FILLED
@@ -649,6 +656,7 @@ async def test_market_change_only_closes_old_market_positions(
             limit_price=0.30,
             reason="Test",
             ttl_s=60.0,
+            strategy_id="simple_threshold",
         )
         order1 = await order_store.create_order(intent1, "client-1")
         order1.state = OrderState.FILLED
@@ -676,6 +684,7 @@ async def test_market_change_only_closes_old_market_positions(
             limit_price=0.30,
             reason="Test",
             ttl_s=60.0,
+            strategy_id="simple_threshold",
         )
         order2 = await order_store.create_order(intent2, "client-2")
         order2.state = OrderState.FILLED

@@ -78,9 +78,19 @@ class PaperPositionManager(IPositionManager):
         # (market_slug, outcome) -> current_mid_price
         self._latest_prices: dict[tuple[str, Outcome], float] = {}
 
+        # Track strategy_id per position for per-strategy tracking
+        # (market_slug, outcome) -> strategy_id
+        self._position_strategy: dict[tuple[str, Outcome], str] = {}
+
         # Outcome tracking and performance metrics (Commit 4)
         self._outcome_tracker = OutcomeTracker()
         self._performance_metrics = PerformanceMetrics(self._outcome_tracker)
+
+        # Per-strategy performance tracking (Commit 3.2)
+        # Import here to avoid circular import with platform module
+        from polytrader.platform.performance import PerStrategyPerformanceTracker
+
+        self._per_strategy_tracker = PerStrategyPerformanceTracker(starting_equity=starting_equity)
 
         self._running = False
 
@@ -226,7 +236,7 @@ class PaperPositionManager(IPositionManager):
             fill_id=fill_event.fill_id,
         )
 
-        # Look up order to get market_slug, outcome, and side
+        # Look up order to get market_slug, outcome, side, and strategy_id
         order = self._store.get_order(fill_event.order_id)
         if order is None:
             logger.bind(
@@ -242,8 +252,32 @@ class PaperPositionManager(IPositionManager):
         market_slug = order.market_slug
         outcome = order.outcome
         side = order.side
+        strategy_id = order.intent.strategy_id if order.intent.strategy_id else "unknown"
         key = (market_slug, outcome)
 
+        # Store strategy_id for this position
+        if side == "BUY":
+            self._position_strategy[key] = strategy_id
+
+        # Update per-strategy tracker
+        if side == "BUY":
+            self._per_strategy_tracker.record_buy_fill(
+                strategy_id=strategy_id,
+                market_slug=market_slug,
+                outcome=outcome,
+                fill_event=fill_event,
+                order=order,
+            )
+        elif side == "SELL":
+            self._per_strategy_tracker.record_sell_fill(
+                strategy_id=strategy_id,
+                market_slug=market_slug,
+                outcome=outcome,
+                fill_event=fill_event,
+                order=order,
+            )
+
+        # Continue with existing position tracking (for backward compatibility)
         if side == "BUY":
             await self._handle_buy_fill(key, fill_event, order)
         elif side == "SELL":

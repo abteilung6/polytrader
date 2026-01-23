@@ -19,16 +19,11 @@ from polytrader.events.types import (
 
 
 @pytest.fixture
-async def event_sink(
-    postgres_test_url: str,
-) -> AsyncGenerator[EventSink, None]:
+async def event_sink(postgres_test_url: str, postgres_db: None) -> AsyncGenerator[EventSink, None]:
     """Create EventSink for testing."""
     from sqlalchemy import text
 
-    from polytrader.db.migrations import run_migrations
-
-    # Ensure migrations are run
-    await run_migrations(postgres_test_url)
+    # Migrations are run by postgres_db fixture
 
     # Create event bus and store
     store = PostgreSQLEventStore(connection_url=postgres_test_url, pool_size=5)
@@ -89,12 +84,14 @@ async def test_event_sink_batch_writing(event_sink: EventSink) -> None:
         events_published.append(event)
         await event_sink._bus.publish(SYSTEM_LIFECYCLE, event)
 
-    # Wait for flush
-    await asyncio.sleep(0.2)
+    # Wait for flush (flush_interval is 0.1s, wait longer to ensure completion)
+    await asyncio.sleep(0.5)
 
     # Verify all events were persisted
     events = list(event_sink._store.read_stream())
-    assert len(events) >= 5
+    # Filter to only SystemStartedEvent to avoid counting other events
+    system_events = [e for e in events if isinstance(e, SystemStartedEvent)]
+    assert len(system_events) >= 5
 
     # Verify all published events are in database
     published_ids = {e.event_id for e in events_published}
@@ -122,6 +119,7 @@ async def test_event_sink_subscribes_to_all_topics(event_sink: EventSink) -> Non
         limit_price=0.45,
         size=100.0,
         reason="Test",
+        strategy_id="simple_threshold",
     )
     event2 = OrderCreatedEvent(
         order_id="order-123",
@@ -144,13 +142,9 @@ async def test_event_sink_subscribes_to_all_topics(event_sink: EventSink) -> Non
 
 @pytest.mark.asyncio
 async def test_event_sink_handles_database_errors_gracefully(
-    postgres_test_url: str,
+    postgres_test_url: str, postgres_db: None
 ) -> None:
     """Test that EventSink handles database errors gracefully."""
-    from polytrader.db.migrations import run_migrations
-
-    # Ensure migrations are run
-    await run_migrations(postgres_test_url)
 
     # Create store
     store = PostgreSQLEventStore(connection_url=postgres_test_url, pool_size=5)
@@ -203,11 +197,8 @@ async def test_event_sink_handles_database_errors_gracefully(
 
 
 @pytest.mark.asyncio
-async def test_event_sink_circuit_breaker(postgres_test_url: str) -> None:
+async def test_event_sink_circuit_breaker(postgres_test_url: str, postgres_db: None) -> None:
     """Test that EventSink circuit breaker opens after failures."""
-    from polytrader.db.migrations import run_migrations
-
-    await run_migrations(postgres_test_url)
 
     # Create a store that will fail (invalid connection)
     invalid_store = PostgreSQLEventStore(

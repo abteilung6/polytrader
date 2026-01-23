@@ -60,6 +60,7 @@ def convert_target_to_intent(
         limit_price=limit_price,
         size=size,
         reason=reason,
+        strategy_id=signal.model_id,  # Propagate strategy_id from SignalEvent.model_id
         correlation_id=signal.correlation_id,  # Propagate from signal
         ttl_s=60.0,  # Default TTL
     )

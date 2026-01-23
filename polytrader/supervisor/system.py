@@ -1094,11 +1094,12 @@ class SystemSupervisor:
 
         service_start = time.perf_counter()
 
-        try:
-            # Start EventSink task
-            task = asyncio.create_task(self._event_sink.run())
-            self._event_sink_task = task
+        # Create task first (before any await that might fail)
+        # This ensures _event_sink_task is always set if _event_sink is not None
+        task = asyncio.create_task(self._event_sink.run())
+        self._event_sink_task = task
 
+        try:
             # Wait a short time for EventSink to initialize
             await asyncio.sleep(self.startup_delay_s)
 
@@ -1138,6 +1139,20 @@ class SystemSupervisor:
                 error=error_msg,
             )
 
+            # Ensure task is cleaned up if it was created
+            if self._event_sink_task is not None:
+                try:
+                    if not self._event_sink_task.done():
+                        self._event_sink_task.cancel()
+                    try:
+                        await asyncio.wait_for(self._event_sink_task, timeout=1.0)
+                    except (asyncio.CancelledError, TimeoutError):
+                        pass
+                except Exception:
+                    pass
+                finally:
+                    self._event_sink_task = None
+
             # Emit error event
             error_event = ServiceErrorEvent(
                 service_name="EventSink",
@@ -1163,6 +1178,33 @@ class SystemSupervisor:
         - Structured logging with context
         """
         if not self._running:
+            # Already stopped, but ensure EventSink cleanup happens
+            # This handles the case where stop() is called multiple times
+            # (e.g., test calls stop() and fixture teardown also calls stop())
+            if self._event_sink_task is not None:
+                try:
+                    if not self._event_sink_task.done():
+                        self._event_sink_task.cancel()
+                    try:
+                        await asyncio.wait_for(self._event_sink_task, timeout=5.0)
+                    except (asyncio.CancelledError, TimeoutError):
+                        pass
+                except Exception:
+                    pass
+                finally:
+                    self._event_sink_task = None
+            if self._event_sink is not None:
+                try:
+                    await self._event_sink.stop()
+                except Exception:
+                    pass
+                finally:
+                    if hasattr(self._event_sink, "_store"):
+                        try:
+                            await self._event_sink._store.cleanup()
+                        except Exception:
+                            pass
+                    self._event_sink = None
             return
 
         self._running = False
@@ -1172,6 +1214,24 @@ class SystemSupervisor:
 
         # Stop in reverse order
         # Stop EventSink (should be last to flush remaining events)
+        # Clean up EventSink task first (even if _event_sink is None, task might exist)
+        if self._event_sink_task is not None:
+            try:
+                if not self._event_sink_task.done():
+                    self._event_sink_task.cancel()
+                try:
+                    await asyncio.wait_for(self._event_sink_task, timeout=5.0)
+                except (asyncio.CancelledError, TimeoutError):
+                    pass
+            except Exception as e:
+                logger.bind(
+                    supervisor=SUPERVISOR_TYPE,
+                    service="EventSink",
+                    error_type=type(e).__name__,
+                ).exception("Error cancelling EventSink task: {error}", error=str(e))
+            finally:
+                self._event_sink_task = None
+
         if self._event_sink is not None:
             try:
                 await self._event_sink.stop()
@@ -1193,14 +1253,6 @@ class SystemSupervisor:
                     error_type=type(e).__name__,
                 ).exception("Error stopping EventSink: {error}", error=str(e))
             finally:
-                if self._event_sink_task is not None:
-                    if not self._event_sink_task.done():
-                        self._event_sink_task.cancel()
-                    try:
-                        await asyncio.wait_for(self._event_sink_task, timeout=5.0)
-                    except (asyncio.CancelledError, TimeoutError):
-                        pass
-                    self._event_sink_task = None
                 # Cleanup event store
                 if hasattr(self._event_sink, "_store"):
                     try:

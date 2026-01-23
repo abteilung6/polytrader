@@ -70,6 +70,7 @@ def sample_intent() -> OrderIntentEvent:
         limit_price=0.55,
         reason="Test",
         ttl_s=60.0,
+        strategy_id="simple_threshold",
     )
 
 

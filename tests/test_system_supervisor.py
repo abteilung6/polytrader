@@ -677,6 +677,7 @@ class TestSystemSupervisor:
             limit_price=0.5,
             size=1.0,
             reason="Test order",
+            strategy_id="simple_threshold",
         )
         order = await oms_store.create_order(intent, "client-order-1")
         # Set order to ACKED state with venue_order_id
@@ -1292,6 +1293,7 @@ class TestSystemSupervisor:
             limit_price=0.55,
             reason="Test",
             ttl_s=60.0,
+            strategy_id="simple_threshold",
         )
 
         command = SubmitOrderCommand(
@@ -1369,6 +1371,7 @@ class TestSystemSupervisor:
             limit_price=0.55,
             reason="Test",
             ttl_s=60.0,
+            strategy_id="simple_threshold",
         )
 
         command = SubmitOrderCommand(
@@ -1837,6 +1840,7 @@ class TestSystemSupervisor:
             limit_price=0.45,
             size=10.0,
             reason="Test reconstruction",
+            strategy_id="simple_threshold",
         )
 
         # Add order events to event store (simulating previous run)

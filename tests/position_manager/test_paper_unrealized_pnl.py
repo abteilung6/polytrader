@@ -58,6 +58,7 @@ async def test_unrealized_pnl_with_market_data(
             limit_price=0.30,
             reason="Test",
             ttl_s=60.0,
+            strategy_id="simple_threshold",
         )
         order = await order_store.create_order(intent, "client-1")
         # Manually update order to FILLED state for testing
@@ -216,6 +217,7 @@ async def test_unrealized_pnl_multiple_positions(
             limit_price=0.30,
             reason="Test 1",
             ttl_s=60.0,
+            strategy_id="simple_threshold",
         )
         intent2 = OrderIntentEvent(
             market_slug="market-2",
@@ -226,6 +228,7 @@ async def test_unrealized_pnl_multiple_positions(
             limit_price=0.60,
             reason="Test 2",
             ttl_s=60.0,
+            strategy_id="simple_threshold",
         )
 
         order1 = await order_store.create_order(intent1, "client-1")
@@ -328,6 +331,7 @@ async def test_unrealized_pnl_direct_handler(
         limit_price=0.30,
         reason="Test",
         ttl_s=60.0,
+        strategy_id="simple_threshold",
     )
     order = await order_store.create_order(intent, "client-1")
     order.state = OrderState.FILLED

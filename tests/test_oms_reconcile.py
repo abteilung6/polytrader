@@ -89,6 +89,7 @@ class TestReconciliationService:
             limit_price=0.55,
             reason="Test",
             ttl_s=60.0,
+            strategy_id="simple_threshold",
         )
         order = await store.create_order(intent, "client-123")
         # Simulate order being submitted and acked with venue_order_id
@@ -143,6 +144,7 @@ class TestReconciliationService:
             limit_price=0.55,
             reason="Test",
             ttl_s=60.0,
+            strategy_id="simple_threshold",
         )
         order = await store.create_order(intent, "client-123")
         # Simulate order being submitted and acked with venue_order_id
@@ -229,6 +231,7 @@ class TestReconciliationService:
             limit_price=0.55,
             reason="Test",
             ttl_s=60.0,
+            strategy_id="simple_threshold",
         )
         order = await store.create_order(intent, "client-123")
         # Simulate order being submitted and acked with venue_order_id
@@ -287,6 +290,7 @@ class TestReconciliationService:
             limit_price=0.55,
             reason="Test",
             ttl_s=60.0,
+            strategy_id="simple_threshold",
         )
         order = await store.create_order(intent, "client-123")
         # Simulate order being submitted, acked, and partially filled
@@ -347,6 +351,7 @@ class TestReconciliationService:
             limit_price=0.55,
             reason="Test",
             ttl_s=60.0,
+            strategy_id="simple_threshold",
         )
         order1 = await store.create_order(intent1, "client-123")
         # Simulate order1 being submitted and acked
@@ -367,6 +372,7 @@ class TestReconciliationService:
             limit_price=0.45,
             reason="Test",
             ttl_s=60.0,
+            strategy_id="simple_threshold",
         )
         order2 = await store.create_order(intent2, "client-789")
         # Simulate order2 being submitted and acked
@@ -473,6 +479,7 @@ class TestReconciliationService:
             limit_price=0.55,
             reason="Test",
             ttl_s=60.0,
+            strategy_id="simple_threshold",
         )
         order = await store.create_order(intent, "client-123")
         # Order is in SUBMITTED state, no venue_order_id yet

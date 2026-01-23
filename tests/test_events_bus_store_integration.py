@@ -50,6 +50,7 @@ class TestEventBusStoreIntegration:
             limit_price=0.55,
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
         executed_event = OrderExecutedEvent(
             market_slug="test-market",

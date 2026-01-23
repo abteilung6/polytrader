@@ -21,6 +21,7 @@ from polytrader.risk.policies import (
     check_price_sanity,
     check_proposal_validity,
     check_rate_limits,
+    check_strategy_activation,
     check_system_health,
     check_token_ownership,
 )
@@ -42,6 +43,7 @@ __all__ = [
     "check_price_sanity",
     "check_proposal_validity",
     "check_rate_limits",
+    "check_strategy_activation",
     "check_system_health",
     "check_token_ownership",
     "get_default_limits",

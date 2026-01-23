@@ -122,6 +122,7 @@ async def test_oms_reconstruction_from_events(
         size=1.0,
         reason="Test order",
         ts_mono=ts,
+        strategy_id="simple_threshold",
     )
     order_created = OrderCreatedEvent(
         order_id="order-1",
@@ -179,6 +180,7 @@ async def test_oms_reconstruction_with_fill(
         size=1.0,
         reason="Test order",
         ts_mono=ts,
+        strategy_id="simple_threshold",
     )
     order_created = OrderCreatedEvent(
         order_id="order-1",
@@ -245,6 +247,7 @@ async def test_oms_reconstruction_with_reject(
         size=1.0,
         reason="Test order",
         ts_mono=ts,
+        strategy_id="simple_threshold",
     )
     order_created = OrderCreatedEvent(
         order_id="order-1",
@@ -299,6 +302,7 @@ async def test_oms_reconstruction_with_cancel(
         size=1.0,
         reason="Test order",
         ts_mono=ts,
+        strategy_id="simple_threshold",
     )
     order_created = OrderCreatedEvent(
         order_id="order-1",
@@ -368,6 +372,7 @@ async def test_oms_reconstruction_out_of_order_events(
         size=1.0,
         reason="Test order",
         ts_mono=ts,
+        strategy_id="simple_threshold",
     )
     order_created = OrderCreatedEvent(
         order_id="order-1",
@@ -427,6 +432,7 @@ async def test_position_reconstruction_from_fills(
         size=1.0,
         reason="Test order",
         ts_mono=ts,
+        strategy_id="simple_threshold",
     )
 
     order = await oms_store.create_order(intent, "client-1")
@@ -501,6 +507,7 @@ async def test_reconstruct_all(
         size=1.0,
         reason="Test order",
         ts_mono=ts,
+        strategy_id="simple_threshold",
     )
     order_created = OrderCreatedEvent(
         order_id="order-1",
@@ -534,6 +541,7 @@ async def test_reconstruct_all(
         size=1.0,
         reason="Test order",
         ts_mono=ts,
+        strategy_id="simple_threshold",
     )
 
     order = await oms_store.create_order(intent, "client-1")

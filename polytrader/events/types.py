@@ -667,11 +667,13 @@ class OrderIntentEvent(Event):
         size: Trade size in USD
         reason: Human-readable reason for the intent
         ttl_s: Time-to-live in seconds before intent expires (default: 2.0)
+        strategy_id: Strategy identifier (propagated from SignalEvent.model_id)
 
     Note:
         - Timestamps come from Event base class (ts_wall, ts_mono)
         - Source is automatically set to EventSource.PORTFOLIO
         - All Event base class fields are inherited (event_id, correlation_id, run_id, etc.)
+        - strategy_id is propagated from SignalEvent.model_id in portfolio layer
     """
 
     source: EventSource = Field(default=EventSource.PORTFOLIO)
@@ -685,6 +687,7 @@ class OrderIntentEvent(Event):
     )
     size: float = Field(gt=0, description="Trade size in USD")
     reason: str = Field(description="Human-readable reason for the intent")
+    strategy_id: str = Field(description="Strategy identifier (from SignalEvent.model_id)")
     ttl_s: float = Field(
         default=2.0, gt=0, description="Time-to-live in seconds before intent expires"
     )
@@ -886,6 +889,58 @@ class KillSwitchEvent(Event):
     details: dict[str, Any] = Field(
         default_factory=dict,
         description="Dictionary with additional context (order counts, etc.)",
+    )
+
+
+class ControlCommandEvent(Event):
+    """Event emitted when control command is applied.
+
+    Per Platform_Proposal.md §2.4.2: ControlCommandEvent records when control commands
+    are processed by the control plane service. This provides an audit trail for
+    execution control and strategy activation changes.
+
+    Attributes:
+        command_id: Command identifier (UUID as string)
+        command_type: Type of command (enable_execution, disable_execution, etc.)
+        strategy_id: Strategy identifier (None for enable/disable commands)
+        reason: Reason for the command
+        issued_by: User/system that issued the command
+        client_request_id: Client request ID for idempotency tracking (optional)
+        status: Command status (pending, applied, failed)
+        error_message: Error message if command failed (optional)
+        expected_version: Version that was expected (for optimistic concurrency)
+        actual_version: Version after application (for optimistic concurrency)
+
+    Note:
+        - Timestamps come from Event base class (ts_wall, ts_mono)
+        - Source is automatically set to EventSource.OPS
+        - All Event base class fields are inherited (event_id, correlation_id, run_id, etc.)
+    """
+
+    source: EventSource = Field(default=EventSource.OPS)
+
+    command_id: str = Field(description="Command identifier (UUID as string)")
+    command_type: Literal[
+        "enable_execution",
+        "disable_execution",
+        "add_active_strategy",
+        "remove_active_strategy",
+    ] = Field(description="Type of command")
+    strategy_id: str | None = Field(
+        default=None, description="Strategy identifier (None for enable/disable commands)"
+    )
+    reason: str = Field(description="Reason for the command")
+    issued_by: str = Field(description="User/system that issued the command")
+    client_request_id: str | None = Field(
+        default=None, description="Client request ID for idempotency tracking"
+    )
+    status: Literal["pending", "applied", "failed"] = Field(description="Command status")
+    error_message: str | None = Field(default=None, description="Error message if command failed")
+    expected_version: int | None = Field(
+        default=None, description="Version that was expected (for optimistic concurrency)"
+    )
+    actual_version: int | None = Field(
+        default=None, description="Version after application (for optimistic concurrency)"
     )
 
 

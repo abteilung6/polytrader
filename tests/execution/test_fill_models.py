@@ -30,6 +30,7 @@ class TestFillPriceCalculation:
             limit_price=0.55,
             reason="Test",
             ttl_s=60.0,
+            strategy_id="simple_threshold",
         )
 
         fill_price = calculate_fill_price(FillModel.IMMEDIATE, intent, store)
@@ -57,6 +58,7 @@ class TestFillPriceCalculation:
             limit_price=0.55,
             reason="Test",
             ttl_s=60.0,
+            strategy_id="simple_threshold",
         )
 
         fill_price = calculate_fill_price(FillModel.MID_PRICE, intent, store)
@@ -75,6 +77,7 @@ class TestFillPriceCalculation:
             limit_price=0.55,
             reason="Test",
             ttl_s=60.0,
+            strategy_id="simple_threshold",
         )
 
         fill_price = calculate_fill_price(FillModel.MID_PRICE, intent, store)
@@ -102,6 +105,7 @@ class TestFillPriceCalculation:
             limit_price=0.55,
             reason="Test",
             ttl_s=60.0,
+            strategy_id="simple_threshold",
         )
 
         slippage_bps = 10.0  # 10 basis points = 0.001
@@ -135,6 +139,7 @@ class TestFillPriceCalculation:
             limit_price=0.55,
             reason="Test",
             ttl_s=60.0,
+            strategy_id="simple_threshold",
         )
 
         slippage_bps = 10.0  # 10 basis points = 0.001
@@ -168,6 +173,7 @@ class TestFillPriceCalculation:
             limit_price=0.50,
             reason="Test",
             ttl_s=60.0,
+            strategy_id="simple_threshold",
         )
 
         slippage_bps = 1000.0  # Large slippage

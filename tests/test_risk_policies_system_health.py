@@ -21,6 +21,7 @@ class TestCheckSystemHealth:
             limit_price=0.45,
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         context = RiskContext(
@@ -46,6 +47,7 @@ class TestCheckSystemHealth:
             limit_price=0.45,
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         context = RiskContext(
@@ -71,6 +73,7 @@ class TestCheckSystemHealth:
             limit_price=0.45,
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         context = RiskContext(
@@ -96,6 +99,7 @@ class TestCheckSystemHealth:
             limit_price=0.45,
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         context = RiskContext(
@@ -121,6 +125,7 @@ class TestCheckSystemHealth:
             limit_price=0.45,
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         context = RiskContext(
@@ -152,6 +157,7 @@ class TestCheckRateLimits:
             limit_price=0.45,
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         context = RiskContext(
@@ -175,6 +181,7 @@ class TestCheckRateLimits:
             limit_price=0.45,
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         context = RiskContext(
@@ -201,6 +208,7 @@ class TestCheckRateLimits:
             limit_price=0.45,
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         context = RiskContext(
@@ -227,6 +235,7 @@ class TestCheckRateLimits:
             limit_price=0.45,
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         context = RiskContext(
@@ -250,6 +259,7 @@ class TestCheckRateLimits:
             limit_price=0.45,
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         context = RiskContext(
@@ -273,6 +283,7 @@ class TestCheckRateLimits:
             limit_price=0.65,
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         context = RiskContext(

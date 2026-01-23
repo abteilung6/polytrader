@@ -57,9 +57,9 @@ class MarketSupervisor:
         discovery_service: IMarketDiscoveryService,
         adapter_factory: Callable[[str], IMarketDataAdapter],
         observer_factory: Callable[[IMarketDataAdapter], IObserver],
-        strategy_factory: Callable[[str], IStrategy],
         bus: EventBus,
         store: IMarketDataStore,
+        strategy_factory: Callable[[str], IStrategy] | None = None,
         position_manager: IPositionManager | None = None,
         monitor_interval: float = 1.0,
         evaluation_throttle_ms: float = 0.0,
@@ -71,12 +71,17 @@ class MarketSupervisor:
             discovery_service: Service for finding active markets
             adapter_factory: Factory function to create adapters
             observer_factory: Factory function to create observers
-            strategy_factory: Factory function to create strategies
+            strategy_factory: Factory function to create strategies (None for strategy-less mode)
             bus: Event bus for communication
             store: Market data store for historical data
             position_manager: Position manager reference (from SystemSupervisor, for querying)
             monitor_interval: How often to check for market changes (seconds, default: 1.0)
             evaluation_throttle_ms: Minimum time between strategy evaluations (ms, default: 0.0)
+
+        Note:
+            When strategy_factory is None (strategy-less mode), MarketSupervisor only manages
+            Adapter and Observer. Strategy creation and evaluation are skipped. This mode is
+            used when strategies are managed externally (e.g., by StrategyRunner in platform mode).
         """
         self.pattern = pattern
         self.discovery = discovery_service
@@ -237,11 +242,10 @@ class MarketSupervisor:
             return
 
         transition_start = time.perf_counter()
-        logger.bind(
-            supervisor=SUPERVISOR_TYPE,
-            old_market=old_market,
-            new_market=new_market,
-        ).info(
+        # Log initial transition (None -> market) at debug level to reduce noise
+        # Log actual market changes (market -> market) at info level
+        log_func = logger.debug if old_market is None else logger.info
+        log_func(
             "Transitioning from {old_market} to {new_market}",
             old_market=old_market or "None",
             new_market=new_market,
@@ -281,21 +285,29 @@ class MarketSupervisor:
             )
             await self.bus.publish(SYSTEM_LIFECYCLE, started_event)
 
-            # Strategy
-            component_start = time.perf_counter()
-            self.strategy = self.strategy_factory(new_market)
-            # Strategy evaluation: subscribe to MARKET_DATA and evaluate on-demand
-            self._strategy_evaluation_task = asyncio.create_task(self._evaluate_strategy_loop())
-            # Strategy background tasks (if strategy needs them)
-            self._strategy_background_task = asyncio.create_task(self._run_strategy_background())
-            strategy_start_ms = (time.perf_counter() - component_start) * 1000
-            record_service_started("Strategy", SUPERVISOR_TYPE, strategy_start_ms)
-            started_event = ServiceStartedEvent(
-                service_name="Strategy",
-                supervisor_type=SUPERVISOR_TYPE,
-                startup_time_ms=strategy_start_ms,
-            )
-            await self.bus.publish(SYSTEM_LIFECYCLE, started_event)
+            # Strategy (only if strategy_factory provided)
+            if self.strategy_factory is not None:
+                component_start = time.perf_counter()
+                self.strategy = self.strategy_factory(new_market)
+                # Strategy evaluation: subscribe to MARKET_DATA and evaluate on-demand
+                self._strategy_evaluation_task = asyncio.create_task(self._evaluate_strategy_loop())
+                # Strategy background tasks (if strategy needs them)
+                self._strategy_background_task = asyncio.create_task(
+                    self._run_strategy_background()
+                )
+                strategy_start_ms = (time.perf_counter() - component_start) * 1000
+                record_service_started("Strategy", SUPERVISOR_TYPE, strategy_start_ms)
+                started_event = ServiceStartedEvent(
+                    service_name="Strategy",
+                    supervisor_type=SUPERVISOR_TYPE,
+                    startup_time_ms=strategy_start_ms,
+                )
+                await self.bus.publish(SYSTEM_LIFECYCLE, started_event)
+            else:
+                # Strategy-less mode: no strategy instance, no evaluation/background tasks
+                self.strategy = None
+                self._strategy_evaluation_task = None
+                self._strategy_background_task = None
 
             # Record transition metric
             record_market_transition(SUPERVISOR_TYPE, old_market, new_market)
@@ -305,12 +317,10 @@ class MarketSupervisor:
                 old_market=old_market,
                 new_market=new_market,
             )
-            logger.bind(
-                supervisor=SUPERVISOR_TYPE,
-                old_market=old_market,
-                new_market=new_market,
-                event_id=event.event_id,
-            ).info(
+            # Log initial transition (None -> market) at debug level to reduce noise
+            # Log actual market changes (market -> market) at info level
+            log_func = logger.debug if old_market is None else logger.info
+            log_func(
                 "📢 Publishing MarketChangeEvent: {old_market} → {new_market} "
                 "(event_id={event_id})",
                 old_market=old_market or "None",
@@ -320,11 +330,10 @@ class MarketSupervisor:
             await self.bus.publish(MARKET_CHANGE, event)
 
             transition_time_ms = (time.perf_counter() - transition_start) * 1000
-            logger.bind(
-                supervisor=SUPERVISOR_TYPE,
-                new_market=new_market,
-                transition_time_ms=transition_time_ms,
-            ).info(
+            # Log initial transition (None -> market) at debug level to reduce noise
+            # Log actual market changes (market -> market) at info level
+            log_func = logger.debug if old_market is None else logger.info
+            log_func(
                 "Successfully transitioned to market: {new_market} in {time_ms:.1f}ms",
                 new_market=new_market,
                 time_ms=transition_time_ms,

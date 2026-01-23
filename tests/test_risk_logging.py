@@ -39,6 +39,7 @@ class TestRiskStructuredLogging:
             size=1.0,
             reason="Test",
             ttl_s=60.0,
+            strategy_id="simple_threshold",
         )
 
         market_data = MarketDataEvent(
@@ -110,6 +111,7 @@ class TestRiskStructuredLogging:
             size=1.0,
             reason="Test",
             ttl_s=60.0,
+            strategy_id="simple_threshold",
         )
 
         market_data = MarketDataEvent(
@@ -166,6 +168,7 @@ class TestRiskStructuredLogging:
             size=1.0,
             reason="Test",
             ttl_s=60.0,
+            strategy_id="simple_threshold",
         )
 
         # Publish proposal to bus (RiskChecker subscribes to PROPOSALS)

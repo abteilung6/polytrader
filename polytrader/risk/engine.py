@@ -33,6 +33,7 @@ from polytrader.risk.policies import (
     check_price_sanity,
     check_proposal_validity,
     check_rate_limits,
+    check_strategy_activation,
     check_system_health,
     check_token_ownership,
 )
@@ -79,9 +80,10 @@ class RiskEngine:
             check_system_health,  # Second: system health gates
             check_data_freshness,  # Third: data freshness
             check_token_ownership,  # Fourth: token ownership
-            check_max_trades_per_market,  # Fifth: max trades
-            check_position_limits,  # Sixth: position limits
-            check_price_sanity,  # Seventh: price sanity
+            check_strategy_activation,  # Fifth: strategy activation (paper vs live)
+            check_max_trades_per_market,  # Sixth: max trades
+            check_position_limits,  # Seventh: position limits
+            check_price_sanity,  # Eighth: price sanity
             check_rate_limits,  # Last: rate limits
         ]
 

@@ -137,6 +137,7 @@ async def test_oms_pipeline_approved_proposal_to_order_creation() -> None:
         limit_price=0.55,
         reason="Test integration",
         ttl_s=60.0,
+        strategy_id="simple_threshold",
     )
 
     # Subscribe to command queue BEFORE starting OMS Core
@@ -219,6 +220,7 @@ async def test_oms_pipeline_execution_router_processes_commands() -> None:
         limit_price=0.55,
         reason="Test execution",
         ttl_s=60.0,
+        strategy_id="simple_threshold",
     )
 
     # Start execution router
@@ -284,6 +286,7 @@ async def test_oms_pipeline_end_to_end_ack() -> None:
         limit_price=0.55,
         reason="Test E2E",
         ttl_s=60.0,
+        strategy_id="simple_threshold",
     )
 
     # Start both components
@@ -370,6 +373,7 @@ async def test_oms_pipeline_rejection_flow() -> None:
         limit_price=0.55,
         reason="Test rejection",
         ttl_s=60.0,
+        strategy_id="simple_threshold",
     )
 
     # Start both components

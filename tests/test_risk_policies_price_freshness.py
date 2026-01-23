@@ -23,6 +23,7 @@ class TestCheckPriceSanity:
             limit_price=0.45,  # Within bounds (mid=0.45, max=0.45*1.1=0.495)
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         market_data = MarketDataEvent(
@@ -53,6 +54,7 @@ class TestCheckPriceSanity:
             limit_price=0.50,  # Exceeds max (mid=0.45, max=0.45*1.1=0.495)
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         market_data = MarketDataEvent(
@@ -85,6 +87,7 @@ class TestCheckPriceSanity:
             limit_price=0.65,  # Within bounds (mid=0.45, min=0.45*0.9=0.405)
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         market_data = MarketDataEvent(
@@ -112,6 +115,7 @@ class TestCheckPriceSanity:
             limit_price=0.40,  # Below min (mid=0.45, min=0.45*0.9=0.405)
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         market_data = MarketDataEvent(
@@ -144,6 +148,7 @@ class TestCheckPriceSanity:
             limit_price=0.45,
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         context = RiskContext(intent=intent, market_data=None)  # No market data
@@ -165,6 +170,7 @@ class TestCheckPriceSanity:
             limit_price=0.495,  # Exactly at max (mid=0.45, max=0.45*1.1=0.495)
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         market_data = MarketDataEvent(
@@ -192,6 +198,7 @@ class TestCheckPriceSanity:
             limit_price=0.405,  # Exactly at min (mid=0.45, min=0.45*0.9=0.405)
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         market_data = MarketDataEvent(
@@ -219,6 +226,7 @@ class TestCheckPriceSanity:
             limit_price=0.50,  # Would be out of bounds with 0.1 threshold
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         market_data = MarketDataEvent(
@@ -250,6 +258,7 @@ class TestCheckDataFreshness:
             limit_price=0.45,
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         market_data = MarketDataEvent(
@@ -280,6 +289,7 @@ class TestCheckDataFreshness:
             limit_price=0.45,
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         market_data = MarketDataEvent(
@@ -313,6 +323,7 @@ class TestCheckDataFreshness:
             limit_price=0.45,
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         context = RiskContext(intent=intent, market_data=None)  # No market data
@@ -336,6 +347,7 @@ class TestCheckDataFreshness:
             limit_price=0.45,
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         market_data = MarketDataEvent(
@@ -366,6 +378,7 @@ class TestCheckDataFreshness:
             limit_price=0.45,
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         market_data = MarketDataEvent(
@@ -396,6 +409,7 @@ class TestCheckDataFreshness:
             limit_price=0.45,
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         market_data = MarketDataEvent(
@@ -424,6 +438,7 @@ class TestCheckDataFreshness:
             limit_price=0.45,
             size=1.0,
             reason="Test",
+            strategy_id="simple_threshold",
         )
 
         market_data = MarketDataEvent(

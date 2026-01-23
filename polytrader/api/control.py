@@ -1,0 +1,543 @@
+"""Control API routes (state and command endpoints).
+
+Per Platform_Proposal.md: Elite-style API design with separation of
+state endpoints (/state/*) and command endpoints (/commands/*).
+"""
+
+from fastapi import APIRouter, Depends, HTTPException, status
+
+from polytrader.api.dependencies import (
+    get_control_command_repo,
+    get_execution_control_repo,
+    get_live_strategy_repo,
+    get_strategy_registry,
+)
+from polytrader.api.models import (
+    ActivateStrategyRequest,
+    CommandEnvelopeResponse,
+    CommandStatusResponse,
+    CreateStrategyRequest,
+    DeactivateStrategyRequest,
+    DisableExecutionRequest,
+    EnableExecutionRequest,
+    ErrorResponse,
+    ExecutionStateResponse,
+    HealthGates,
+    HealthGateStatus,
+    HealthResponse,
+    LiveStrategiesResponse,
+    StrategiesResponse,
+    StrategyResponse,
+    UpdateStrategyRequest,
+    VersionConflictResponse,
+)
+from polytrader.db.models import ControlCommandRecord
+from polytrader.db.models import StrategyRecord as StrategyRecordModel
+from polytrader.platform.control import (
+    ControlCommandRepository,
+    ExecutionControlRepository,
+    LiveStrategyRepository,
+)
+from polytrader.platform.registry import StrategyRegistry
+
+router = APIRouter(prefix="/api/v1", tags=["control"])
+
+
+# ============================================================================
+# State Endpoints (Reads)
+# ============================================================================
+
+
+@router.get("/state/health", response_model=HealthResponse)
+async def get_health() -> HealthResponse:
+    """Get system health with individual gate statuses.
+
+    Returns overall status and individual gate statuses (db, market_data_freshness, etc.).
+    Overall status = worst gate status (down > degraded > ok).
+
+    Note: Health gates implementation is basic in this commit.
+    Full health gate checks will be implemented in later commits.
+    """
+    # Basic health check: database connectivity
+    # TODO: Add full health gate checks (market_data_freshness, event_bus_lag, etc.)
+    try:
+        # Try to get execution control (tests DB connectivity)
+        from polytrader.api.dependencies import get_db_session
+
+        async for session in get_db_session():
+            from polytrader.platform.control import ExecutionControlRepository
+
+            repo = ExecutionControlRepository(session)
+            await repo.get_control()
+            db_status = HealthGateStatus(status="ok", message="Database connected")
+            break
+    except Exception:
+        db_status = HealthGateStatus(status="down", message="Database connection failed")
+
+    # Placeholder for other gates (will be implemented in later commits)
+    gates = HealthGates(
+        db=db_status,
+        market_data_freshness=HealthGateStatus(status="ok", message="Not implemented yet"),
+        event_bus_lag=HealthGateStatus(status="ok", message="Not implemented yet"),
+        venue_connectivity=HealthGateStatus(status="ok", message="Not implemented yet"),
+        risk_engine=HealthGateStatus(status="ok", message="Not implemented yet"),
+        clock_skew_ms=0,
+    )
+
+    # Overall status = worst gate status
+    gate_statuses = [
+        gates.db.status,
+        gates.market_data_freshness.status,
+        gates.event_bus_lag.status,
+        gates.venue_connectivity.status,
+        gates.risk_engine.status,
+    ]
+    if "down" in gate_statuses:
+        overall = "down"
+    elif "degraded" in gate_statuses:
+        overall = "degraded"
+    else:
+        overall = "ok"
+
+    return HealthResponse(overall=overall, gates=gates)
+
+
+@router.get("/state/execution", response_model=ExecutionStateResponse)
+async def get_execution_state(
+    execution_repo: ExecutionControlRepository = Depends(get_execution_control_repo),  # noqa: B008
+) -> ExecutionStateResponse:
+    """Get execution control state (with version for optimistic concurrency)."""
+    control = await execution_repo.get_control()
+    return ExecutionStateResponse(
+        execution_enabled=control.execution_enabled,
+        version=control.version,
+        updated_at=control.updated_at,
+        updated_by=control.updated_by,
+        reason=control.reason,
+    )
+
+
+@router.get("/state/live-strategies", response_model=LiveStrategiesResponse)
+async def get_live_strategies(
+    live_repo: LiveStrategyRepository = Depends(get_live_strategy_repo),  # noqa: B008
+) -> LiveStrategiesResponse:
+    """Get active live strategies."""
+    active = await live_repo.list_active()
+    return LiveStrategiesResponse(active_strategies=list(active))
+
+
+@router.get("/state/strategies", response_model=StrategiesResponse)
+async def get_strategies(
+    registry: StrategyRegistry = Depends(get_strategy_registry),  # noqa: B008
+) -> StrategiesResponse:
+    """Get all strategies in registry."""
+    strategies = await registry.list_strategies()
+    return StrategiesResponse(
+        strategies=[
+            StrategyResponse(
+                strategy_id=s.strategy_id,
+                name=s.name,
+                description=s.description,
+                config=s.config,
+                enabled=s.enabled,
+                created_at=s.created_at,
+                updated_at=s.updated_at,
+            )
+            for s in strategies
+        ]
+    )
+
+
+@router.get(
+    "/state/commands/{command_id}",
+    response_model=CommandStatusResponse,
+    responses={
+        404: {"model": ErrorResponse, "description": "Command not found"},
+    },
+)
+async def get_command_status(
+    command_id: str,
+    command_repo: ControlCommandRepository = Depends(get_control_command_repo),  # noqa: B008
+) -> CommandStatusResponse:
+    """Get command status by command_id."""
+    cmd = await command_repo.get_command(command_id)
+
+    if cmd is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=ErrorResponse(
+                error="Command not found",
+                detail=f"No command found with command_id: {command_id}",
+            ).model_dump(),
+        )
+
+    return CommandStatusResponse(
+        command_id=str(cmd.command_id),
+        type=cmd.command_type,
+        status=cmd.status,
+        error_message=cmd.error_message,
+        created_at=cmd.created_at,
+        applied_at=cmd.applied_at,
+        reason=cmd.reason,
+        issued_by=cmd.issued_by,
+    )
+
+
+# ============================================================================
+# Command Endpoints (Writes)
+# ============================================================================
+
+
+@router.post(
+    "/commands/execution/enable",
+    response_model=CommandEnvelopeResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        409: {"model": VersionConflictResponse, "description": "Version conflict"},
+        400: {"model": ErrorResponse, "description": "Validation error"},
+    },
+)
+async def enable_execution(
+    request: EnableExecutionRequest,
+    command_repo: ControlCommandRepository = Depends(get_control_command_repo),  # noqa: B008
+    execution_repo: ExecutionControlRepository = Depends(get_execution_control_repo),  # noqa: B008
+) -> CommandEnvelopeResponse:
+    """Enable execution (creates command in queue).
+
+    Idempotent: If client_request_id already exists, returns existing command_id.
+    Version check: If expected_version != current version, returns 409 Conflict.
+    """
+    # Check idempotency
+    existing = await command_repo.find_by_client_request_id(
+        "enable_execution", None, request.client_request_id
+    )
+    if existing:
+        # Return existing command, but always return "pending" status in envelope
+        # (actual status can be checked via GET /state/commands/{command_id})
+        return CommandEnvelopeResponse(
+            command_id=str(existing.command_id),
+            status="pending",  # Always return "pending" for idempotency (per API contract)
+            submitted_at=existing.created_at,
+            links={"status": f"/api/v1/state/commands/{existing.command_id}"},
+        )
+
+    # Check version if provided
+    if request.expected_version is not None:
+        current = await execution_repo.get_control()
+        if current.version != request.expected_version:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=VersionConflictResponse(
+                    expected_version=request.expected_version,
+                    actual_version=current.version,
+                    detail=(
+                        f"Version mismatch: expected {request.expected_version}, "
+                        f"got {current.version}"
+                    ),
+                ).model_dump(),
+            )
+
+    # Create command
+    cmd = ControlCommandRecord(
+        command_type="enable_execution",
+        reason=request.reason,
+        issued_by=request.issued_by,
+        client_request_id=request.client_request_id,
+        expected_version=request.expected_version,
+    )
+    command_id = await command_repo.create_command(cmd)
+
+    return CommandEnvelopeResponse(
+        command_id=command_id,
+        status="pending",
+        submitted_at=cmd.created_at,
+        links={"status": f"/api/v1/state/commands/{command_id}"},
+    )
+
+
+@router.post(
+    "/commands/execution/disable",
+    response_model=CommandEnvelopeResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        409: {"model": VersionConflictResponse, "description": "Version conflict"},
+        400: {"model": ErrorResponse, "description": "Validation error"},
+    },
+)
+async def disable_execution(
+    request: DisableExecutionRequest,
+    command_repo: ControlCommandRepository = Depends(get_control_command_repo),  # noqa: B008
+    execution_repo: ExecutionControlRepository = Depends(get_execution_control_repo),  # noqa: B008
+) -> CommandEnvelopeResponse:
+    """Disable execution (creates command in queue).
+
+    Idempotent: If client_request_id already exists, returns existing command_id.
+    Version check: If expected_version != current version, returns 409 Conflict.
+    """
+    # Check idempotency
+    existing = await command_repo.find_by_client_request_id(
+        "disable_execution", None, request.client_request_id
+    )
+    if existing:
+        # Return existing command, but always return "pending" status in envelope
+        # (actual status can be checked via GET /state/commands/{command_id})
+        return CommandEnvelopeResponse(
+            command_id=str(existing.command_id),
+            status="pending",  # Always return "pending" for idempotency (per API contract)
+            submitted_at=existing.created_at,
+            links={"status": f"/api/v1/state/commands/{existing.command_id}"},
+        )
+
+    # Check version if provided
+    if request.expected_version is not None:
+        current = await execution_repo.get_control()
+        if current.version != request.expected_version:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=VersionConflictResponse(
+                    expected_version=request.expected_version,
+                    actual_version=current.version,
+                    detail=(
+                        f"Version mismatch: expected {request.expected_version}, "
+                        f"got {current.version}"
+                    ),
+                ).model_dump(),
+            )
+
+    # Create command
+    cmd = ControlCommandRecord(
+        command_type="disable_execution",
+        reason=request.reason,
+        issued_by=request.issued_by,
+        client_request_id=request.client_request_id,
+        expected_version=request.expected_version,
+    )
+    command_id = await command_repo.create_command(cmd)
+
+    return CommandEnvelopeResponse(
+        command_id=command_id,
+        status="pending",
+        submitted_at=cmd.created_at,
+        links={"status": f"/api/v1/state/commands/{command_id}"},
+    )
+
+
+@router.post(
+    "/commands/live-strategies/{strategy_id}/activate",
+    response_model=CommandEnvelopeResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        400: {"model": ErrorResponse, "description": "Validation error"},
+    },
+)
+async def activate_strategy(
+    strategy_id: str,
+    request: ActivateStrategyRequest,
+    command_repo: ControlCommandRepository = Depends(get_control_command_repo),  # noqa: B008
+) -> CommandEnvelopeResponse:
+    """Activate strategy for live trading (creates command in queue).
+
+    Idempotent: If client_request_id already exists, returns existing command_id.
+    """
+    # Check idempotency
+    existing = await command_repo.find_by_client_request_id(
+        "add_active_strategy", strategy_id, request.client_request_id
+    )
+    if existing:
+        # Return existing command, but always return "pending" status in envelope
+        # (actual status can be checked via GET /state/commands/{command_id})
+        return CommandEnvelopeResponse(
+            command_id=str(existing.command_id),
+            status="pending",  # Always return "pending" for idempotency (per API contract)
+            submitted_at=existing.created_at,
+            links={"status": f"/api/v1/state/commands/{existing.command_id}"},
+        )
+
+    # Create command
+    cmd = ControlCommandRecord(
+        command_type="add_active_strategy",
+        strategy_id=strategy_id,
+        reason=request.reason,
+        issued_by=request.issued_by,
+        client_request_id=request.client_request_id,
+    )
+    command_id = await command_repo.create_command(cmd)
+
+    return CommandEnvelopeResponse(
+        command_id=command_id,
+        status="pending",
+        submitted_at=cmd.created_at,
+        links={"status": f"/api/v1/state/commands/{command_id}"},
+    )
+
+
+@router.post(
+    "/commands/live-strategies/{strategy_id}/deactivate",
+    response_model=CommandEnvelopeResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        400: {"model": ErrorResponse, "description": "Validation error"},
+    },
+)
+async def deactivate_strategy(
+    strategy_id: str,
+    request: DeactivateStrategyRequest,
+    command_repo: ControlCommandRepository = Depends(get_control_command_repo),  # noqa: B008
+) -> CommandEnvelopeResponse:
+    """Deactivate strategy for live trading (creates command in queue).
+
+    Idempotent: If client_request_id already exists, returns existing command_id.
+    """
+    # Check idempotency
+    existing = await command_repo.find_by_client_request_id(
+        "remove_active_strategy", strategy_id, request.client_request_id
+    )
+    if existing:
+        # Return existing command, but always return "pending" status in envelope
+        # (actual status can be checked via GET /state/commands/{command_id})
+        return CommandEnvelopeResponse(
+            command_id=str(existing.command_id),
+            status="pending",  # Always return "pending" for idempotency (per API contract)
+            submitted_at=existing.created_at,
+            links={"status": f"/api/v1/state/commands/{existing.command_id}"},
+        )
+
+    # Create command
+    cmd = ControlCommandRecord(
+        command_type="remove_active_strategy",
+        strategy_id=strategy_id,
+        reason=request.reason,
+        issued_by=request.issued_by,
+        client_request_id=request.client_request_id,
+    )
+    command_id = await command_repo.create_command(cmd)
+
+    return CommandEnvelopeResponse(
+        command_id=command_id,
+        status="pending",
+        submitted_at=cmd.created_at,
+        links={"status": f"/api/v1/state/commands/{command_id}"},
+    )
+
+
+@router.post(
+    "/commands/strategies",
+    response_model=StrategyResponse,
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        400: {"model": ErrorResponse, "description": "Validation error"},
+        409: {"model": ErrorResponse, "description": "Strategy already exists"},
+    },
+)
+async def create_strategy(
+    request: CreateStrategyRequest,
+    registry: StrategyRegistry = Depends(get_strategy_registry),  # noqa: B008
+) -> StrategyResponse:
+    """Create a new strategy in registry."""
+    strategy = StrategyRecordModel(
+        strategy_id=request.strategy_id,
+        name=request.name,
+        description=request.description,
+        config=request.config,
+        enabled=request.enabled,
+    )
+
+    try:
+        await registry.create_strategy(strategy)
+        # Re-fetch to ensure timestamps are loaded
+        from sqlalchemy import select
+
+        # Re-fetch to ensure timestamps are loaded
+        query = select(StrategyRecordModel).where(
+            StrategyRecordModel.strategy_id == strategy.strategy_id
+        )
+        result = await registry.session.execute(query)
+        strategy = result.scalar_one()
+    except Exception as e:
+        # Check if it's a duplicate key error
+        error_str = str(e).lower()
+        if "unique" in error_str or "duplicate" in error_str:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=ErrorResponse(
+                    error="Strategy already exists",
+                    detail=f"Strategy with strategy_id '{request.strategy_id}' already exists",
+                ).model_dump(),
+            ) from e
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ErrorResponse(error="Failed to create strategy", detail=str(e)).model_dump(),
+        ) from e
+
+    return StrategyResponse(
+        strategy_id=strategy.strategy_id,
+        name=strategy.name,
+        description=strategy.description,
+        config=strategy.config,
+        enabled=strategy.enabled,
+        created_at=strategy.created_at,
+        updated_at=strategy.updated_at,
+    )
+
+
+@router.patch(
+    "/commands/strategies/{strategy_id}",
+    response_model=StrategyResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        404: {"model": ErrorResponse, "description": "Strategy not found"},
+        400: {"model": ErrorResponse, "description": "Validation error"},
+    },
+)
+async def update_strategy(
+    strategy_id: str,
+    request: UpdateStrategyRequest,
+    registry: StrategyRegistry = Depends(get_strategy_registry),  # noqa: B008
+) -> StrategyResponse:
+    """Update an existing strategy in registry."""
+    # Get existing strategy
+    strategy = await registry.get_strategy(strategy_id)
+    if strategy is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=ErrorResponse(
+                error="Strategy not found",
+                detail=f"No strategy found with strategy_id: {strategy_id}",
+            ).model_dump(),
+        )
+
+    # Update fields (only if provided)
+    if request.name is not None:
+        strategy.name = request.name
+    if request.description is not None:
+        strategy.description = request.description
+    if request.config is not None:
+        strategy.config = request.config
+    if request.enabled is not None:
+        strategy.enabled = request.enabled
+
+    try:
+        await registry.update_strategy(strategy)
+        # Re-fetch to ensure timestamps are loaded
+        from sqlalchemy import select
+
+        query = select(StrategyRecordModel).where(
+            StrategyRecordModel.strategy_id == strategy.strategy_id
+        )
+        result = await registry.session.execute(query)
+        updated_strategy = result.scalar_one()
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ErrorResponse(error="Failed to update strategy", detail=str(e)).model_dump(),
+        ) from e
+
+    return StrategyResponse(
+        strategy_id=updated_strategy.strategy_id,
+        name=updated_strategy.name,
+        description=updated_strategy.description,
+        config=updated_strategy.config,
+        enabled=updated_strategy.enabled,
+        created_at=updated_strategy.created_at,
+        updated_at=updated_strategy.updated_at,
+    )

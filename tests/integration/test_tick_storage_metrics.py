@@ -16,7 +16,6 @@ from uuid import uuid4
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from polytrader.db.migrations import run_migrations
 from polytrader.db.repository import MarketTickRepository
 from polytrader.events.types import EventSource, MarketDataEvent
 from polytrader.obs.metrics import get_metrics_collector
@@ -24,12 +23,13 @@ from polytrader.store import PostgreSQLMarketTickStore
 
 
 @pytest.fixture
-async def db_session(postgres_test_url: str) -> AsyncGenerator[AsyncSession, None]:
+async def db_session(
+    postgres_test_url: str, postgres_db: None
+) -> AsyncGenerator[AsyncSession, None]:
     """Provide SQLAlchemy session for tests."""
     from sqlalchemy import text
 
-    # Ensure migrations are run
-    await run_migrations(postgres_test_url)
+    # Migrations are run by postgres_db fixture
 
     # Convert URL to SQLAlchemy async format
     sqlalchemy_url = postgres_test_url

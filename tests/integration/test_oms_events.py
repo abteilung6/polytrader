@@ -55,6 +55,7 @@ def sample_intent() -> OrderIntentEvent:
         size=100.0,
         reason="Test order",
         correlation_id="corr-123",
+        strategy_id="simple_threshold",
     )
 
 

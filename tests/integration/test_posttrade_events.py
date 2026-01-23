@@ -54,6 +54,7 @@ def sample_intent() -> OrderIntentEvent:
         size=100.0,
         reason="Test order",
         correlation_id="corr-123",
+        strategy_id="simple_threshold",
     )
 
 
@@ -285,6 +286,7 @@ class TestPositionUpdatedEvent:
                 size=50.0,
                 reason="Test sell",
                 correlation_id="corr-456",
+                strategy_id="simple_threshold",
             )
             sell_order = await order_store.create_order(sell_intent, "client-456")
             # Order must go through SUBMITTED before ACKED
@@ -392,6 +394,7 @@ class TestPositionUpdatedEvent:
                 size=100.0,
                 reason="Test sell",
                 correlation_id="corr-456",
+                strategy_id="simple_threshold",
             )
             sell_order = await order_store.create_order(sell_intent, "client-456")
             # Order must go through SUBMITTED before ACKED
@@ -652,6 +655,7 @@ class TestPnLEvent:
                 size=100.0,
                 reason="Test sell",
                 correlation_id="corr-456",
+                strategy_id="simple_threshold",
             )
             sell_order = await order_store.create_order(sell_intent, "client-456")
             # Order must go through SUBMITTED before ACKED

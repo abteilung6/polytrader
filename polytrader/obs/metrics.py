@@ -621,27 +621,53 @@ def record_adapter_error(error_class: str) -> None:
 # Posttrade metrics functions per observability.mdc §4
 
 
-def set_position_net(market_slug: str, outcome: str, net_position: float) -> None:
+def set_position_net(
+    market_slug: str,
+    outcome: str,
+    net_position: float,
+    strategy_id: str | None = None,
+) -> None:
     """Set position net gauge per observability.mdc §4.
 
     Args:
         market_slug: Market identifier
         outcome: Market outcome (UP/DOWN)
         net_position: Net position size (positive for long, negative for short)
+        strategy_id: Optional strategy identifier for per-strategy tracking
     """
     collector = get_metrics_collector()
-    collector.set_gauge(
-        "position_net",
-        net_position,
-        labels={"market": market_slug, "outcome": outcome},
-    )
+    labels: dict[str, str] = {"market": market_slug, "outcome": outcome}
+    if strategy_id:
+        labels["strategy_id"] = strategy_id
+    collector.set_gauge("position_net", net_position, labels=labels)
 
 
-def set_pnl_unrealized(unrealized_pnl: float) -> None:
+def set_pnl_unrealized(unrealized_pnl: float, strategy_id: str | None = None) -> None:
     """Set unrealized PnL gauge per observability.mdc §4.
 
     Args:
         unrealized_pnl: Total unrealized profit/loss across all open positions
+        strategy_id: Optional strategy identifier for per-strategy tracking
     """
     collector = get_metrics_collector()
-    collector.set_gauge("pnl_unrealized", unrealized_pnl)
+    labels: dict[str, str] | None = None
+    if strategy_id:
+        labels = {"strategy_id": strategy_id}
+    collector.set_gauge("pnl_unrealized", unrealized_pnl, labels=labels)
+
+
+def record_pnl_realized(pnl: float, strategy_id: str | None = None) -> None:
+    """Record realized PnL per observability.mdc §4.
+
+    Args:
+        pnl: Realized profit/loss from a closed position
+        strategy_id: Optional strategy identifier for per-strategy tracking
+    """
+    collector = get_metrics_collector()
+    labels: dict[str, str] | None = None
+    if strategy_id:
+        labels = {"strategy_id": strategy_id}
+    # Use gauge to track cumulative realized PnL
+    # Get current value and add to it
+    current = collector.get_gauge("pnl_realized", labels=labels)
+    collector.set_gauge("pnl_realized", current + pnl, labels=labels)

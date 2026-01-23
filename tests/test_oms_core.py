@@ -72,6 +72,7 @@ def sample_intent() -> OrderIntentEvent:
         correlation_id=str(uuid.uuid4()),
         ttl_s=60.0,
         reason="Test order",
+        strategy_id="simple_threshold",
     )
 
 
