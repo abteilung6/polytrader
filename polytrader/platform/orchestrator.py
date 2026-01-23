@@ -18,8 +18,10 @@ from polytrader.oms.idempotency import IdempotencyStore
 from polytrader.oms.store import InMemoryOrderStore
 from polytrader.platform.registry import StrategyRegistry
 from polytrader.platform.strategy_runner import StrategyRunner
+from polytrader.platform.supervisor_registry import MarketSupervisorRegistry
 from polytrader.store import IMarketDataStore
 from polytrader.strategies import create_simple_threshold_factory
+from polytrader.supervisor.market import MarketSupervisor
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -114,8 +116,21 @@ class PlatformOrchestrator:
         self._position_manager = position_manager
         self._live_execution_router_factory = live_execution_router_factory
 
+        # MarketSupervisorRegistry for shared supervisors (Commit 1.4)
+        self._supervisor_registry = MarketSupervisorRegistry(
+            discovery_service=discovery_service,
+            adapter_factory=adapter_factory,
+            observer_factory=observer_factory,
+            bus=bus,
+            store=store,
+            position_manager=position_manager,
+        )
+
         # Strategy runners (created in start())
         self._strategy_runners: dict[str, StrategyRunner] = {}
+
+        # Pattern to strategies mapping (for supervisor sharing)
+        self._pattern_to_strategies: dict[str, list[str]] = {}
 
         # Paper OMS and execution (always created)
         self._paper_oms: OMSCore | None = None
@@ -164,19 +179,48 @@ class PlatformOrchestrator:
             if self._live_execution_router_factory:
                 await self._create_live_lane()
 
-            # Step 4: Create and start StrategyRunner per enabled strategy
+            # Step 4: Group strategies by market_pattern and create shared supervisors
             enabled_list = [s for s in strategies if s.enabled]
             logger.info(
                 "Starting {count} enabled strategies...",
                 count=len(enabled_list),
             )
 
+            # Group strategies by market_pattern
+            pattern_to_strategies: dict[str, list[StrategyRecord]] = {}
+            for strategy in enabled_list:
+                pattern = strategy.config.get("market_pattern", "btc-updown-15m")
+                pattern_to_strategies.setdefault(pattern, []).append(strategy)
+
+            logger.info(
+                "Grouped strategies: {pattern_count} unique patterns, {strategy_count} strategies",
+                pattern_count=len(pattern_to_strategies),
+                strategy_count=len(enabled_list),
+            )
+
+            # Create shared supervisors for each pattern
+            pattern_to_supervisor: dict[str, MarketSupervisor] = {}
+            for pattern, pattern_strategies in pattern_to_strategies.items():
+                supervisor = await self._supervisor_registry.get_or_create(pattern)
+                pattern_to_supervisor[pattern] = supervisor
+                self._pattern_to_strategies[pattern] = [s.strategy_id for s in pattern_strategies]
+                logger.debug(
+                    "Created shared supervisor for pattern '{pattern}' ({count} strategies)",
+                    pattern=pattern,
+                    count=len(pattern_strategies),
+                )
+
+            # Create and start StrategyRunner per enabled strategy
             started_count = 0
             failed_count = 0
 
             for idx, strategy in enumerate(enabled_list, 1):
                 try:
-                    runner = await self._create_strategy_runner(strategy)
+                    # Get market pattern for this strategy
+                    pattern = strategy.config.get("market_pattern", "btc-updown-15m")
+                    supervisor = pattern_to_supervisor[pattern]
+
+                    runner = await self._create_strategy_runner(strategy, supervisor)
                     await runner.start()
                     self._strategy_runners[strategy.strategy_id] = runner
                     started_count += 1
@@ -218,7 +262,8 @@ class PlatformOrchestrator:
     async def stop(self) -> None:
         """Stop the platform orchestrator.
 
-        Stops all strategy runners and OMS/execution components gracefully.
+        Stops all strategy runners, releases shared supervisors, and stops
+        OMS/execution components gracefully.
         """
         if not self._running:
             return
@@ -233,6 +278,14 @@ class PlatformOrchestrator:
             ]
             if stop_tasks:
                 await asyncio.gather(*stop_tasks, return_exceptions=True)
+
+            # Release all shared supervisors (registry manages lifecycle)
+            for pattern in list(self._pattern_to_strategies.keys()):
+                await self._supervisor_registry.release(pattern)
+            self._pattern_to_strategies.clear()
+
+            # Stop all supervisors (registry will stop when ref_count reaches 0)
+            await self._supervisor_registry.stop_all()
 
             # Stop OMS and execution tasks
             all_tasks = self._oms_tasks + self._execution_tasks
@@ -309,11 +362,13 @@ class PlatformOrchestrator:
     async def _create_strategy_runner(
         self,
         strategy: StrategyRecord,
+        market_supervisor: MarketSupervisor,
     ) -> StrategyRunner:
-        """Create StrategyRunner for a strategy.
+        """Create StrategyRunner for a strategy with shared MarketSupervisor.
 
         Args:
             strategy: StrategyRecord from registry
+            market_supervisor: Shared MarketSupervisor instance (already started)
 
         Returns:
             StrategyRunner instance
@@ -327,14 +382,12 @@ class PlatformOrchestrator:
             store=self._store,
         )
 
-        # Create runner
+        # Create runner with shared supervisor
         runner = StrategyRunner(
             strategy=strategy,
             bus=self._bus,
             store=self._store,
-            discovery_service=self._discovery_service,
-            adapter_factory=self._adapter_factory,
-            observer_factory=self._observer_factory,
+            market_supervisor=market_supervisor,
             strategy_factory=strategy_factory,
             position_manager=self._position_manager,
         )
