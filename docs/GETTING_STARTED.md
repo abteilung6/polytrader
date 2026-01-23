@@ -143,16 +143,7 @@ The platform provides:
 3. Enable/disable execution via `/api/v1/control/execution` endpoint
 4. Monitor platform state via `/api/v1/state` endpoints
 
-**Legacy Single-Strategy Mode:**
-
-```bash
-# Paper trading (single strategy)
-python -m cli model paper \
-  --market btc-updown-15m \
-  --buy-threshold 0.30 \
-  --sell-threshold 0.50 \
-  --size 1.0
-```
+**Note:** The legacy single-strategy mode (`model paper`, `model live`) has been removed. Use `platform start` instead.
 
 ## Troubleshooting
 

@@ -44,5 +44,3 @@ For live trading, set environment variables:
 ### Available Commands
 
 - `platform start`: Start the platform with multi-strategy support
-- `model paper`: Run single-strategy paper trading (legacy)
-- `model live`: Run single-strategy live trading (legacy)
