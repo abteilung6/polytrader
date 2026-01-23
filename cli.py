@@ -9,6 +9,7 @@ from polytrader.logging_config import logger, setup_logging
 from polytrader.tasks import (
     live_trading_task,
     paper_trading_task,
+    platform_start_task,
     watch_task,
 )
 
@@ -17,9 +18,11 @@ app = typer.Typer(help="Polymarket trading system")
 # Create sub-apps for command groups
 market_app = typer.Typer(help="Market operations")
 model_app = typer.Typer(help="Trading model operations")
+platform_app = typer.Typer(help="Platform operations")
 
 app.add_typer(market_app, name="market")
 app.add_typer(model_app, name="model")
+app.add_typer(platform_app, name="platform")
 
 
 @market_app.command("watch")
@@ -200,6 +203,47 @@ def model_paper(
             rejection_probability=rejection_probability,
             latency_ms=latency_ms,
             metrics_interval=metrics_interval,
+            starting_equity=starting_equity,
+        )
+    )
+
+
+@platform_app.command("start")
+def platform_start(
+    api_host: str = typer.Option(
+        "0.0.0.0", "--api-host", help="API server host (default: 0.0.0.0)"
+    ),
+    api_port: int = typer.Option(8000, "--api-port", help="API server port (default: 8000)"),
+    frequency: float = typer.Option(1.0, "--frequency", "-f", help="Polling frequency in Hz"),
+    starting_equity: float = typer.Option(
+        1000.0, "--starting-equity", help="Starting equity for paper trading"
+    ),
+    log_file: str | None = typer.Option(None, "--log-file", help="Optional file path to save logs"),
+) -> None:
+    """Start the platform with orchestrator, control plane, and API server.
+
+    Starts the multi-strategy platform that:
+    - Loads all strategies from database
+    - Runs all strategies in paper mode
+    - Starts control plane service (processes control commands)
+    - Starts FastAPI control API server
+
+    Press Ctrl+C to stop.
+    """
+    _setup_logging(log_file)
+
+    logger.info("🚀 PLATFORM MODE")
+    logger.info("Starting platform orchestrator")
+    logger.info("API server: http://{host}:{port}/docs", host=api_host, port=api_port)
+    logger.info("Frequency: {frequency} Hz", frequency=frequency)
+    logger.info("Starting equity: ${equity:.2f}", equity=starting_equity)
+    logger.info("Press Ctrl+C to stop")
+
+    asyncio.run(
+        platform_start_task(
+            api_host=api_host,
+            api_port=api_port,
+            frequency=frequency,
             starting_equity=starting_equity,
         )
     )

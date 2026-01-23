@@ -237,11 +237,10 @@ class MarketSupervisor:
             return
 
         transition_start = time.perf_counter()
-        logger.bind(
-            supervisor=SUPERVISOR_TYPE,
-            old_market=old_market,
-            new_market=new_market,
-        ).info(
+        # Log initial transition (None -> market) at debug level to reduce noise
+        # Log actual market changes (market -> market) at info level
+        log_func = logger.debug if old_market is None else logger.info
+        log_func(
             "Transitioning from {old_market} to {new_market}",
             old_market=old_market or "None",
             new_market=new_market,
@@ -305,12 +304,10 @@ class MarketSupervisor:
                 old_market=old_market,
                 new_market=new_market,
             )
-            logger.bind(
-                supervisor=SUPERVISOR_TYPE,
-                old_market=old_market,
-                new_market=new_market,
-                event_id=event.event_id,
-            ).info(
+            # Log initial transition (None -> market) at debug level to reduce noise
+            # Log actual market changes (market -> market) at info level
+            log_func = logger.debug if old_market is None else logger.info
+            log_func(
                 "📢 Publishing MarketChangeEvent: {old_market} → {new_market} "
                 "(event_id={event_id})",
                 old_market=old_market or "None",
@@ -320,11 +317,10 @@ class MarketSupervisor:
             await self.bus.publish(MARKET_CHANGE, event)
 
             transition_time_ms = (time.perf_counter() - transition_start) * 1000
-            logger.bind(
-                supervisor=SUPERVISOR_TYPE,
-                new_market=new_market,
-                transition_time_ms=transition_time_ms,
-            ).info(
+            # Log initial transition (None -> market) at debug level to reduce noise
+            # Log actual market changes (market -> market) at info level
+            log_func = logger.debug if old_market is None else logger.info
+            log_func(
                 "Successfully transitioned to market: {new_market} in {time_ms:.1f}ms",
                 new_market=new_market,
                 time_ms=transition_time_ms,

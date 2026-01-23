@@ -149,10 +149,12 @@ class PlatformOrchestrator:
             registry = StrategyRegistry(self._session)
             strategies = await registry.list_strategies()
 
+            total_count = len(strategies)
+            enabled_count = sum(1 for s in strategies if s.enabled)
             logger.info(
-                "Loaded strategies from registry",
-                total_strategies=len(strategies),
-                enabled_strategies=sum(1 for s in strategies if s.enabled),
+                "Loaded strategies from registry: {total} total, {enabled} enabled",
+                total=total_count,
+                enabled=enabled_count,
             )
 
             # Step 2: Create paper OMS and execution
@@ -163,27 +165,41 @@ class PlatformOrchestrator:
                 await self._create_live_lane()
 
             # Step 4: Create and start StrategyRunner per enabled strategy
-            for strategy in strategies:
-                if not strategy.enabled:
-                    logger.debug(
-                        "Skipping disabled strategy",
-                        strategy_id=strategy.strategy_id,
-                    )
-                    continue
+            enabled_list = [s for s in strategies if s.enabled]
+            logger.info(
+                "Starting {count} enabled strategies...",
+                count=len(enabled_list),
+            )
 
+            started_count = 0
+            failed_count = 0
+
+            for idx, strategy in enumerate(enabled_list, 1):
                 try:
                     runner = await self._create_strategy_runner(strategy)
                     await runner.start()
                     self._strategy_runners[strategy.strategy_id] = runner
+                    started_count += 1
 
-                    logger.info(
-                        "Started strategy runner",
-                        strategy_id=strategy.strategy_id,
-                        strategy_name=strategy.name,
-                    )
+                    # Log progress every 10 strategies or for the last one
+                    if idx % 10 == 0 or idx == len(enabled_list):
+                        logger.info(
+                            "Strategy startup progress: {started}/{total} started, {failed} failed",
+                            started=started_count,
+                            total=len(enabled_list),
+                            failed=failed_count,
+                        )
+                    else:
+                        # Log individual strategy at debug level to reduce noise
+                        logger.debug(
+                            "Started strategy runner: {strategy_id} ({name})",
+                            strategy_id=strategy.strategy_id,
+                            name=strategy.name,
+                        )
                 except Exception:
+                    failed_count += 1
                     logger.exception(
-                        "Failed to create/start strategy runner",
+                        "Failed to create/start strategy runner: {strategy_id}",
                         strategy_id=strategy.strategy_id,
                         error_class="fatal",
                     )
@@ -191,8 +207,8 @@ class PlatformOrchestrator:
                     continue
 
             logger.info(
-                "PlatformOrchestrator started",
-                total_runners=len(self._strategy_runners),
+                "PlatformOrchestrator started: {total} strategy runners active",
+                total=len(self._strategy_runners),
             )
         except Exception:
             self._running = False
