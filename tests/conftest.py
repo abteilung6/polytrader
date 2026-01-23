@@ -8,6 +8,8 @@ from unittest.mock import MagicMock
 import pytest
 
 from polytrader.events.bus import EventBus
+from polytrader.events.types import OrderIntentEvent
+from polytrader.oms.core import OMSCore
 from polytrader.oms.idempotency import IdempotencyStore
 from polytrader.oms.store import InMemoryOrderStore
 
@@ -29,6 +31,22 @@ def order_store(bus: EventBus) -> InMemoryOrderStore:
 def idempotency_store() -> IdempotencyStore:
     """Create IdempotencyStore for testing."""
     return IdempotencyStore()
+
+
+@pytest.fixture
+def oms_core(
+    bus: EventBus, order_store: InMemoryOrderStore, idempotency_store: IdempotencyStore
+) -> OMSCore:
+    """Create OMSCore for testing."""
+    return OMSCore(bus=bus, store=order_store, idempotency_store=idempotency_store)
+
+
+@pytest.fixture
+def sample_intent() -> OrderIntentEvent:
+    """Create sample order intent for testing."""
+    from tests.factories.events import create_order_intent_event
+
+    return create_order_intent_event()
 
 
 # Clock fixtures (deterministic)

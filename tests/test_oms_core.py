@@ -1,7 +1,6 @@
 """Tests for OMS Core component."""
 
 import asyncio
-import uuid
 from typing import cast
 
 import pytest
@@ -28,52 +27,9 @@ from polytrader.events.types import (
 )
 from polytrader.oms.commands import CancelOrderCommand, SubmitOrderCommand
 from polytrader.oms.core import OMSCore
-from polytrader.oms.idempotency import IdempotencyStore
 from polytrader.oms.models import OrderState
-from polytrader.oms.store import InMemoryOrderStore
 
-
-@pytest.fixture
-def bus() -> EventBus:
-    """Create event bus for testing."""
-    return EventBus()
-
-
-@pytest.fixture
-def store(bus: EventBus) -> InMemoryOrderStore:
-    """Create order store for testing."""
-    return InMemoryOrderStore(bus)
-
-
-@pytest.fixture
-def idempotency_store() -> IdempotencyStore:
-    """Create idempotency store for testing."""
-    return IdempotencyStore()
-
-
-@pytest.fixture
-def oms_core(
-    bus: EventBus, store: InMemoryOrderStore, idempotency_store: IdempotencyStore
-) -> OMSCore:
-    """Create OMS Core for testing."""
-    return OMSCore(bus, store, idempotency_store)
-
-
-@pytest.fixture
-def sample_intent() -> OrderIntentEvent:
-    """Create sample order intent for testing."""
-    return OrderIntentEvent(
-        market_slug="test-market",
-        outcome="UP",
-        side="BUY",
-        size=100.0,
-        target_price=0.6,
-        limit_price=0.5,
-        correlation_id=str(uuid.uuid4()),
-        ttl_s=60.0,
-        reason="Test order",
-        strategy_id="simple_threshold",
-    )
+# Fixtures are now in tests/conftest.py
 
 
 class TestOMSCoreOrderCreation:
@@ -83,8 +39,8 @@ class TestOMSCoreOrderCreation:
     async def test_create_order_emits_events_and_commands(
         self,
         oms_core: OMSCore,
-        bus: EventBus,
-        sample_intent: OrderIntentEvent,
+        bus: EventBus,  # From root conftest
+        sample_intent: OrderIntentEvent,  # From unit/oms/conftest
     ) -> None:
         """Test that order creation emits OrderCreatedEvent and SubmitOrderCommand."""
         # Capture published events/commands
@@ -158,19 +114,19 @@ class TestOMSCoreOrderCreation:
     async def test_create_order_stores_in_store(
         self,
         oms_core: OMSCore,
-        store: InMemoryOrderStore,
+        order_store,  # From root conftest
         sample_intent: OrderIntentEvent,
     ) -> None:
         """Test that created order is stored in store."""
         order = await oms_core.create_order(sample_intent)
 
         # Verify order is in store
-        stored_order = store.get_order(order.order_id)
+        stored_order = order_store.get_order(order.order_id)
         assert stored_order is not None
         assert stored_order.order_id == order.order_id
 
         # Verify can retrieve by client_order_id
-        stored_by_client = store.get_order_by_client_id(order.client_order_id)
+        stored_by_client = order_store.get_order_by_client_id(order.client_order_id)
         assert stored_by_client is not None
         assert stored_by_client.order_id == order.order_id
 
@@ -285,11 +241,14 @@ class TestOMSCoreFill:
         self,
         oms_core: OMSCore,
         bus: EventBus,
-        sample_intent: OrderIntentEvent,
     ) -> None:
         """Test that partial fill transitions order to PARTIALLY_FILLED."""
+        # Create intent with larger size for fill testing
+        from tests.factories.events import create_order_intent_event
+
+        intent = create_order_intent_event(size=100.0)
         # Create and ack order
-        order = await oms_core.create_order(sample_intent)
+        order = await oms_core.create_order(intent)
         await oms_core.handle_venue_ack(order.client_order_id, "venue-123")
 
         # Capture published events
@@ -362,11 +321,14 @@ class TestOMSCoreFill:
     async def test_handle_fill_multiple(
         self,
         oms_core: OMSCore,
-        sample_intent: OrderIntentEvent,
     ) -> None:
         """Test that multiple fills accumulate correctly."""
+        # Create intent with larger size for multiple fills
+        from tests.factories.events import create_order_intent_event
+
+        intent = create_order_intent_event(size=100.0)
         # Create and ack order
-        order = await oms_core.create_order(sample_intent)
+        order = await oms_core.create_order(intent)
         await oms_core.handle_venue_ack(order.client_order_id, "venue-123")
 
         # First fill: 30.0 at 0.55

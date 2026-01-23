@@ -10,7 +10,6 @@ from polytrader.oms.fsm import (
     transition_order_state,
 )
 from polytrader.oms.models import OrderState
-
 from tests.factories.orders import create_order
 
 
