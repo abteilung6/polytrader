@@ -11,9 +11,9 @@ from polytrader.types import Outcome
 from tests.factories.events import (
     create_fill_event,
     create_market_data_event,
-    create_order,
     create_order_intent_event,
 )
+from tests.factories.orders import create_order
 
 
 class TestPerStrategyPerformanceTracker:

@@ -11,7 +11,6 @@ from polytrader.events.types import (
     OrderIntentEvent,
     SignalEvent,
 )
-from polytrader.oms.models import Order, OrderState
 from polytrader.types import Outcome, Side
 
 
@@ -184,53 +183,3 @@ def create_fill_event(
         kwargs["ts_mono"] = ts_mono
 
     return FillEvent(**kwargs)
-
-
-def create_order(
-    order_id: str | None = None,
-    market_slug: str = "test-market",
-    outcome: Outcome = "UP",
-    side: Side = "BUY",
-    size: float = 10.0,
-    intent: OrderIntentEvent | None = None,
-    state: OrderState = OrderState.NEW,
-    correlation_id: str | None = None,
-    client_order_id: str | None = None,
-) -> Order:
-    """Create a test Order with deterministic defaults.
-
-    Args:
-        order_id: Order ID (defaults to generated UUID)
-        market_slug: Market identifier
-        outcome: Market outcome
-        side: Trade side
-        size: Order size in USD
-        intent: Order intent (defaults to created from params)
-        state: Order state (default: NEW)
-        correlation_id: Correlation ID (optional)
-        client_order_id: Client order ID (defaults to generated UUID)
-
-    Returns:
-        Order with specified parameters
-    """
-    if intent is None:
-        intent = create_order_intent_event(
-            market_slug=market_slug,
-            outcome=outcome,
-            side=side,
-            size=size,
-            correlation_id=correlation_id,
-        )
-
-    return Order(
-        order_id=order_id or str(uuid.uuid4()),
-        client_order_id=client_order_id or str(uuid.uuid4()),
-        market_slug=market_slug,
-        outcome=outcome,
-        side=side,
-        size=size,
-        limit_price=intent.limit_price,
-        intent=intent,
-        state=state,
-        correlation_id=correlation_id or intent.correlation_id,
-    )
