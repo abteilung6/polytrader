@@ -88,8 +88,8 @@ alembic upgrade head
 # Run tests to verify everything works
 make test
 
-# Or run a quick paper trading test
-python -m cli model paper --market btc-updown-15m --max-trades 1
+# Or start the platform for testing
+python -m cli platform start --api-host 0.0.0.0 --api-port 8000
 ```
 
 ## Development Workflow
@@ -122,9 +122,31 @@ make test-db-up            # Start test PostgreSQL
 make test-db-down          # Stop test PostgreSQL
 ```
 
-### Paper Trading
+### Platform Mode (Recommended)
+
+Start the platform with multi-strategy support:
 
 ```bash
+# Start platform (paper trading by default)
+python -m cli platform start --api-host 0.0.0.0 --api-port 8000 > platform.log 2>&1
+```
+
+The platform provides:
+- **Control API**: `http://localhost:8000/docs` - Manage strategies via REST API
+- **Multi-strategy support**: Run multiple strategies simultaneously
+- **Shared market supervisors**: Efficient resource usage for strategies on the same market
+- **Paper trading by default**: Safe testing without real money
+
+**Using the Control API:**
+1. Visit `http://localhost:8000/docs` in your browser
+2. Create strategies via `/api/v1/strategies` endpoint
+3. Enable/disable execution via `/api/v1/control/execution` endpoint
+4. Monitor platform state via `/api/v1/state` endpoints
+
+**Legacy Single-Strategy Mode:**
+
+```bash
+# Paper trading (single strategy)
 python -m cli model paper \
   --market btc-updown-15m \
   --buy-threshold 0.30 \
