@@ -107,7 +107,7 @@ make db-migrate
 make test
 
 # Or run a quick paper trading test
-python -m cli model paper --market btc-updown-15m --max-trades 1
+python -m cli platform start
 ```
 
 ---
