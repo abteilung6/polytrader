@@ -3,8 +3,9 @@
 Per unit_testing_techinical.mdc §5: Fixtures with function scope by default.
 """
 
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
 
 from polytrader.events.bus import EventBus
 from polytrader.oms.idempotency import IdempotencyStore

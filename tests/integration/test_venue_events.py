@@ -16,6 +16,12 @@ from polytrader.events.store import MemoryEventStore
 from polytrader.events.types import VenueConnectedEvent, VenueDisconnectedEvent
 
 
+async def async_iter_empty():
+    """Empty async iterator for mocking WebSocket message stream."""
+    return
+    yield  # Make it an async generator
+
+
 @pytest.fixture
 def bus() -> EventBus:
     """Create an event bus for testing."""
@@ -54,11 +60,16 @@ class TestVenueConnectedEvent:
         # Mock websockets.connect to avoid actual connection
         with patch("polytrader.adapters.polymarket.user_stream.websockets.connect") as mock_connect:
             # Create a mock WebSocket connection
+            async def async_iter_empty():
+                """Empty async iterator."""
+                return
+                yield  # Make it an async generator
+
             mock_ws = AsyncMock()
             mock_ws.__aenter__ = AsyncMock(return_value=mock_ws)
             mock_ws.__aexit__ = AsyncMock(return_value=None)
             mock_ws.send = AsyncMock()
-            mock_ws.__aiter__ = AsyncMock(return_value=iter([]))  # Empty message stream
+            mock_ws.__aiter__ = async_iter_empty  # Empty async message stream
 
             mock_connect.return_value = mock_ws
 
@@ -99,7 +110,7 @@ class TestVenueConnectedEvent:
             mock_ws.__aenter__ = AsyncMock(return_value=mock_ws)
             mock_ws.__aexit__ = AsyncMock(return_value=None)
             mock_ws.send = AsyncMock()
-            mock_ws.__aiter__ = AsyncMock(return_value=iter([]))
+            mock_ws.__aiter__ = async_iter_empty
 
             mock_connect.return_value = mock_ws
 
@@ -140,7 +151,7 @@ class TestVenueDisconnectedEvent:
             mock_ws.__aenter__ = AsyncMock(return_value=mock_ws)
             mock_ws.__aexit__ = AsyncMock(return_value=None)
             mock_ws.send = AsyncMock()
-            mock_ws.__aiter__ = AsyncMock(return_value=iter([]))
+            mock_ws.__aiter__ = async_iter_empty
 
             mock_connect.return_value = mock_ws
 
@@ -217,7 +228,7 @@ class TestVenueDisconnectedEvent:
             mock_ws.__aenter__ = AsyncMock(return_value=mock_ws)
             mock_ws.__aexit__ = AsyncMock(return_value=None)
             mock_ws.send = AsyncMock()
-            mock_ws.__aiter__ = AsyncMock(return_value=iter([]))
+            mock_ws.__aiter__ = async_iter_empty
 
             mock_connect.return_value = mock_ws
 
@@ -262,7 +273,7 @@ class TestVenueEventSequence:
             mock_ws.__aenter__ = AsyncMock(return_value=mock_ws)
             mock_ws.__aexit__ = AsyncMock(return_value=None)
             mock_ws.send = AsyncMock()
-            mock_ws.__aiter__ = AsyncMock(return_value=iter([]))
+            mock_ws.__aiter__ = async_iter_empty
 
             mock_connect.return_value = mock_ws
 
