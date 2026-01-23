@@ -156,7 +156,7 @@ async def test_start_loads_strategies_from_registry(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_start_creates_market_supervisor_per_strategy(
+async def test_start_creates_shared_market_supervisor_for_same_pattern(
     db_session: AsyncSession,
     bus: EventBus,
     store: IMarketDataStore,
@@ -165,7 +165,11 @@ async def test_start_creates_market_supervisor_per_strategy(
     observer_factory: MagicMock,
     test_strategies: list[str],
 ) -> None:
-    """Test start() creates MarketSupervisor per strategy."""
+    """Test start() creates shared MarketSupervisor for strategies with same pattern.
+
+    Per Commit 1.4: Strategies with the same market_pattern share one
+    MarketSupervisor instance via MarketSupervisorRegistry.
+    """
     orchestrator = PlatformOrchestrator(
         bus=bus,
         store=store,
@@ -179,6 +183,14 @@ async def test_start_creates_market_supervisor_per_strategy(
 
     try:
         runners = orchestrator.list_strategy_runners()
+        assert len(runners) == 2  # strategy_1 and strategy_2 (both enabled)
+
+        # Both strategies use default pattern "btc-updown-15m" (no market_pattern in config)
+        # So they should share the same supervisor instance
+        supervisor_ids = {id(runner.market_supervisor) for runner in runners.values()}
+        assert len(supervisor_ids) == 1, "Strategies with same pattern should share supervisor"
+
+        # Verify all supervisors have correct pattern
         for _strategy_id, runner in runners.items():
             assert runner.market_supervisor is not None
             assert runner.market_supervisor.pattern == "btc-updown-15m"
@@ -343,7 +355,11 @@ async def test_multiple_strategies_run_concurrently(
     observer_factory: MagicMock,
     test_strategies: list[str],
 ) -> None:
-    """Test multiple strategies run concurrently."""
+    """Test multiple strategies run concurrently and share supervisor.
+
+    Per Commit 1.4: Multiple strategies with same pattern share one
+    MarketSupervisor but run independently via StrategyRunner.
+    """
     orchestrator = PlatformOrchestrator(
         bus=bus,
         store=store,
@@ -365,5 +381,9 @@ async def test_multiple_strategies_run_concurrently(
         # All runners should be running
         for runner in runners.values():
             assert runner.is_running() is True
+
+        # Verify they share the same supervisor (same pattern)
+        supervisor_ids = {id(runner.market_supervisor) for runner in runners.values()}
+        assert len(supervisor_ids) == 1, "Strategies should share supervisor for same pattern"
     finally:
         await orchestrator.stop()
