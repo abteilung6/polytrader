@@ -1,4 +1,4 @@
-.PHONY: help install install-dev lint format type-check test test-integration
+.PHONY: help install install-dev lint format type-check test test-unit test-integration test-replay clean-test-cache
 .PHONY: db-up db-down db-migrate db-logs db-psql
 .PHONY: test-db-up test-db-down test-db-migrate
 
@@ -19,11 +19,23 @@ format:
 type-check:
 	mypy .
 
-test:
-	pytest tests/ -v -n auto
+clean-test-cache:
+	@find tests -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+	@find tests -name "*.pyc" -delete 2>/dev/null || true
+	@rm -rf .pytest_cache 2>/dev/null || true
+	@echo "Test cache cleared"
 
-test-integration:
-	pytest tests/integration/ -v -n auto
+test: clean-test-cache
+	pytest tests/ -v -n auto --import-mode=importlib
+
+test-unit: clean-test-cache
+	pytest tests/unit/ -v -n auto --import-mode=importlib
+
+test-integration: clean-test-cache
+	pytest tests/integration/ -v -n auto --import-mode=importlib
+
+test-replay: clean-test-cache
+	pytest tests/replay/ -v -n auto --import-mode=importlib
 
 # Development Database
 db-up:
