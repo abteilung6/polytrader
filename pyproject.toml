@@ -42,6 +42,10 @@ ignore_missing_imports = false
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 pythonpath = ["."]
+markers = [
+    "integration: marks tests as integration tests (deselect with '-m \"not integration\"')",
+    "replay: marks tests as replay/golden tests (deselect with '-m \"not replay\"')",
+]
 # Parallel execution is enabled via Makefile targets using pytest-xdist
 # Use: make test (parallel) or pytest tests/ -v (sequential)
 
