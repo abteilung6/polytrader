@@ -153,6 +153,9 @@ class TestCreateStrategy:
         db_session.add(strategy1)
         await db_session.commit()
 
+        # Expunge strategy1 from session to avoid instance conflicts
+        db_session.expunge(strategy1)
+
         # Try to create duplicate
         strategy2 = StrategyRecord(
             strategy_id="duplicate",
