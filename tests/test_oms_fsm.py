@@ -2,7 +2,6 @@
 
 import pytest
 
-from polytrader.events.types import OrderIntentEvent
 from polytrader.oms.fsm import (
     InvalidTransitionError,
     can_transition,
@@ -10,32 +9,9 @@ from polytrader.oms.fsm import (
     is_terminal_state,
     transition_order_state,
 )
-from polytrader.oms.models import Order, OrderState
+from polytrader.oms.models import OrderState
 
-
-def create_test_order(state: OrderState = OrderState.NEW) -> Order:
-    """Create a test order with specified state."""
-    intent = OrderIntentEvent(
-        market_slug="test-market",
-        outcome="UP",
-        side="BUY",
-        target_price=0.6,
-        limit_price=0.5,
-        size=10.0,
-        reason="Test order",
-        strategy_id="simple_threshold",
-    )
-    return Order(
-        client_order_id="test-client-id",
-        intent=intent,
-        market_slug=intent.market_slug,
-        outcome=intent.outcome,
-        side=intent.side,
-        size=intent.size,
-        limit_price=intent.limit_price,
-        correlation_id=intent.correlation_id,
-        state=state,
-    )
+from tests.factories.orders import create_order
 
 
 class TestCanTransition:
@@ -151,7 +127,7 @@ class TestTransitionOrderState:
 
     def test_valid_transition_new_to_pending_submit(self) -> None:
         """Test valid transition: NEW → PENDING_SUBMIT."""
-        order = create_test_order(OrderState.NEW)
+        order = create_order(state=OrderState.NEW)
         new_order = transition_order_state(order, OrderState.PENDING_SUBMIT)
 
         assert new_order.state == OrderState.PENDING_SUBMIT
@@ -160,7 +136,7 @@ class TestTransitionOrderState:
 
     def test_valid_transition_pending_submit_to_submitted(self) -> None:
         """Test valid transition: PENDING_SUBMIT → SUBMITTED."""
-        order = create_test_order(OrderState.PENDING_SUBMIT)
+        order = create_order(OrderState.PENDING_SUBMIT)
         new_order = transition_order_state(order, OrderState.SUBMITTED)
 
         assert new_order.state == OrderState.SUBMITTED
@@ -168,7 +144,7 @@ class TestTransitionOrderState:
 
     def test_valid_transition_submitted_to_acked(self) -> None:
         """Test valid transition: SUBMITTED → ACKED."""
-        order = create_test_order(OrderState.SUBMITTED)
+        order = create_order(OrderState.SUBMITTED)
         new_order = transition_order_state(order, OrderState.ACKED)
 
         assert new_order.state == OrderState.ACKED
@@ -176,7 +152,7 @@ class TestTransitionOrderState:
 
     def test_valid_transition_submitted_to_rejected(self) -> None:
         """Test valid transition: SUBMITTED → REJECTED with reason."""
-        order = create_test_order(OrderState.SUBMITTED)
+        order = create_order(OrderState.SUBMITTED)
         reason = "Insufficient balance"
         new_order = transition_order_state(order, OrderState.REJECTED, reason=reason)
 
@@ -186,7 +162,7 @@ class TestTransitionOrderState:
 
     def test_valid_transition_acked_to_partially_filled(self) -> None:
         """Test valid transition: ACKED → PARTIALLY_FILLED."""
-        order = create_test_order(OrderState.ACKED)
+        order = create_order(OrderState.ACKED)
         new_order = transition_order_state(order, OrderState.PARTIALLY_FILLED)
 
         assert new_order.state == OrderState.PARTIALLY_FILLED
@@ -194,7 +170,7 @@ class TestTransitionOrderState:
 
     def test_valid_transition_acked_to_filled(self) -> None:
         """Test valid transition: ACKED → FILLED."""
-        order = create_test_order(OrderState.ACKED)
+        order = create_order(OrderState.ACKED)
         new_order = transition_order_state(order, OrderState.FILLED)
 
         assert new_order.state == OrderState.FILLED
@@ -202,7 +178,7 @@ class TestTransitionOrderState:
 
     def test_valid_transition_partially_filled_to_filled(self) -> None:
         """Test valid transition: PARTIALLY_FILLED → FILLED."""
-        order = create_test_order(OrderState.PARTIALLY_FILLED)
+        order = create_order(OrderState.PARTIALLY_FILLED)
         new_order = transition_order_state(order, OrderState.FILLED)
 
         assert new_order.state == OrderState.FILLED
@@ -210,7 +186,7 @@ class TestTransitionOrderState:
 
     def test_valid_transition_acked_to_cancelled(self) -> None:
         """Test valid transition: ACKED → CANCELLED."""
-        order = create_test_order(OrderState.ACKED)
+        order = create_order(OrderState.ACKED)
         new_order = transition_order_state(order, OrderState.CANCELLED)
 
         assert new_order.state == OrderState.CANCELLED
@@ -218,7 +194,7 @@ class TestTransitionOrderState:
 
     def test_valid_transition_partially_filled_to_cancelled(self) -> None:
         """Test valid transition: PARTIALLY_FILLED → CANCELLED."""
-        order = create_test_order(OrderState.PARTIALLY_FILLED)
+        order = create_order(OrderState.PARTIALLY_FILLED)
         new_order = transition_order_state(order, OrderState.CANCELLED)
 
         assert new_order.state == OrderState.CANCELLED
@@ -226,7 +202,7 @@ class TestTransitionOrderState:
 
     def test_valid_transition_pending_submit_to_cancelled(self) -> None:
         """Test valid transition: PENDING_SUBMIT → CANCELLED."""
-        order = create_test_order(OrderState.PENDING_SUBMIT)
+        order = create_order(OrderState.PENDING_SUBMIT)
         new_order = transition_order_state(order, OrderState.CANCELLED)
 
         assert new_order.state == OrderState.CANCELLED
@@ -234,7 +210,7 @@ class TestTransitionOrderState:
 
     def test_invalid_transition_raises_error(self) -> None:
         """Test that invalid transitions raise InvalidTransitionError."""
-        order = create_test_order(OrderState.NEW)
+        order = create_order(OrderState.NEW)
 
         with pytest.raises(InvalidTransitionError) as exc_info:
             transition_order_state(order, OrderState.FILLED)
@@ -244,14 +220,14 @@ class TestTransitionOrderState:
 
     def test_invalid_transition_from_terminal_state(self) -> None:
         """Test that transitions from terminal states raise error."""
-        order = create_test_order(OrderState.FILLED)
+        order = create_order(OrderState.FILLED)
 
         with pytest.raises(InvalidTransitionError):
             transition_order_state(order, OrderState.CANCELLED)
 
     def test_idempotent_transition(self) -> None:
         """Test that transitioning to the same state is idempotent."""
-        order = create_test_order(OrderState.ACKED)
+        order = create_order(OrderState.ACKED)
         original_updated_at = order.updated_at
 
         # Transition to same state
@@ -264,7 +240,7 @@ class TestTransitionOrderState:
 
     def test_reject_reason_only_set_on_reject(self) -> None:
         """Test that reject_reason is only set when transitioning to REJECTED."""
-        order = create_test_order(OrderState.SUBMITTED)
+        order = create_order(OrderState.SUBMITTED)
         order.reject_reason = None
 
         # Transition to ACKED (should not set reject_reason)
@@ -277,7 +253,7 @@ class TestTransitionOrderState:
 
     def test_reject_reason_without_reason(self) -> None:
         """Test that reject_reason can be None if no reason provided."""
-        order = create_test_order(OrderState.SUBMITTED)
+        order = create_order(OrderState.SUBMITTED)
         new_order = transition_order_state(order, OrderState.REJECTED)
 
         assert new_order.state == OrderState.REJECTED
@@ -286,7 +262,7 @@ class TestTransitionOrderState:
 
     def test_transition_preserves_order_fields(self) -> None:
         """Test that transition preserves all order fields except state and updated_at."""
-        order = create_test_order(OrderState.NEW)
+        order = create_order(OrderState.NEW)
         original_order_id = order.order_id
         original_client_order_id = order.client_order_id
         original_correlation_id = order.correlation_id
@@ -337,7 +313,7 @@ class TestFSMEdgeCases:
 
     def test_complete_order_lifecycle(self) -> None:
         """Test a complete order lifecycle through all states."""
-        order = create_test_order(OrderState.NEW)
+        order = create_order(OrderState.NEW)
 
         # NEW → PENDING_SUBMIT
         order = transition_order_state(order, OrderState.PENDING_SUBMIT)
@@ -362,7 +338,7 @@ class TestFSMEdgeCases:
 
     def test_rejected_order_lifecycle(self) -> None:
         """Test order lifecycle ending in rejection."""
-        order = create_test_order(OrderState.NEW)
+        order = create_order(OrderState.NEW)
 
         # NEW → PENDING_SUBMIT
         order = transition_order_state(order, OrderState.PENDING_SUBMIT)
@@ -378,7 +354,7 @@ class TestFSMEdgeCases:
 
     def test_cancelled_order_lifecycle(self) -> None:
         """Test order lifecycle ending in cancellation."""
-        order = create_test_order(OrderState.NEW)
+        order = create_order(OrderState.NEW)
 
         # NEW → PENDING_SUBMIT
         order = transition_order_state(order, OrderState.PENDING_SUBMIT)
@@ -396,7 +372,7 @@ class TestFSMEdgeCases:
 
     def test_cancel_before_submit(self) -> None:
         """Test cancelling order before submission."""
-        order = create_test_order(OrderState.NEW)
+        order = create_order(OrderState.NEW)
 
         # NEW → PENDING_SUBMIT
         order = transition_order_state(order, OrderState.PENDING_SUBMIT)
