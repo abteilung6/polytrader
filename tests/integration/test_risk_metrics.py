@@ -12,6 +12,7 @@ from polytrader.risk.engine import RiskChecker, RiskEngine
 from polytrader.risk.models import RiskContext, RiskLimits, RiskReasonCode
 
 
+@pytest.mark.integration
 class TestRiskCheckerMetrics:
     """Tests that RiskChecker emits metrics per observability.mdc §4."""
 

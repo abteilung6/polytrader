@@ -1,10 +1,13 @@
 """Tests for EventBus and EventStore integration."""
 
+import pytest
+
 from polytrader.events import EventBus, MemoryEventStore
 from polytrader.events.topics import MARKET_DATA, ORDERS, PROPOSALS
 from polytrader.events.types import MarketDataEvent, OrderExecutedEvent, OrderIntentEvent
 
 
+@pytest.mark.integration
 class TestEventBusStoreIntegration:
     """Tests for EventBus automatic event persistence."""
 
