@@ -1,0 +1,18 @@
+# Prometheus configuration for development environment
+# Per Commit 7: Dev Prometheus instance on port 9090
+# Scrapes metrics from host.docker.internal:9100 (metrics server, not control API)
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'polytrader'
+    environment: 'development'
+
+scrape_configs:
+  - job_name: 'polytrader'
+    static_configs:
+      - targets: ['host.docker.internal:9100']  # Metrics server (separate from control API :8000)
+    metrics_path: '/metrics'
+    scrape_interval: 15s
+    scrape_timeout: 10s
