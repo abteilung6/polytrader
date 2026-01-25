@@ -687,17 +687,93 @@ async def deactivate_strategy(
 async def create_strategy(
     request: CreateStrategyRequest,
     registry: StrategyRegistry = Depends(get_strategy_registry),  # noqa: B008
+    in_memory_registry: InMemoryStrategyRegistry = Depends(get_in_memory_strategy_registry),  # noqa: B008
 ) -> StrategyResponse:
-    """Create a new strategy in registry."""
+    """Create a new strategy in registry.
+
+    Per Commit 17: This endpoint now:
+    - Resolves version selector to exact version
+    - Validates config before creation
+    - Calculates config_hash for reproducibility
+    - Generates deployment_id for correlation
+    - Adds reproducibility metadata (run_identity)
+    """
+    import uuid
+
+    from polytrader.strategies.reproducibility import (
+        calculate_config_hash,
+        create_run_identity,
+    )
+    from polytrader.strategies.version import VersionResolutionError, VersionSelector
+
     # Resolve version selector to exact version
-    # TODO: Get available versions from registry and resolve selector
-    # For now, use exact version if provided, otherwise default to "1.0.0"
-    template_version = (
-        request.version_selector.exact
-        if request.version_selector.exact
-        else "1.0.0"  # Default, should be resolved from registry
+    try:
+        available_versions = in_memory_registry.list_versions(request.template_type_id)
+        if not available_versions:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=ErrorResponse(
+                    error="Template not found",
+                    detail=f"No template found with type_id: {request.template_type_id}",
+                ).model_dump(),
+            )
+
+        # Convert VersionSelectorRequest to VersionSelector
+        version_selector = VersionSelector(
+            exact=request.version_selector.exact,
+            channel=request.version_selector.channel,
+            major=request.version_selector.major,
+        )
+        template_version = version_selector.resolve(available_versions)
+    except (ValueError, VersionResolutionError) as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ErrorResponse(
+                error="Version resolution failed",
+                detail=str(e),
+            ).model_dump(),
+        ) from e
+
+    # Get template and validate config before creation
+    try:
+        template = in_memory_registry.get(request.template_type_id, template_version)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ErrorResponse(
+                error="Template not found",
+                detail=str(e),
+            ).model_dump(),
+        ) from e
+
+    # Validate config against template's parameter schema
+    validation_errors = template.parameter_schema.validate(request.config)
+    if validation_errors:
+        error_msg = "; ".join(validation_errors)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ErrorResponse(
+                error="Config validation failed",
+                detail=error_msg,
+            ).model_dump(),
+        )
+
+    # Calculate config_hash for reproducibility
+    config_hash = calculate_config_hash(request.config)
+
+    # Create run_identity with reproducibility metadata
+    # For now, use placeholder for template_code_ref (could be git SHA in production)
+    run_identity = create_run_identity(
+        template_code_ref="local_dev",  # TODO: Replace with actual git SHA in production
+        config=request.config,
+        market_data_snapshot_ref=None,  # Will be set when strategy is activated
+        dependency_packages=["polytrader", "numpy", "pydantic"],
     )
 
+    # Generate deployment_id for correlation
+    deployment_id = uuid.uuid4()
+
+    # Create strategy record with all metadata
     strategy = StrategyRecordModel(
         strategy_id=request.strategy_id,
         name=request.name,
@@ -705,9 +781,14 @@ async def create_strategy(
         config=request.config,
         template_type_id=request.template_type_id,
         template_version=template_version,
-        config_hash="",  # Will be calculated by registry
+        config_hash=config_hash,
         desired_state=request.desired_state,
         actual_state=request.desired_state,
+        template_code_ref=run_identity.template_code_ref,
+        dependency_set=run_identity.dependency_set,
+        market_data_snapshot_ref=run_identity.market_data_snapshot_ref,
+        deployment_id=deployment_id,
+        run_id=None,  # Will be set when strategy is activated
     )
 
     try:
