@@ -1,10 +1,11 @@
 """Metrics infrastructure for observability per observability.mdc §4.
 
 This module provides a simple metrics interface for collecting
-and querying metrics. In Phase 2, we use an in-memory implementation.
-Future phases can add Prometheus/OpenTelemetry exporters.
+and querying metrics. Defaults to PrometheusMetricsCollector for
+operator visibility via Grafana dashboards.
 """
 
+import os
 from collections import defaultdict
 from typing import Any, Protocol
 
@@ -89,7 +90,7 @@ class IMetricsCollector(Protocol):
         ...
 
 
-class MemoryMetricsCollector:
+class MemoryMetricsCollector(IMetricsCollector):
     """In-memory metrics collector for Phase 2.
 
     Simple implementation that stores metrics in memory.
@@ -279,15 +280,40 @@ class MemoryMetricsCollector:
 _metrics_collector: IMetricsCollector | None = None
 
 
+def create_metrics_collector(backend: str | None = None) -> IMetricsCollector:
+    """Create metrics collector based on backend.
+
+    Args:
+        backend: Backend type ('prometheus' or 'memory'), or None to read from env
+
+    Returns:
+        IMetricsCollector instance
+
+    Raises:
+        ValueError: If backend is not 'prometheus' or 'memory'
+    """
+    if backend is None:
+        backend = os.getenv("METRICS_BACKEND", "prometheus")  # Default to prometheus
+
+    if backend == "prometheus":
+        from polytrader.obs.metrics_prometheus import PrometheusMetricsCollector
+
+        return PrometheusMetricsCollector()
+    elif backend == "memory":
+        return MemoryMetricsCollector()
+    else:
+        raise ValueError(f"Unknown metrics backend: {backend}. Must be 'prometheus' or 'memory'")
+
+
 def get_metrics_collector() -> IMetricsCollector:
     """Get the global metrics collector instance.
 
     Returns:
-        IMetricsCollector instance (singleton)
+        IMetricsCollector instance (singleton, defaults to Prometheus)
     """
     global _metrics_collector
     if _metrics_collector is None:
-        _metrics_collector = MemoryMetricsCollector()
+        _metrics_collector = create_metrics_collector()  # Uses factory, defaults to prometheus
     return _metrics_collector
 
 

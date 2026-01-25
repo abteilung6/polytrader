@@ -6,6 +6,7 @@ PnL calculation, and metrics emission.
 
 import pytest
 
+from polytrader.obs.metrics import MemoryMetricsCollector, set_metrics_collector
 from polytrader.platform.performance import PerStrategyPerformanceTracker
 from polytrader.types import Outcome
 from tests.factories.events import (
@@ -14,6 +15,15 @@ from tests.factories.events import (
     create_order_intent_event,
 )
 from tests.factories.orders import create_order
+
+
+@pytest.fixture(autouse=True)
+def memory_metrics_collector():
+    """Use MemoryMetricsCollector for tests that need to query values directly."""
+    collector = MemoryMetricsCollector()
+    set_metrics_collector(collector)
+    yield collector
+    set_metrics_collector(None)
 
 
 class TestPerStrategyPerformanceTracker:

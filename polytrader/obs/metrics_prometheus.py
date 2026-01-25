@@ -42,11 +42,15 @@ class PrometheusMetricsCollector(IMetricsCollector):
             registry: Prometheus CollectorRegistry to use. If None, uses REGISTRY.
         """
         self._registry = registry or REGISTRY
-        # Store metric instances: (name, tuple of label_names) -> Prometheus metric object
-        # This allows us to handle metrics with different label sets
-        self._counters: dict[tuple[str, tuple[str, ...]], Counter] = {}
-        self._gauges: dict[tuple[str, tuple[str, ...]], Gauge] = {}
-        self._histograms: dict[tuple[str, tuple[str, ...]], Histogram] = {}
+        # Store metric instances: name -> Prometheus metric object
+        # Track all label names used for each metric (union of all label sets)
+        self._counters: dict[str, Counter] = {}
+        self._gauges: dict[str, Gauge] = {}
+        self._histograms: dict[str, Histogram] = {}
+        # Track all label names seen for each metric (to handle different label sets)
+        self._counter_label_names: dict[str, set[str]] = {}
+        self._gauge_label_names: dict[str, set[str]] = {}
+        self._histogram_label_names: dict[str, set[str]] = {}
 
     def increment_counter(self, name: str, labels: dict[str, str] | None = None) -> None:
         """Increment a counter metric.
@@ -166,32 +170,52 @@ class PrometheusMetricsCollector(IMetricsCollector):
 
         Returns:
             Prometheus Counter instance (with labels applied if provided)
+
+        Note:
+            Prometheus requires the same label names for all instances of a metric.
+            This method tracks all label names used and creates the metric with the
+            union of all label names seen so far.
         """
-        # For Prometheus, we need to know label names upfront when creating the metric
-        # If labels are provided, extract label names
-        label_names: list[str] = []
+        # Track all label names used for this metric
+        if name not in self._counter_label_names:
+            self._counter_label_names[name] = set()
         if labels:
-            label_names = sorted(labels.keys())  # Sort for consistency
+            self._counter_label_names[name].update(labels.keys())
 
-        # Create a key that includes both name and label names (for uniqueness)
-        # This ensures metrics with different label sets are handled correctly
-        metric_key = (name, tuple(label_names))
+        # Get union of all label names (sorted for consistency)
+        all_label_names = sorted(self._counter_label_names[name])
 
-        if metric_key not in self._counters:
-            # Create Counter with label names
-            self._counters[metric_key] = Counter(
+        # Create metric if it doesn't exist
+        if name not in self._counters:
+            self._counters[name] = Counter(
                 name=name,
                 documentation=f"Counter metric: {name}",
-                labelnames=label_names,
+                labelnames=all_label_names,
                 registry=self._registry,
             )
 
-        counter = self._counters[metric_key]
+        counter = self._counters[name]
+        # Check if metric actually has label names (Prometheus metric attribute)
+        has_label_names = len(counter._labelnames) > 0 if hasattr(counter, "_labelnames") else False
+
         # Apply labels if provided
         if labels:
-            # Sort labels to match label_names order
-            sorted_labels = {k: labels[k] for k in label_names}
-            return counter.labels(**sorted_labels)
+            if has_label_names:
+                # Metric has label names, use them (fill missing with empty string)
+                full_labels = {
+                    label_name: labels.get(label_name, "") for label_name in all_label_names
+                }
+                return counter.labels(**full_labels)
+            else:
+                # Metric was created without label names, can't add labels
+                # Return the unlabeled counter (labels are ignored)
+                return counter
+        # If no labels provided
+        if has_label_names:
+            # Metric has label names, must provide them (use empty strings)
+            empty_labels = dict.fromkeys(counter._labelnames, "")
+            return counter.labels(**empty_labels)
+        # Metric has no label names, return as-is
         return counter
 
     def _get_or_create_gauge(self, name: str, labels: dict[str, str] | None = None) -> Gauge:
@@ -203,29 +227,54 @@ class PrometheusMetricsCollector(IMetricsCollector):
 
         Returns:
             Prometheus Gauge instance (with labels applied if provided)
+
+        Note:
+            Prometheus requires the same label names for all instances of a metric.
+            This method tracks all label names used and creates the metric with the
+            union of all label names seen so far. If a metric is first used without
+            labels and later with labels, it will be created with label names from
+            the first labeled usage.
         """
-        # Extract label names
-        label_names: list[str] = []
+        # Track all label names used for this metric
+        if name not in self._gauge_label_names:
+            self._gauge_label_names[name] = set()
         if labels:
-            label_names = sorted(labels.keys())  # Sort for consistency
+            self._gauge_label_names[name].update(labels.keys())
 
-        metric_key = (name, tuple(label_names))
+        # Get union of all label names (sorted for consistency)
+        all_label_names = sorted(self._gauge_label_names[name])
 
-        if metric_key not in self._gauges:
-            # Create Gauge with label names
-            self._gauges[metric_key] = Gauge(
+        # Create metric if it doesn't exist
+        if name not in self._gauges:
+            self._gauges[name] = Gauge(
                 name=name,
                 documentation=f"Gauge metric: {name}",
-                labelnames=label_names,
+                labelnames=all_label_names,
                 registry=self._registry,
             )
 
-        gauge = self._gauges[metric_key]
+        gauge = self._gauges[name]
+        # Check if metric actually has label names (Prometheus metric attribute)
+        has_label_names = len(gauge._labelnames) > 0 if hasattr(gauge, "_labelnames") else False
+
         # Apply labels if provided
         if labels:
-            # Sort labels to match label_names order
-            sorted_labels = {k: labels[k] for k in label_names}
-            return gauge.labels(**sorted_labels)
+            if has_label_names:
+                # Metric has label names, use them (fill missing with empty string)
+                full_labels = {
+                    label_name: labels.get(label_name, "") for label_name in all_label_names
+                }
+                return gauge.labels(**full_labels)
+            else:
+                # Metric was created without label names, can't add labels
+                # Return the unlabeled metric (labels are ignored)
+                return gauge
+        # If no labels provided
+        if has_label_names:
+            # Metric has label names, must provide them (use empty strings)
+            empty_labels = dict.fromkeys(gauge._labelnames, "")
+            return gauge.labels(**empty_labels)
+        # Metric has no label names, return as-is
         return gauge
 
     def _get_or_create_histogram(
@@ -239,28 +288,53 @@ class PrometheusMetricsCollector(IMetricsCollector):
 
         Returns:
             Prometheus Histogram instance (with labels applied if provided)
+
+        Note:
+            Prometheus requires the same label names for all instances of a metric.
+            This method tracks all label names used and creates the metric with the
+            union of all label names seen so far.
         """
-        # Extract label names
-        label_names: list[str] = []
+        # Track all label names used for this metric
+        if name not in self._histogram_label_names:
+            self._histogram_label_names[name] = set()
         if labels:
-            label_names = sorted(labels.keys())  # Sort for consistency
+            self._histogram_label_names[name].update(labels.keys())
 
-        metric_key = (name, tuple(label_names))
+        # Get union of all label names (sorted for consistency)
+        all_label_names = sorted(self._histogram_label_names[name])
 
-        if metric_key not in self._histograms:
-            # Create Histogram with label names
+        # Create metric if it doesn't exist
+        if name not in self._histograms:
             # Use default buckets (Prometheus default)
-            self._histograms[metric_key] = Histogram(
+            self._histograms[name] = Histogram(
                 name=name,
                 documentation=f"Histogram metric: {name}",
-                labelnames=label_names,
+                labelnames=all_label_names,
                 registry=self._registry,
             )
 
-        histogram = self._histograms[metric_key]
+        histogram = self._histograms[name]
+        # Check if metric actually has label names (Prometheus metric attribute)
+        has_label_names = (
+            len(histogram._labelnames) > 0 if hasattr(histogram, "_labelnames") else False
+        )
+
         # Apply labels if provided
         if labels:
-            # Sort labels to match label_names order
-            sorted_labels = {k: labels[k] for k in label_names}
-            return histogram.labels(**sorted_labels)
+            if has_label_names:
+                # Metric has label names, use them (fill missing with empty string)
+                full_labels = {
+                    label_name: labels.get(label_name, "") for label_name in all_label_names
+                }
+                return histogram.labels(**full_labels)
+            else:
+                # Metric was created without label names, can't add labels
+                # Return the unlabeled histogram (labels are ignored)
+                return histogram
+        # If no labels provided
+        if has_label_names:
+            # Metric has label names, must provide them (use empty strings)
+            empty_labels = dict.fromkeys(histogram._labelnames, "")
+            return histogram.labels(**empty_labels)
+        # Metric has no label names, return as-is
         return histogram
