@@ -103,8 +103,8 @@ class ParameterDefinition:
     @staticmethod
     def _validate_type(
         value: Any,
-        expected_type: type[Any] | Any,
-        parameter_name: str,  # type: ignore[valid-type]
+        expected_type: type[Any] | Any,  # type: ignore[valid-type]
+        parameter_name: str,
     ) -> None:
         """Validate that value matches expected type.
 
