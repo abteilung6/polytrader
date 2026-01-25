@@ -1,0 +1,16 @@
+# Grafana data source provisioning for Prometheus
+# Per Commit 9: Auto-configure Prometheus data source on Grafana startup
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: true
+    jsonData:
+      httpMethod: POST
+      timeInterval: 15s
+    version: 1

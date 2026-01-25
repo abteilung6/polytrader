@@ -7,38 +7,67 @@ services:
       POSTGRES_PASSWORD: ${DB_PASSWORD:-polytrader}
       POSTGRES_DB: ${DB_DATABASE:-polytrader}
     ports:
-      - "5432:5432"
+    - 5432:5432
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+    - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-polytrader} -d ${DB_DATABASE:-polytrader}"]
+      test:
+      - CMD-SHELL
+      - pg_isready -U ${DB_USER:-polytrader} -d ${DB_DATABASE:-polytrader}
       interval: 2s
       timeout: 5s
       retries: 5
       start_period: 5s
-
   prometheus:
     image: prom/prometheus:latest
     container_name: polytrader-prometheus
     ports:
-      - "9092:9090"
+    - 9092:9090
     volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml
-      - prometheus_data:/prometheus
+    - ./infra/prometheus.yml:/etc/prometheus/prometheus.yml
+    - prometheus_data:/prometheus
     command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--storage.tsdb.retention.time=15d'
+    - --config.file=/etc/prometheus/prometheus.yml
+    - --storage.tsdb.path=/prometheus
+    - --storage.tsdb.retention.time=15d
     extra_hosts:
-      - "host.docker.internal:host-gateway"  # Access host metrics server
+    - host.docker.internal:host-gateway
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      test:
+      - CMD
+      - wget
+      - --quiet
+      - --tries=1
+      - --spider
+      - http://localhost:9090/-/healthy
       interval: 5s
       timeout: 3s
       retries: 3
     depends_on:
-      - postgres
-
+    - postgres
+  grafana:
+    image: grafana/grafana:latest
+    container_name: polytrader-grafana
+    ports:
+    - 3000:3000
+    environment:
+    - GF_SECURITY_ADMIN_USER=admin
+    - GF_SECURITY_ADMIN_PASSWORD=admin
+    - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+    - grafana_data:/var/lib/grafana
+    - ./infra/grafana/provisioning:/etc/grafana/provisioning
+    - ./infra/grafana/dashboards:/var/lib/grafana/dashboards
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - wget --quiet --tries=1 --spider http://localhost:3000/api/health || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    depends_on:
+    - prometheus
 volumes:
-  postgres_data:
-  prometheus_data:
+  postgres_data: null
+  prometheus_data: null
+  grafana_data: {}

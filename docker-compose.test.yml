@@ -23,7 +23,7 @@ services:
     ports:
       - "9091:9090"
     volumes:
-      - ./prometheus.test.yml:/etc/prometheus/prometheus.yml
+      - ./infra/prometheus.test.yml:/etc/prometheus/prometheus.yml
       - prometheus_test_data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'

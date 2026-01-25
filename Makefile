@@ -92,3 +92,16 @@ test-prometheus-down:
 
 test-prometheus-logs:
 	docker compose -f docker-compose.test.yml logs -f prometheus-test
+
+# Grafana
+grafana-up:
+	docker compose up -d grafana
+	@echo "Waiting for Grafana to be ready..."
+	@timeout 30 bash -c 'until curl -s http://localhost:3000/api/health > /dev/null; do sleep 1; done' || echo "Grafana may not be ready yet"
+	@echo "Grafana is available at http://localhost:3000 (admin/admin)"
+
+grafana-down:
+	docker compose stop grafana
+
+grafana-logs:
+	docker compose logs -f grafana
