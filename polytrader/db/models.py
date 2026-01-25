@@ -4,6 +4,7 @@ This module defines the database schema using SQLAlchemy ORM.
 Per architecture.mdc: Database models are separated from business logic.
 """
 
+import uuid
 from datetime import datetime
 from decimal import Decimal
 from typing import Any
@@ -248,28 +249,41 @@ class MarketTickRecord(Base):
 
 
 class StrategyRecord(Base):
-    """SQLAlchemy ORM model for strategies table.
+    """SQLAlchemy ORM model for strategy_instances table.
 
     This model provides:
-    - Type-safe database operations for strategy registry
-    - Automatic type conversions (JSONB, timestamps)
+    - Type-safe database operations for strategy instances
+    - Automatic type conversions (JSONB, timestamps, UUIDs)
     - Clean query interface
     - Integration with Alembic autogenerate
 
-    Per Platform_Proposal.md: Strategies table stores strategy definitions
-    with configuration in JSONB format.
+    Per STRATEGY_ARCHITECTURE_PROPOSAL.md: Strategy instances are runtime
+    configurations of strategy templates with lifecycle state machine and
+    reproducibility metadata.
     """
 
-    __tablename__ = "strategies"
+    __tablename__ = "strategy_instances"
 
     # Primary key
     strategy_id: Mapped[str] = mapped_column(
         String(100),
         primary_key=True,
-        comment="Unique strategy identifier",
+        comment="Unique strategy instance identifier",
     )
 
-    # Strategy metadata
+    # Strategy Template Reference
+    template_type_id: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        comment="Strategy template type identifier (e.g., 'simple_threshold')",
+    )
+    template_version: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        comment="Resolved template version (e.g., '1.0.0')",
+    )
+
+    # Metadata
     name: Mapped[str] = mapped_column(
         String(255),
         nullable=False,
@@ -283,13 +297,68 @@ class StrategyRecord(Base):
     config: Mapped[dict[str, Any]] = mapped_column(
         JSONB,
         nullable=False,
-        comment="Strategy configuration (JSONB)",
+        comment="Strategy configuration (JSONB, validated against template schema)",
     )
-    enabled: Mapped[bool] = mapped_column(
-        Boolean,
+    config_hash: Mapped[str] = mapped_column(
+        String(64),
         nullable=False,
-        server_default="true",
-        comment="Whether strategy is enabled",
+        comment="SHA256 hash of config (for reproducibility)",
+    )
+
+    # Lifecycle State Machine (replaces enabled boolean)
+    desired_state: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        server_default="STOPPED",
+        comment=(
+            "Desired lifecycle state "
+            "(STOPPED | STARTING | RUNNING | PAUSED | DRAINING | STOPPING | ERROR)"
+        ),
+    )
+    actual_state: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        server_default="STOPPED",
+        comment="Actual runtime state (same enum as desired_state)",
+    )
+    last_transition_at: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=True,
+        comment="Timestamp of last state change",
+    )
+    last_error: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Last error message (if ERROR state)",
+    )
+
+    # Reproducibility Metadata
+    template_code_ref: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        comment="Git SHA / build artifact digest of template code",
+    )
+    dependency_set: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB,
+        nullable=True,
+        comment="Versions of key libs / model artifacts (JSONB)",
+    )
+    market_data_snapshot_ref: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        comment="Market data stream ID / snapshot reference",
+    )
+
+    # Deployment Tracking
+    deployment_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        nullable=True,
+        comment="UUID for each activation (correlates logs/metrics/events)",
+    )
+    run_id: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        comment="Process run_id when strategy is active",
     )
 
     # Timestamps
@@ -305,6 +374,24 @@ class StrategyRecord(Base):
         onupdate=func.now(),
         nullable=False,
         comment="Record update timestamp",
+    )
+
+    # Table constraints
+    __table_args__ = (
+        CheckConstraint(
+            (
+                "desired_state IN "
+                "('STOPPED', 'STARTING', 'RUNNING', 'PAUSED', 'DRAINING', 'STOPPING', 'ERROR')"
+            ),
+            name="strategy_instances_desired_state_check",
+        ),
+        CheckConstraint(
+            (
+                "actual_state IN "
+                "('STOPPED', 'STARTING', 'RUNNING', 'PAUSED', 'DRAINING', 'STOPPING', 'ERROR')"
+            ),
+            name="strategy_instances_actual_state_check",
+        ),
     )
 
 
@@ -381,12 +468,12 @@ class LiveStrategyActivationRecord(Base):
 
     __tablename__ = "live_strategy_activation"
 
-    # Primary key (foreign key to strategies)
+    # Primary key (foreign key to strategy_instances)
     strategy_id: Mapped[str] = mapped_column(
         String(100),
-        ForeignKey("strategies.strategy_id", ondelete="CASCADE"),
+        ForeignKey("strategy_instances.strategy_id", ondelete="CASCADE"),
         primary_key=True,
-        comment="Strategy identifier (FK to strategies.strategy_id)",
+        comment="Strategy identifier (FK to strategy_instances.strategy_id)",
     )
 
     # Activation state
@@ -465,7 +552,7 @@ class ControlCommandRecord(Base):
     )
     strategy_id: Mapped[str | None] = mapped_column(
         String(100),
-        ForeignKey("strategies.strategy_id", ondelete="SET NULL"),
+        ForeignKey("strategy_instances.strategy_id", ondelete="SET NULL"),
         nullable=True,
         comment="Strategy identifier (nullable for enable/disable commands)",
     )
