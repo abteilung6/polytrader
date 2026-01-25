@@ -11,17 +11,63 @@ Tests POST endpoints for creating commands:
 Tests idempotency, version checks, and command envelope responses.
 """
 
+from collections.abc import AsyncGenerator
+
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from polytrader.api.app import create_app
+from polytrader.api.dependencies import get_db_session
 
 
 @pytest.fixture
-def client(postgres_db: None) -> TestClient:
-    """Create FastAPI test client with real database."""
+def client(postgres_test_url: str, postgres_db: None) -> TestClient:
+    """Create FastAPI test client with test database.
+
+    Overrides get_db_session dependency to use test database instead of dev database.
+    """
+    # Convert URL to SQLAlchemy async format
+    sqlalchemy_url = postgres_test_url
+    if sqlalchemy_url.startswith("postgresql://"):
+        sqlalchemy_url = sqlalchemy_url.replace("postgresql://", "postgresql+psycopg://", 1)
+
+    # Create engine and session factory for test database
+    engine = create_async_engine(sqlalchemy_url, echo=False)
+    Session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    # Clean up strategies table at test start
+    async def cleanup_strategies() -> None:
+        """Clean up strategies table."""
+        from sqlalchemy import text
+
+        async with Session() as session:
+            try:
+                await session.execute(text("TRUNCATE TABLE strategies CASCADE"))
+                await session.commit()
+            except Exception:
+                await session.rollback()
+
+    # Run cleanup synchronously using asyncio
+    import asyncio
+
+    asyncio.run(cleanup_strategies())
+
     app = create_app()
-    return TestClient(app)
+
+    # Override get_db_session to use test database session
+    async def override_get_db_session() -> AsyncGenerator[AsyncSession, None]:
+        """Override dependency to use test database session."""
+        async with Session() as session:
+            yield session
+
+    app.dependency_overrides[get_db_session] = override_get_db_session
+
+    yield TestClient(app)
+
+    # Cleanup: remove dependency override and clean up strategies
+    app.dependency_overrides.clear()
+    asyncio.run(cleanup_strategies())
 
 
 @pytest.fixture
