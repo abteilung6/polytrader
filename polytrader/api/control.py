@@ -26,6 +26,7 @@ from polytrader.api.models import (
     HealthGateStatus,
     HealthResponse,
     LiveStrategiesResponse,
+    RunIdentityResponse,
     StrategiesResponse,
     StrategyResponse,
     UpdateStrategyRequest,
@@ -39,7 +40,6 @@ from polytrader.platform.control import (
     LiveStrategyRepository,
 )
 from polytrader.platform.registry import StrategyRegistry
-from polytrader.strategies.lifecycle_models import StrategyLifecycleState
 
 router = APIRouter(prefix="/api/v1", tags=["control"])
 
@@ -140,7 +140,24 @@ async def get_strategies(
                 name=s.name,
                 description=s.description,
                 config=s.config,
-                enabled=s.desired_state == StrategyLifecycleState.RUNNING,
+                template_type_id=s.template_type_id,
+                template_version=s.template_version,
+                desired_state=s.desired_state,
+                actual_state=s.actual_state,
+                last_transition_at=s.last_transition_at,
+                last_error=s.last_error,
+                run_identity=(
+                    RunIdentityResponse(
+                        template_code_ref=s.template_code_ref,
+                        config_hash=s.config_hash,
+                        dependency_set=s.dependency_set,
+                        market_data_snapshot_ref=s.market_data_snapshot_ref,
+                    )
+                    if (s.template_code_ref or s.dependency_set or s.market_data_snapshot_ref)
+                    else None
+                ),
+                deployment_id=str(s.deployment_id) if s.deployment_id else None,
+                run_id=s.run_id,
                 created_at=s.created_at,
                 updated_at=s.updated_at,
             )
@@ -435,9 +452,13 @@ async def create_strategy(
     registry: StrategyRegistry = Depends(get_strategy_registry),  # noqa: B008
 ) -> StrategyResponse:
     """Create a new strategy in registry."""
-    # Map enabled boolean to lifecycle state
-    desired_state = (
-        StrategyLifecycleState.RUNNING if request.enabled else StrategyLifecycleState.STOPPED
+    # Resolve version selector to exact version
+    # TODO: Get available versions from registry and resolve selector
+    # For now, use exact version if provided, otherwise default to "1.0.0"
+    template_version = (
+        request.version_selector.exact
+        if request.version_selector.exact
+        else "1.0.0"  # Default, should be resolved from registry
     )
 
     strategy = StrategyRecordModel(
@@ -445,11 +466,11 @@ async def create_strategy(
         name=request.name,
         description=request.description,
         config=request.config,
-        template_type_id="simple_threshold",  # Default for now, should come from request
-        template_version="1.0.0",  # Default for now, should come from request
+        template_type_id=request.template_type_id,
+        template_version=template_version,
         config_hash="",  # Will be calculated by registry
-        desired_state=desired_state,
-        actual_state=desired_state,
+        desired_state=request.desired_state,
+        actual_state=request.desired_state,
     )
 
     try:
@@ -484,7 +505,28 @@ async def create_strategy(
         name=strategy.name,
         description=strategy.description,
         config=strategy.config,
-        enabled=strategy.desired_state == StrategyLifecycleState.RUNNING,
+        template_type_id=strategy.template_type_id,
+        template_version=strategy.template_version,
+        desired_state=strategy.desired_state,
+        actual_state=strategy.actual_state,
+        last_transition_at=strategy.last_transition_at,
+        last_error=strategy.last_error,
+        run_identity=(
+            RunIdentityResponse(
+                template_code_ref=strategy.template_code_ref,
+                config_hash=strategy.config_hash,
+                dependency_set=strategy.dependency_set,
+                market_data_snapshot_ref=strategy.market_data_snapshot_ref,
+            )
+            if (
+                strategy.template_code_ref
+                or strategy.dependency_set
+                or strategy.market_data_snapshot_ref
+            )
+            else None
+        ),
+        deployment_id=str(strategy.deployment_id) if strategy.deployment_id else None,
+        run_id=strategy.run_id,
         created_at=strategy.created_at,
         updated_at=strategy.updated_at,
     )
@@ -523,14 +565,9 @@ async def update_strategy(
         strategy.description = request.description
     if request.config is not None:
         strategy.config = request.config
-    if request.enabled is not None:
-        # Map enabled boolean to lifecycle state
-        strategy.desired_state = (
-            StrategyLifecycleState.RUNNING if request.enabled else StrategyLifecycleState.STOPPED
-        )
-        # Also update actual_state if strategy is not currently running
-        if strategy.actual_state != StrategyLifecycleState.RUNNING:
-            strategy.actual_state = strategy.desired_state
+    if request.desired_state is not None:
+        # Update desired_state (lifecycle manager will handle actual_state transition)
+        strategy.desired_state = request.desired_state
 
     try:
         await registry.update_strategy(strategy)
@@ -553,7 +590,28 @@ async def update_strategy(
         name=updated_strategy.name,
         description=updated_strategy.description,
         config=updated_strategy.config,
-        enabled=updated_strategy.desired_state == StrategyLifecycleState.RUNNING,
+        template_type_id=updated_strategy.template_type_id,
+        template_version=updated_strategy.template_version,
+        desired_state=updated_strategy.desired_state,
+        actual_state=updated_strategy.actual_state,
+        last_transition_at=updated_strategy.last_transition_at,
+        last_error=updated_strategy.last_error,
+        run_identity=(
+            RunIdentityResponse(
+                template_code_ref=updated_strategy.template_code_ref,
+                config_hash=updated_strategy.config_hash,
+                dependency_set=updated_strategy.dependency_set,
+                market_data_snapshot_ref=updated_strategy.market_data_snapshot_ref,
+            )
+            if updated_strategy.template_code_ref
+            or updated_strategy.dependency_set
+            or updated_strategy.market_data_snapshot_ref
+            else None
+        ),
+        deployment_id=(
+            str(updated_strategy.deployment_id) if updated_strategy.deployment_id else None
+        ),
+        run_id=updated_strategy.run_id,
         created_at=updated_strategy.created_at,
         updated_at=updated_strategy.updated_at,
     )

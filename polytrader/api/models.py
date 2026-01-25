@@ -10,7 +10,7 @@ All endpoints return Pydantic models (not dicts) to enable:
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field, model_validator
 
 # ============================================================================
 # Health & Status Models
@@ -66,16 +66,148 @@ class ExecutionStateResponse(BaseModel):
 # ============================================================================
 
 
+# StrategyLifecycleState is imported from polytrader.strategies.lifecycle_models
+# For API models, we use a Literal type alias for OpenAPI generation
+StrategyLifecycleState = Literal[
+    "STOPPED", "STARTING", "RUNNING", "PAUSED", "DRAINING", "STOPPING", "ERROR"
+]
+
+
+class VersionSelectorRequest(BaseModel):
+    """Version selector request model.
+
+    Per Commit 14: VersionSelectorRequest allows clients to specify
+    either an exact version or a channel selector for strategy templates.
+
+    Attributes:
+        exact: Exact version string (e.g., "1.2.3") or None
+        channel: Channel name ("stable", "beta", "dev") or None
+        major: Major version number for channel selection (e.g., 1) or None
+    """
+
+    exact: str | None = Field(default=None, description="Exact version string (e.g., '1.2.3')")
+    channel: Literal["stable", "beta", "dev"] | None = Field(
+        default=None, description="Channel name for version selection"
+    )
+    major: int | None = Field(
+        default=None, description="Major version number for channel selection"
+    )
+
+    @model_validator(mode="after")
+    def validate_selector(self) -> "VersionSelectorRequest":
+        """Validate that selector has exactly one of exact or channel."""
+        if self.exact is None and self.channel is None:
+            raise ValueError("VersionSelectorRequest must have either 'exact' or 'channel'")
+
+        if self.exact is not None and self.channel is not None:
+            raise ValueError("VersionSelectorRequest cannot have both 'exact' and 'channel'")
+
+        if self.major is not None and self.channel is None:
+            raise ValueError("'major' can only be specified with 'channel'")
+
+        return self
+
+
+class RunIdentityResponse(BaseModel):
+    """Reproducibility metadata response.
+
+    Per Commit 14: RunIdentityResponse exposes reproducibility metadata
+    for strategy instances, enabling deterministic replay.
+
+    Attributes:
+        template_code_ref: Git SHA / build artifact digest of template code
+        config_hash: SHA256 hash of config (for reproducibility)
+        dependency_set: Versions of key libs / model artifacts
+        market_data_snapshot_ref: Market data stream ID / snapshot reference
+    """
+
+    template_code_ref: str | None = Field(
+        default=None, description="Git SHA / build artifact digest of template code"
+    )
+    config_hash: str = Field(description="SHA256 hash of config (for reproducibility)")
+    dependency_set: dict[str, str] | None = Field(
+        default=None, description="Versions of key libs / model artifacts"
+    )
+    market_data_snapshot_ref: str | None = Field(
+        default=None, description="Market data stream ID / snapshot reference"
+    )
+
+
+class StrategyTypeResponse(BaseModel):
+    """Strategy template type response.
+
+    Per Commit 14: StrategyTypeResponse exposes strategy template information
+    for discovery and selection.
+
+    Attributes:
+        type_id: Template type identifier (e.g., 'simple_threshold')
+        name: Human-readable template name
+        description: Template description
+        available_versions: List of available versions
+        parameter_schema: OpenAPI-compatible parameter schema
+    """
+
+    type_id: str = Field(description="Template type identifier (e.g., 'simple_threshold')")
+    name: str = Field(description="Human-readable template name")
+    description: str = Field(description="Template description")
+    available_versions: list[str] = Field(description="List of available versions")
+    parameter_schema: dict = Field(description="OpenAPI-compatible parameter schema")
+
+
+class StrategyTypesResponse(BaseModel):
+    """List of strategy types response."""
+
+    types: list[StrategyTypeResponse] = Field(description="List of strategy templates")
+
+
 class StrategyResponse(BaseModel):
-    """Strategy registry entry response."""
+    """Strategy registry entry response.
+
+    Per Commit 14: StrategyResponse includes all new fields for template
+    reference, lifecycle state, and reproducibility metadata.
+    """
 
     strategy_id: str = Field(description="Strategy identifier")
     name: str = Field(description="Human-readable strategy name")
     description: str | None = Field(default=None, description="Strategy description")
     config: dict = Field(description="Strategy configuration (JSONB)")
-    enabled: bool = Field(description="Whether strategy is enabled")
+
+    # Template Reference
+    template_type_id: str = Field(description="Template type identifier (e.g., 'simple_threshold')")
+    template_version: str = Field(description="Resolved template version (e.g., '1.0.0')")
+
+    # Lifecycle State (replaces enabled boolean)
+    desired_state: StrategyLifecycleState = Field(
+        description="Desired lifecycle state (STOPPED | STARTING | RUNNING | etc.)"
+    )
+    actual_state: StrategyLifecycleState = Field(
+        description="Actual runtime state (STOPPED | STARTING | RUNNING | etc.)"
+    )
+    last_transition_at: datetime | None = Field(
+        default=None, description="Timestamp of last state change"
+    )
+    last_error: str | None = Field(default=None, description="Last error message (if ERROR state)")
+
+    # Reproducibility Metadata
+    run_identity: RunIdentityResponse | None = Field(
+        default=None, description="Reproducibility metadata"
+    )
+
+    # Deployment Tracking
+    deployment_id: str | None = Field(
+        default=None, description="UUID for each activation (correlates logs/metrics/events)"
+    )
+    run_id: str | None = Field(default=None, description="Process run_id when strategy is active")
+
+    # Timestamps
     created_at: datetime = Field(description="Creation timestamp")
     updated_at: datetime = Field(description="Last update timestamp")
+
+    # Backward compatibility: enabled field derived from desired_state
+    @computed_field
+    def enabled(self) -> bool:
+        """Whether strategy is enabled (derived from desired_state == RUNNING)."""
+        return self.desired_state == "RUNNING"
 
 
 class StrategiesResponse(BaseModel):
@@ -170,22 +302,43 @@ class DeactivateStrategyRequest(BaseModel):
 
 
 class CreateStrategyRequest(BaseModel):
-    """Request to create a new strategy."""
+    """Request to create a new strategy.
+
+    Per Commit 14: CreateStrategyRequest includes version_selector and
+    desired_state instead of enabled boolean.
+    """
 
     strategy_id: str = Field(description="Strategy identifier")
     name: str = Field(description="Human-readable strategy name")
     description: str | None = Field(default=None, description="Strategy description")
     config: dict = Field(description="Strategy configuration (JSONB)")
-    enabled: bool = Field(default=True, description="Whether strategy is enabled")
+
+    # Template Reference
+    template_type_id: str = Field(description="Template type identifier (e.g., 'simple_threshold')")
+    version_selector: VersionSelectorRequest = Field(
+        description="Version selector (exact version or channel)"
+    )
+
+    # Lifecycle State (replaces enabled boolean)
+    desired_state: StrategyLifecycleState = Field(
+        default="STOPPED",
+        description="Desired lifecycle state (default: STOPPED)",
+    )
 
 
 class UpdateStrategyRequest(BaseModel):
-    """Request to update an existing strategy."""
+    """Request to update an existing strategy.
+
+    Per Commit 14: UpdateStrategyRequest includes desired_state instead
+    of enabled boolean.
+    """
 
     name: str | None = Field(default=None, description="Strategy name")
     description: str | None = Field(default=None, description="Strategy description")
     config: dict | None = Field(default=None, description="Strategy configuration")
-    enabled: bool | None = Field(default=None, description="Whether strategy is enabled")
+    desired_state: StrategyLifecycleState | None = Field(
+        default=None, description="Desired lifecycle state"
+    )
 
 
 # ============================================================================
