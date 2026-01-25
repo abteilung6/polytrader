@@ -33,6 +33,8 @@ from polytrader.api.models import (
     StrategyTypeResponse,
     StrategyTypesResponse,
     UpdateStrategyRequest,
+    ValidateStrategyConfigRequest,
+    ValidateStrategyConfigResponse,
     VersionConflictResponse,
 )
 from polytrader.db.models import ControlCommandRecord
@@ -311,6 +313,93 @@ async def get_strategy_template_version(
         description=template.description,
         available_versions=[version],  # Single version
         parameter_schema=template.parameter_schema.to_openapi_schema(),
+    )
+
+
+@router.post(
+    "/state/strategies/validate",
+    response_model=ValidateStrategyConfigResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        400: {
+            "model": ErrorResponse,
+            "description": "Template not found or version resolution failed",
+        },
+    },
+)
+async def validate_strategy_config(
+    request: ValidateStrategyConfigRequest,
+    in_memory_registry: InMemoryStrategyRegistry = Depends(get_in_memory_strategy_registry),  # noqa: B008
+) -> ValidateStrategyConfigResponse:
+    """Validate a strategy configuration against a template schema.
+
+    Per Commit 16: This endpoint allows clients to validate configurations
+    before creating strategy instances. Returns validation results with
+    clear error messages.
+
+    Args:
+        request: Validation request with template_type_id, version_selector, and config
+
+    Returns:
+        ValidateStrategyConfigResponse with validation results
+
+    Raises:
+        HTTPException: 400 if template not found or version resolution fails
+    """
+    from polytrader.strategies.version import VersionResolutionError, VersionSelector
+
+    # Resolve version selector to exact version
+    try:
+        available_versions = in_memory_registry.list_versions(request.template_type_id)
+        if not available_versions:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=ErrorResponse(
+                    error="Template not found",
+                    detail=f"No template found with type_id: {request.template_type_id}",
+                ).model_dump(),
+            )
+
+        # Convert VersionSelectorRequest to VersionSelector
+        version_selector = VersionSelector(
+            exact=request.version_selector.exact,
+            channel=request.version_selector.channel,
+            major=request.version_selector.major,
+        )
+        template_version = version_selector.resolve(available_versions)
+    except (ValueError, VersionResolutionError) as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ErrorResponse(
+                error="Version resolution failed",
+                detail=str(e),
+            ).model_dump(),
+        ) from e
+
+    # Get template and validate config
+    try:
+        template = in_memory_registry.get(request.template_type_id, template_version)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ErrorResponse(
+                error="Template not found",
+                detail=str(e),
+            ).model_dump(),
+        ) from e
+
+    # Validate config against template's parameter schema
+    validation_errors = template.parameter_schema.validate(request.config)
+
+    # For now, we don't have warnings (could add in future for deprecations, etc.)
+    warnings: list[str] = []
+
+    return ValidateStrategyConfigResponse(
+        valid=len(validation_errors) == 0,
+        errors=validation_errors,
+        warnings=warnings,
+        template_type_id=request.template_type_id,
+        template_version=template_version,
     )
 
 

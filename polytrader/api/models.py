@@ -341,6 +341,48 @@ class UpdateStrategyRequest(BaseModel):
     )
 
 
+class ValidateStrategyConfigRequest(BaseModel):
+    """Request to validate a strategy configuration.
+
+    Per Commit 16: ValidateStrategyConfigRequest allows clients to validate
+    configurations before creating strategy instances.
+
+    Attributes:
+        template_type_id: Template type identifier (e.g., 'simple_threshold')
+        version_selector: Version selector (exact version or channel)
+        config: Configuration dictionary to validate
+    """
+
+    template_type_id: str = Field(description="Template type identifier (e.g., 'simple_threshold')")
+    version_selector: VersionSelectorRequest = Field(
+        description="Version selector (exact version or channel)"
+    )
+    config: dict = Field(description="Strategy configuration to validate")
+
+
+class ValidateStrategyConfigResponse(BaseModel):
+    """Response from strategy configuration validation.
+
+    Per Commit 16: ValidateStrategyConfigResponse provides validation results
+    with clear error messages and warnings.
+
+    Attributes:
+        valid: Whether the configuration is valid
+        errors: List of validation error messages (empty if valid)
+        warnings: List of validation warnings (optional issues)
+        template_type_id: Template type identifier used for validation
+        template_version: Resolved template version used for validation
+    """
+
+    valid: bool = Field(description="Whether the configuration is valid")
+    errors: list[str] = Field(default_factory=list, description="List of validation error messages")
+    warnings: list[str] = Field(
+        default_factory=list, description="List of validation warnings (optional issues)"
+    )
+    template_type_id: str = Field(description="Template type identifier used for validation")
+    template_version: str = Field(description="Resolved template version used for validation")
+
+
 # ============================================================================
 # Error Response Models
 # ============================================================================
