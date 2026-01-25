@@ -1,0 +1,22 @@
+# Grafana dashboard provisioning configuration
+# Per Commit 9: Auto-load dashboards from JSON files on Grafana startup
+#
+# This configuration tells Grafana to automatically load all dashboard JSON files
+# from the /var/lib/grafana/dashboards directory (mapped from ./infra/grafana/dashboards)
+#
+# Dashboards placed in infra/grafana/dashboards/*.json will be automatically
+# imported when Grafana starts.
+
+apiVersion: 1
+
+providers:
+  - name: 'Polytrader Dashboards'
+    orgId: 1
+    folder: ''
+    type: file
+    disableDeletion: false
+    editable: true
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: true
