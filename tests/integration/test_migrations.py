@@ -89,9 +89,10 @@ class TestMigrationRunner:
             assert len(versions) > 0
             # Check that a valid migration revision is present
             # Note: Alembic only stores the latest revision, not the full history
-            # Current HEAD should be 669d44032370 (platform tables)
-            # Previous migrations: 2544c4bd05f5 (market_ticks), 21bc6d880faf (events)
-            assert "669d44032370" in versions
+            # Current HEAD should be d156ab13dab9 (strategy lifecycle and metadata)
+            # Previous migrations: 669d44032370 (platform tables),
+            # 2544c4bd05f5 (market_ticks), 21bc6d880faf (events)
+            assert "d156ab13dab9" in versions
 
     @pytest.mark.asyncio
     async def test_run_migrations_idempotent(

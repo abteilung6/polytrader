@@ -8,6 +8,9 @@ lanes based on strategy activation.
 
 Per flow.md §4: Strategy layer produces SignalEvent (probabilistic scores).
 StrategyRunner subscribes to MARKET_DATA and evaluates strategy on-demand.
+
+Per Commit 22: StrategyRunner integrates StrategyLifecycleManager for
+state transitions and event emission.
 """
 
 import asyncio
@@ -18,12 +21,16 @@ from polytrader.db.models import StrategyRecord
 from polytrader.events import MARKET_DATA, SIGNALS, EventBus
 from polytrader.events.types import MarketDataEvent, SignalEvent
 from polytrader.logging_config import logger
+from polytrader.platform.strategy_lifecycle import StrategyLifecycleManager
 from polytrader.store import IMarketDataStore
+from polytrader.strategies.lifecycle_models import StrategyLifecycleState
 from polytrader.supervisor.errors import classify_service_error
 from polytrader.supervisor.market import MarketSupervisor
 from polytrader.types import Position
 
 if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
     from polytrader.position_manager import IPositionManager
     from polytrader.strategies.base import IStrategy
 
@@ -62,9 +69,14 @@ class StrategyRunner:
         store: IMarketDataStore,
         market_supervisor: MarketSupervisor,
         strategy_factory: Callable[[str], "IStrategy"],
+        session: "AsyncSession",
         position_manager: "IPositionManager | None" = None,
+        lifecycle_manager: StrategyLifecycleManager | None = None,
     ) -> None:
         """Initialize strategy runner.
+
+        Per Commit 22: StrategyRunner accepts StrategyLifecycleManager for
+        state transitions. If not provided, creates one internally.
 
         Args:
             strategy: StrategyRecord from registry
@@ -72,7 +84,9 @@ class StrategyRunner:
             store: Market data store
             market_supervisor: Shared MarketSupervisor instance (already started)
             strategy_factory: Factory for creating strategy instances
+            session: Database session for lifecycle state updates
             position_manager: Position manager (optional)
+            lifecycle_manager: StrategyLifecycleManager (optional, created if None)
         """
         self.strategy = strategy
         self.bus = bus
@@ -80,6 +94,13 @@ class StrategyRunner:
         self.market_supervisor = market_supervisor
         self.strategy_factory = strategy_factory
         self.position_manager = position_manager
+        self._session = session
+
+        # Create lifecycle manager if not provided
+        if lifecycle_manager is None:
+            self._lifecycle_manager = StrategyLifecycleManager(bus=bus, session=session)
+        else:
+            self._lifecycle_manager = lifecycle_manager
 
         self._running = False
         self._strategy_instance: IStrategy | None = None
@@ -90,13 +111,52 @@ class StrategyRunner:
     async def start(self) -> None:
         """Start the strategy runner.
 
+        Per Commit 22: Handles lifecycle state transitions:
+        - STOPPED → STARTING → RUNNING (on success)
+        - Any state → ERROR (on failure)
+
         Subscribes to MARKET_DATA events and starts evaluation loop.
         Strategy instance is created lazily on first market data.
         """
         if self._running:
             return
 
-        self._running = True
+        # Transition to STARTING state (only if not already RUNNING or STARTING)
+        current_state = StrategyLifecycleState(self.strategy.actual_state)
+        if current_state == StrategyLifecycleState.RUNNING:
+            # Already running, check if we need to start anyway
+            if self._running:
+                return
+            # Not actually running yet, but state says RUNNING - transition to STARTING first
+            # This handles the case where state was set but runner wasn't started
+
+        if (
+            current_state != StrategyLifecycleState.STARTING
+            and current_state != StrategyLifecycleState.RUNNING
+        ):
+            try:
+                await self._lifecycle_manager.transition_to_state(
+                    strategy=self.strategy,
+                    target_state=StrategyLifecycleState.STARTING,
+                    reason="StrategyRunner.start() called",
+                )
+            except Exception as e:
+                logger.bind(
+                    strategy_id=self.strategy.strategy_id,
+                    strategy_name=self.strategy.name,
+                    error_class="fatal",
+                ).exception("Failed to transition to STARTING state")
+                # Try to transition to ERROR
+                try:
+                    await self._lifecycle_manager.transition_to_state(
+                        strategy=self.strategy,
+                        target_state=StrategyLifecycleState.ERROR,
+                        reason=f"Failed to transition to STARTING: {e}",
+                    )
+                except Exception:
+                    pass  # Ignore errors in error handling
+                raise
+
         logger.bind(
             strategy_id=self.strategy.strategy_id,
             strategy_name=self.strategy.name,
@@ -109,17 +169,39 @@ class StrategyRunner:
             # Start evaluation loop
             self._evaluation_task = asyncio.create_task(self._evaluate_strategy_loop())
 
+            # Transition to RUNNING state on success
+            await self._lifecycle_manager.transition_to_state(
+                strategy=self.strategy,
+                target_state=StrategyLifecycleState.RUNNING,
+                reason="StrategyRunner started successfully",
+            )
+
+            self._running = True
+
             logger.bind(
                 strategy_id=self.strategy.strategy_id,
                 strategy_name=self.strategy.name,
             ).info("StrategyRunner started")
-        except Exception:
+        except Exception as e:
             self._running = False
+            error_msg = f"Failed to start StrategyRunner: {e}"
             logger.bind(
                 strategy_id=self.strategy.strategy_id,
                 strategy_name=self.strategy.name,
                 error_class="fatal",
-            ).exception("Failed to start StrategyRunner")
+            ).exception(error_msg)
+
+            # Transition to ERROR state
+            try:
+                await self._lifecycle_manager.transition_to_state(
+                    strategy=self.strategy,
+                    target_state=StrategyLifecycleState.ERROR,
+                    reason=error_msg,
+                )
+            except Exception:
+                # Ignore errors in error handling
+                pass
+
             raise
 
     async def _evaluate_strategy_loop(self) -> None:
@@ -238,11 +320,41 @@ class StrategyRunner:
     async def stop(self) -> None:
         """Stop the strategy runner.
 
+        Per Commit 22: Handles lifecycle state transitions:
+        - RUNNING → STOPPING → STOPPED (on success)
+        - Any state → ERROR (on failure)
+
         Cancels evaluation/background tasks and unsubscribes from MARKET_DATA.
         Does NOT stop MarketSupervisor (registry manages lifecycle).
         """
         if not self._running:
             return
+
+        # Transition to STOPPING state
+        current_state = StrategyLifecycleState(self.strategy.actual_state)
+        if current_state != StrategyLifecycleState.STOPPING:
+            try:
+                await self._lifecycle_manager.transition_to_state(
+                    strategy=self.strategy,
+                    target_state=StrategyLifecycleState.STOPPING,
+                    reason="StrategyRunner.stop() called",
+                )
+            except Exception as e:
+                logger.bind(
+                    strategy_id=self.strategy.strategy_id,
+                    strategy_name=self.strategy.name,
+                    error_class="fatal",
+                ).exception("Failed to transition to STOPPING state")
+                # Try to transition to ERROR
+                try:
+                    await self._lifecycle_manager.transition_to_state(
+                        strategy=self.strategy,
+                        target_state=StrategyLifecycleState.ERROR,
+                        reason=f"Failed to transition to STOPPING: {e}",
+                    )
+                except Exception:
+                    pass  # Ignore errors in error handling
+                raise
 
         self._running = False
         logger.bind(
@@ -275,16 +387,36 @@ class StrategyRunner:
             if self._strategy_instance:
                 self._strategy_instance.stop()
 
+            # Transition to STOPPED state on success
+            await self._lifecycle_manager.transition_to_state(
+                strategy=self.strategy,
+                target_state=StrategyLifecycleState.STOPPED,
+                reason="StrategyRunner stopped successfully",
+            )
+
             logger.bind(
                 strategy_id=self.strategy.strategy_id,
                 strategy_name=self.strategy.name,
             ).info("StrategyRunner stopped")
-        except Exception:
+        except Exception as e:
+            error_msg = f"Error stopping StrategyRunner: {e}"
             logger.bind(
                 strategy_id=self.strategy.strategy_id,
                 strategy_name=self.strategy.name,
                 error_class="fatal",
-            ).exception("Error stopping StrategyRunner")
+            ).exception(error_msg)
+
+            # Transition to ERROR state
+            try:
+                await self._lifecycle_manager.transition_to_state(
+                    strategy=self.strategy,
+                    target_state=StrategyLifecycleState.ERROR,
+                    reason=error_msg,
+                )
+            except Exception:
+                # Ignore errors in error handling
+                pass
+
             raise
 
     def is_running(self) -> bool:

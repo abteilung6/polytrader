@@ -48,4 +48,9 @@ markers = [
 ]
 # Parallel execution is enabled via Makefile targets using pytest-xdist
 # Use: make test (parallel) or pytest tests/ -v (sequential)
+# Suppress SQLAlchemy warnings about attribute history during flush
+# This is a known behavior when using onupdate handlers and doesn't affect functionality
+filterwarnings = [
+    "ignore::sqlalchemy.exc.SAWarning",
+]
 

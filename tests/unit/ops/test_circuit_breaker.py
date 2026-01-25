@@ -8,13 +8,29 @@ Per Phase 6 Commit 6: Test CircuitBreaker functionality including:
 """
 
 import asyncio
+from collections.abc import Generator
 
 import pytest
 
 from polytrader.events import CIRCUIT_BREAKER
 from polytrader.events.bus import EventBus
 from polytrader.events.types import ReconcileEvent
+from polytrader.obs.metrics import MemoryMetricsCollector, set_metrics_collector
 from polytrader.ops.control import CircuitBreaker, CircuitBreakerThresholds, ExecutionControl
+
+
+@pytest.fixture
+def metrics_collector() -> Generator[MemoryMetricsCollector, None, None]:
+    """Create a memory metrics collector for testing.
+
+    This prevents Prometheus metric duplication errors when multiple
+    ExecutionControl instances are created in tests.
+    """
+    collector = MemoryMetricsCollector()
+    set_metrics_collector(collector)
+    yield collector
+    # Cleanup: reset to None so next test gets fresh collector
+    set_metrics_collector(None)
 
 
 @pytest.fixture
@@ -23,7 +39,12 @@ def bus() -> EventBus:
 
 
 @pytest.fixture
-def execution_control() -> ExecutionControl:
+def execution_control(metrics_collector: MemoryMetricsCollector) -> ExecutionControl:
+    """Create ExecutionControl with metrics collector set up.
+
+    Args:
+        metrics_collector: Memory metrics collector fixture (ensures metrics are set up)
+    """
     return ExecutionControl()
 
 

@@ -4,6 +4,7 @@ Tests service lifecycle management, startup/shutdown order, and error handling.
 """
 
 import asyncio
+from collections.abc import Generator
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -21,6 +22,7 @@ from polytrader.events.types import (
     ReconcileEvent,
 )
 from polytrader.execution import ExecutionRouter
+from polytrader.obs.metrics import MemoryMetricsCollector, set_metrics_collector
 from polytrader.oms import InMemoryOrderStore, OMSCore
 from polytrader.oms.idempotency import IdempotencyStore
 from polytrader.oms.models import OrderState
@@ -37,6 +39,23 @@ from polytrader.risk import RiskChecker, RiskEngine, get_default_limits
 from polytrader.store import MemoryMarketDataStore
 from polytrader.supervisor import SystemSupervisor
 from polytrader.types import Outcome, Position
+
+
+@pytest.fixture(autouse=True)
+def metrics_collector() -> Generator[MemoryMetricsCollector, None, None]:
+    """Use MemoryMetricsCollector for all supervisor tests to prevent Prometheus metric duplication.
+
+    Per testing.mdc: Unit tests must be isolated. This fixture ensures each test
+    gets a fresh metrics collector, preventing "Duplicated timeseries" errors.
+
+    Yields:
+        MemoryMetricsCollector instance
+    """
+    collector = MemoryMetricsCollector()
+    set_metrics_collector(collector)
+    yield collector
+    # Cleanup: reset to None so next test gets fresh collector
+    set_metrics_collector(None)
 
 
 class FakePortfolioService(PortfolioService):

@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from polytrader.db.models import StrategyRecord
 from polytrader.platform.registry import StrategyRegistry
+from polytrader.strategies.lifecycle_models import StrategyLifecycleState
 
 
 @pytest.fixture
@@ -36,13 +37,13 @@ async def db_session(
         # Clean up strategies table
         from sqlalchemy import text
 
-        await session.execute(text("TRUNCATE TABLE strategies CASCADE"))
+        await session.execute(text("TRUNCATE TABLE strategy_instances CASCADE"))
         await session.commit()
 
         yield session
 
         # Cleanup
-        await session.execute(text("TRUNCATE TABLE strategies CASCADE"))
+        await session.execute(text("TRUNCATE TABLE strategy_instances CASCADE"))
         await session.commit()
 
     await engine.dispose()
@@ -55,14 +56,22 @@ async def seeded_strategies(db_session: AsyncSession) -> list[StrategyRecord]:
         StrategyRecord(
             strategy_id="test_strategy_1",
             name="Test Strategy 1",
-            config={"type": "simple_threshold", "buy_threshold": 0.3, "min_history": 30},
-            enabled=True,
+            config={"buy_threshold": 0.3, "min_history": 30},
+            template_type_id="simple_threshold",
+            template_version="1.0.0",
+            config_hash="hash_1",
+            desired_state=StrategyLifecycleState.RUNNING,
+            actual_state=StrategyLifecycleState.RUNNING,
         ),
         StrategyRecord(
             strategy_id="test_strategy_2",
             name="Test Strategy 2",
-            config={"type": "simple_threshold", "buy_threshold": 0.35, "min_history": 30},
-            enabled=True,
+            config={"buy_threshold": 0.35, "min_history": 30},
+            template_type_id="simple_threshold",
+            template_version="1.0.0",
+            config_hash="hash_2",
+            desired_state=StrategyLifecycleState.RUNNING,
+            actual_state=StrategyLifecycleState.RUNNING,
         ),
     ]
 
@@ -107,7 +116,7 @@ async def test_platform_loads_strategies_from_db(
     assert "test_strategy_2" in strategy_ids
 
     # Verify enabled strategies
-    enabled = [s for s in strategies if s.enabled]
+    enabled = [s for s in strategies if s.desired_state == StrategyLifecycleState.RUNNING]
     assert len(enabled) == 2
 
 

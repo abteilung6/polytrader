@@ -21,6 +21,8 @@ from polytrader.platform.control import (
     LiveStrategyRepository,
 )
 from polytrader.platform.registry import StrategyRegistry
+from polytrader.strategies.registration import register_all_strategies
+from polytrader.strategies.registry import StrategyRegistry as InMemoryStrategyRegistry
 
 # Global engine and session factory (created on first use)
 _engine: AsyncEngine | None = None
@@ -136,3 +138,23 @@ def get_strategy_registry(
         StrategyRegistry instance
     """
     return StrategyRegistry(session)
+
+
+# Global in-memory strategy template registry (singleton)
+_in_memory_registry: InMemoryStrategyRegistry | None = None
+
+
+def get_in_memory_strategy_registry() -> InMemoryStrategyRegistry:
+    """Provide in-memory strategy template registry (singleton).
+
+    Per Commit 15: In-memory registry is used for template discovery.
+    Registry is initialized on first access and reused for all requests.
+
+    Returns:
+        InMemoryStrategyRegistry instance (singleton, initialized with all templates)
+    """
+    global _in_memory_registry
+    if _in_memory_registry is None:
+        _in_memory_registry = InMemoryStrategyRegistry()
+        register_all_strategies(_in_memory_registry)
+    return _in_memory_registry

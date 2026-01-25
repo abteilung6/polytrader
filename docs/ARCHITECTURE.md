@@ -68,11 +68,38 @@ Positions / PnL / Audit
 - Consume normalized market state + positions + config
 - Produce **signals** (probabilistic forecasts/scores)
 - Deterministic and testable (no side effects)
+- Multi-strategy management with lifecycle state machine
 
 **Key Components:**
 - `IStrategy` — Strategy protocol
+- `StrategyRegistry` — Central registry for strategy templates (in-memory)
+- `StrategyTemplate` — Immutable, versioned strategy code definition
+- `ParameterSchema` — Type-safe parameter definitions with validation
 - `SimpleThresholdStrategy` — Example threshold-based strategy
 - Strategy factories — Create strategy instances from config
+- `StrategyLifecycleManager` — Manages state transitions (STOPPED → STARTING → RUNNING → STOPPING → STOPPED)
+- `VersionSelector` — Deterministic version resolution (exact or channel-based)
+
+**Architecture Pattern:**
+- **Strategy Templates** (immutable, versioned code) — Deployed strategy implementations
+- **Strategy Instances** (runtime configuration) — Database records with validated parameters
+- **Template-Instance Separation** — Clear separation enables versioning and reproducibility
+
+**Configuration:**
+- Parameter schemas define types, defaults, validation rules, and bounds
+- OpenAPI-compatible schemas generated automatically for API documentation
+- Config validation at API boundary and factory creation (defense in depth)
+
+**Lifecycle Management:**
+- State machine: STOPPED → STARTING → RUNNING → PAUSED → DRAINING → STOPPING → ERROR
+- State transitions emit `StrategyStateTransitionEvent` for auditability
+- Lifecycle manager enforces valid transitions and tracks state history
+
+**Reproducibility:**
+- `config_hash` — SHA256 hash of configuration (deterministic)
+- `template_code_ref` — Git SHA / build artifact digest
+- `dependency_set` — Versions of key dependencies (JSONB)
+- `market_data_snapshot_ref` — Market data stream reference
 
 **Output:** `SignalEvent` (scores/forecasts, **NOT orders**)
 
@@ -229,13 +256,23 @@ Positions / PnL / Audit
 **Responsibilities:**
 - Multi-strategy coordination
 - Strategy lifecycle management
+- Strategy registry initialization
 - Paper/live lane separation
 
 **Key Components:**
 - `PlatformOrchestrator` — Main platform coordinator
+  - Initializes strategy registry at startup
+  - Registers all strategy templates via `register_all_strategies()`
+  - Creates strategy runners from database instances
 - `StrategyRunner` — Per-strategy execution loop
+- `StrategyLifecycleManager` — Manages state transitions and emits lifecycle events
 - `MarketSupervisorRegistry` — Shared market supervisors
 - `ControlPlaneService` — Control command processing
+
+**Strategy Registration:**
+- Explicit registration pattern — `register_all_strategies()` called at orchestrator startup
+- No import-time side effects — registration happens at composition root
+- Registry provides template discovery, version resolution, and config validation
 
 ---
 
@@ -353,12 +390,14 @@ All inter-component communication uses **typed models**, never raw dicts:
 
 - **Events:** Immutable facts (append-only)
   - `MarketDataEvent`, `SignalEvent`, `OrderIntentEvent`, `RiskCheckEvent`, `OrderCreatedEvent`, `FillEvent`, etc.
+  - `StrategyStateTransitionEvent` — Strategy lifecycle state changes
 
 - **Commands:** Requests to do something
   - `SubmitOrderCommand`, `CancelOrderCommand`
 
 - **Queries:** Read-only projections
   - Market snapshots, order state, positions
+  - Strategy templates, instances, parameter schemas
 
 ---
 
@@ -422,6 +461,14 @@ polytrader/
 ├── position_manager/ # Position tracking, PnL
 ├── risk/             # Pre-trade risk engine
 ├── strategies/       # Trading strategies
+│   ├── registry.py   # Strategy template registry
+│   ├── schema.py     # Parameter schema definitions
+│   ├── lifecycle.py  # Lifecycle state machine
+│   ├── version.py    # Version selector system
+│   ├── reproducibility.py  # Reproducibility metadata
+│   ├── openapi.py    # OpenAPI schema generation
+│   ├── registration.py  # Explicit strategy registration
+│   └── simple_threshold/  # Example strategy implementation
 ├── supervisor/       # Component lifecycle management
 └── tasks/            # Platform startup tasks
 ```

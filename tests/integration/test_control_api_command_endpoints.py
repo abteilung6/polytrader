@@ -11,7 +11,7 @@ Tests POST endpoints for creating commands:
 Tests idempotency, version checks, and command envelope responses.
 """
 
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Iterator
 
 import pytest
 from fastapi.testclient import TestClient
@@ -22,7 +22,7 @@ from polytrader.api.dependencies import get_db_session
 
 
 @pytest.fixture
-def client(postgres_test_url: str, postgres_db: None) -> TestClient:
+def client(postgres_test_url: str, postgres_db: AsyncGenerator[None, None]) -> Iterator[TestClient]:
     """Create FastAPI test client with test database.
 
     Overrides get_db_session dependency to use test database instead of dev database.
@@ -43,7 +43,7 @@ def client(postgres_test_url: str, postgres_db: None) -> TestClient:
 
         async with Session() as session:
             try:
-                await session.execute(text("TRUNCATE TABLE strategies CASCADE"))
+                await session.execute(text("TRUNCATE TABLE strategy_instances CASCADE"))
                 await session.commit()
             except Exception:
                 await session.rollback()
@@ -80,8 +80,10 @@ def test_strategy(client: TestClient) -> str:
         "strategy_id": strategy_id,
         "name": "Test Strategy",
         "description": "Test strategy for API tests",
-        "config": {"param": "value"},
-        "enabled": True,
+        "config": {"buy_threshold": 0.3, "min_history": 30},
+        "template_type_id": "simple_threshold",
+        "version_selector": {"exact": "1.0.0"},
+        "desired_state": "RUNNING",
     }
     response = client.post("/api/v1/commands/strategies", json=request)
     assert response.status_code == 201
@@ -225,7 +227,11 @@ def test_deactivate_strategy_creates_command(client: TestClient, test_strategy: 
 
 
 def test_create_strategy(client: TestClient) -> None:
-    """Test POST /commands/strategies creates strategy."""
+    """Test POST /commands/strategies creates strategy with all metadata.
+
+    Per Commit 17: Verifies version resolution, config validation, config_hash,
+    deployment_id, and reproducibility metadata.
+    """
     import uuid
 
     strategy_id = f"new-strategy-{uuid.uuid4().hex[:8]}"
@@ -233,8 +239,10 @@ def test_create_strategy(client: TestClient) -> None:
         "strategy_id": strategy_id,
         "name": "New Strategy",
         "description": "A new strategy",
-        "config": {"param": "value"},
-        "enabled": True,
+        "config": {"buy_threshold": 0.3, "min_history": 30},
+        "template_type_id": "simple_threshold",
+        "version_selector": {"exact": "1.0.0"},
+        "desired_state": "RUNNING",
     }
 
     response = client.post("/api/v1/commands/strategies", json=request)
@@ -242,7 +250,22 @@ def test_create_strategy(client: TestClient) -> None:
     data = response.json()
     assert data["strategy_id"] == strategy_id
     assert data["name"] == "New Strategy"
-    assert data["enabled"] is True
+    assert data["enabled"] is True  # Computed field derived from desired_state == RUNNING
+
+    # Verify template reference
+    assert data["template_type_id"] == "simple_threshold"
+    assert data["template_version"] == "1.0.0"
+
+    # Verify reproducibility metadata
+    assert data["run_identity"] is not None
+    assert data["run_identity"]["config_hash"] is not None
+    assert len(data["run_identity"]["config_hash"]) == 64  # SHA256 hash length
+    assert data["run_identity"]["template_code_ref"] == "local_dev"
+    assert data["run_identity"]["dependency_set"] is not None
+
+    # Verify deployment_id
+    assert data["deployment_id"] is not None
+    assert len(data["deployment_id"]) == 36  # UUID string length
 
     # Verify Pydantic model structure
     from polytrader.api.models import StrategyResponse
@@ -255,8 +278,10 @@ def test_create_strategy_duplicate(client: TestClient, test_strategy: str) -> No
     request = {
         "strategy_id": test_strategy,
         "name": "Duplicate Strategy",
-        "config": {},
-        "enabled": True,
+        "config": {"buy_threshold": 0.3, "min_history": 30},
+        "template_type_id": "simple_threshold",
+        "version_selector": {"exact": "1.0.0"},
+        "desired_state": "RUNNING",
     }
 
     response = client.post("/api/v1/commands/strategies", json=request)
@@ -265,11 +290,110 @@ def test_create_strategy_duplicate(client: TestClient, test_strategy: str) -> No
     assert "error" in data or "detail" in data
 
 
+def test_create_strategy_with_channel_selector(client: TestClient) -> None:
+    """Test POST /commands/strategies with channel version selector.
+
+    Per Commit 17: Channel selector should resolve to exact version.
+    """
+    import uuid
+
+    strategy_id = f"new-strategy-{uuid.uuid4().hex[:8]}"
+    request = {
+        "strategy_id": strategy_id,
+        "name": "New Strategy",
+        "config": {"buy_threshold": 0.3, "min_history": 30},
+        "template_type_id": "simple_threshold",
+        "version_selector": {"channel": "stable"},
+        "desired_state": "STOPPED",
+    }
+
+    response = client.post("/api/v1/commands/strategies", json=request)
+    assert response.status_code == 201
+    data = response.json()
+    assert data["strategy_id"] == strategy_id
+    assert data["template_version"] == "1.0.0"  # Resolved from channel
+
+
+def test_create_strategy_invalid_config(client: TestClient) -> None:
+    """Test POST /commands/strategies returns 400 for invalid config.
+
+    Per Commit 17: Config validation should happen before creation.
+    """
+    import uuid
+
+    strategy_id = f"new-strategy-{uuid.uuid4().hex[:8]}"
+    request = {
+        "strategy_id": strategy_id,
+        "name": "New Strategy",
+        "config": {"buy_threshold": "invalid", "min_history": 30},  # Invalid type
+        "template_type_id": "simple_threshold",
+        "version_selector": {"exact": "1.0.0"},
+        "desired_state": "STOPPED",
+    }
+
+    response = client.post("/api/v1/commands/strategies", json=request)
+    assert response.status_code == 400
+    data = response.json()
+    assert "detail" in data
+    assert "error" in data["detail"]
+    assert "Config validation failed" in data["detail"]["error"]
+
+
+def test_create_strategy_template_not_found(client: TestClient) -> None:
+    """Test POST /commands/strategies returns 400 for non-existent template.
+
+    Per Commit 17: Template not found should return 400 before creation.
+    """
+    import uuid
+
+    strategy_id = f"new-strategy-{uuid.uuid4().hex[:8]}"
+    request = {
+        "strategy_id": strategy_id,
+        "name": "New Strategy",
+        "config": {"buy_threshold": 0.3},
+        "template_type_id": "nonexistent_template",
+        "version_selector": {"exact": "1.0.0"},
+        "desired_state": "STOPPED",
+    }
+
+    response = client.post("/api/v1/commands/strategies", json=request)
+    assert response.status_code == 400
+    data = response.json()
+    assert "detail" in data
+    assert "error" in data["detail"]
+    assert "Template not found" in data["detail"]["error"]
+
+
+def test_create_strategy_version_resolution_failed(client: TestClient) -> None:
+    """Test POST /commands/strategies returns 400 for invalid version.
+
+    Per Commit 17: Version resolution failure should return 400 before creation.
+    """
+    import uuid
+
+    strategy_id = f"new-strategy-{uuid.uuid4().hex[:8]}"
+    request = {
+        "strategy_id": strategy_id,
+        "name": "New Strategy",
+        "config": {"buy_threshold": 0.3},
+        "template_type_id": "simple_threshold",
+        "version_selector": {"exact": "999.0.0"},  # Non-existent version
+        "desired_state": "STOPPED",
+    }
+
+    response = client.post("/api/v1/commands/strategies", json=request)
+    assert response.status_code == 400
+    data = response.json()
+    assert "detail" in data
+    assert "error" in data["detail"]
+    assert "Version resolution failed" in data["detail"]["error"]
+
+
 def test_update_strategy(client: TestClient, test_strategy: str) -> None:
     """Test PATCH /commands/strategies/{strategy_id} updates strategy."""
     request = {
         "name": "Updated Strategy Name",
-        "enabled": False,
+        "desired_state": "STOPPED",
     }
 
     response = client.patch(f"/api/v1/commands/strategies/{test_strategy}", json=request)
@@ -277,7 +401,7 @@ def test_update_strategy(client: TestClient, test_strategy: str) -> None:
     data = response.json()
     assert data["strategy_id"] == test_strategy
     assert data["name"] == "Updated Strategy Name"
-    assert data["enabled"] is False
+    assert data["enabled"] is False  # Computed field derived from desired_state == STOPPED
 
 
 def test_update_strategy_not_found(client: TestClient) -> None:

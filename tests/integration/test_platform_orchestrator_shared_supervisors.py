@@ -17,6 +17,7 @@ from polytrader.db.models import StrategyRecord
 from polytrader.events import EventBus
 from polytrader.platform.orchestrator import PlatformOrchestrator
 from polytrader.store import IMarketDataStore, MemoryMarketDataStore
+from polytrader.strategies.lifecycle_models import StrategyLifecycleState
 
 
 @pytest.fixture
@@ -35,13 +36,13 @@ async def db_session(
         # Clean up strategies table
         from sqlalchemy import text
 
-        await session.execute(text("TRUNCATE TABLE strategies CASCADE"))
+        await session.execute(text("TRUNCATE TABLE strategy_instances CASCADE"))
         await session.commit()
 
         yield session
 
         # Cleanup
-        await session.execute(text("TRUNCATE TABLE strategies CASCADE"))
+        await session.execute(text("TRUNCATE TABLE strategy_instances CASCADE"))
         await session.commit()
 
     await engine.dispose()
@@ -113,31 +114,40 @@ async def test_orchestrator_groups_strategies_by_pattern(
             strategy_id="strategy_pattern_a_1",
             name="Strategy Pattern A 1",
             config={
-                "type": "simple_threshold",
                 "market_pattern": "pattern-a",
                 "buy_threshold": 0.3,
             },
-            enabled=True,
+            template_type_id="simple_threshold",
+            template_version="1.0.0",
+            config_hash="hash_a_1",
+            desired_state=StrategyLifecycleState.RUNNING,
+            actual_state=StrategyLifecycleState.RUNNING,
         ),
         StrategyRecord(
             strategy_id="strategy_pattern_a_2",
             name="Strategy Pattern A 2",
             config={
-                "type": "simple_threshold",
                 "market_pattern": "pattern-a",
                 "buy_threshold": 0.35,
             },
-            enabled=True,
+            template_type_id="simple_threshold",
+            template_version="1.0.0",
+            config_hash="hash_a_2",
+            desired_state=StrategyLifecycleState.RUNNING,
+            actual_state=StrategyLifecycleState.RUNNING,
         ),
         StrategyRecord(
             strategy_id="strategy_pattern_b_1",
             name="Strategy Pattern B 1",
             config={
-                "type": "simple_threshold",
                 "market_pattern": "pattern-b",
                 "buy_threshold": 0.3,
             },
-            enabled=True,
+            template_type_id="simple_threshold",
+            template_version="1.0.0",
+            config_hash="hash_b_1",
+            desired_state=StrategyLifecycleState.RUNNING,
+            actual_state=StrategyLifecycleState.RUNNING,
         ),
     ]
 
@@ -196,11 +206,14 @@ async def test_orchestrator_creates_one_supervisor_per_pattern(
             strategy_id=f"strategy_{i}",
             name=f"Strategy {i}",
             config={
-                "type": "simple_threshold",
                 "market_pattern": "btc-updown-15m",
                 "buy_threshold": 0.3,
             },
-            enabled=True,
+            template_type_id="simple_threshold",
+            template_version="1.0.0",
+            config_hash=f"hash_{i}",
+            desired_state=StrategyLifecycleState.RUNNING,
+            actual_state=StrategyLifecycleState.RUNNING,
         )
         for i in range(5)
     ]
@@ -252,11 +265,14 @@ async def test_orchestrator_passes_shared_supervisor_to_runners(
             strategy_id=f"strategy_{i}",
             name=f"Strategy {i}",
             config={
-                "type": "simple_threshold",
                 "market_pattern": "test-pattern",
                 "buy_threshold": 0.3,
             },
-            enabled=True,
+            template_type_id="simple_threshold",
+            template_version="1.0.0",
+            config_hash=f"hash_{i}",
+            desired_state=StrategyLifecycleState.RUNNING,
+            actual_state=StrategyLifecycleState.RUNNING,
         )
         for i in range(3)
     ]
@@ -308,11 +324,14 @@ async def test_orchestrator_stop_releases_supervisors(
             strategy_id="strategy_1",
             name="Strategy 1",
             config={
-                "type": "simple_threshold",
                 "market_pattern": "test-pattern",
                 "buy_threshold": 0.3,
             },
-            enabled=True,
+            template_type_id="simple_threshold",
+            template_version="1.0.0",
+            config_hash="hash_1",
+            desired_state=StrategyLifecycleState.RUNNING,
+            actual_state=StrategyLifecycleState.RUNNING,
         ),
     ]
 
@@ -361,11 +380,14 @@ async def test_multiple_strategies_same_pattern_share_supervisor(
             strategy_id=f"strategy_{i}",
             name=f"Strategy {i}",
             config={
-                "type": "simple_threshold",
                 "market_pattern": "shared-pattern",
                 "buy_threshold": 0.3,
             },
-            enabled=True,
+            template_type_id="simple_threshold",
+            template_version="1.0.0",
+            config_hash=f"hash_{i}",
+            desired_state=StrategyLifecycleState.RUNNING,
+            actual_state=StrategyLifecycleState.RUNNING,
         )
         for i in range(10)
     ]
@@ -417,31 +439,40 @@ async def test_strategies_different_patterns_separate_supervisors(
             strategy_id="strategy_pattern_1",
             name="Strategy Pattern 1",
             config={
-                "type": "simple_threshold",
                 "market_pattern": "pattern-1",
                 "buy_threshold": 0.3,
             },
-            enabled=True,
+            template_type_id="simple_threshold",
+            template_version="1.0.0",
+            config_hash="hash_pattern_1",
+            desired_state=StrategyLifecycleState.RUNNING,
+            actual_state=StrategyLifecycleState.RUNNING,
         ),
         StrategyRecord(
             strategy_id="strategy_pattern_2",
             name="Strategy Pattern 2",
             config={
-                "type": "simple_threshold",
                 "market_pattern": "pattern-2",
                 "buy_threshold": 0.3,
             },
-            enabled=True,
+            template_type_id="simple_threshold",
+            template_version="1.0.0",
+            config_hash="hash_pattern_2",
+            desired_state=StrategyLifecycleState.RUNNING,
+            actual_state=StrategyLifecycleState.RUNNING,
         ),
         StrategyRecord(
             strategy_id="strategy_pattern_3",
             name="Strategy Pattern 3",
             config={
-                "type": "simple_threshold",
                 "market_pattern": "pattern-3",
                 "buy_threshold": 0.3,
             },
-            enabled=True,
+            template_type_id="simple_threshold",
+            template_version="1.0.0",
+            config_hash="hash_pattern_3",
+            desired_state=StrategyLifecycleState.RUNNING,
+            actual_state=StrategyLifecycleState.RUNNING,
         ),
     ]
 

@@ -18,6 +18,7 @@ from polytrader.db.models import StrategyRecord
 from polytrader.events import EventBus
 from polytrader.platform.orchestrator import PlatformOrchestrator
 from polytrader.store import IMarketDataStore, MemoryMarketDataStore
+from polytrader.strategies.lifecycle_models import StrategyLifecycleState
 
 if TYPE_CHECKING:
     from polytrader.adapters import IMarketDataAdapter
@@ -40,13 +41,13 @@ async def db_session(
         # Clean up strategies table
         from sqlalchemy import text
 
-        await session.execute(text("TRUNCATE TABLE strategies CASCADE"))
+        await session.execute(text("TRUNCATE TABLE strategy_instances CASCADE"))
         await session.commit()
 
         yield session
 
         # Cleanup
-        await session.execute(text("TRUNCATE TABLE strategies CASCADE"))
+        await session.execute(text("TRUNCATE TABLE strategy_instances CASCADE"))
         await session.commit()
 
     await engine.dispose()
@@ -109,21 +110,27 @@ async def initial_strategies(db_session: AsyncSession) -> list[str]:
             strategy_id="strategy_1",
             name="Strategy 1",
             config={
-                "type": "simple_threshold",
                 "market_pattern": "btc-updown-15m",
                 "buy_threshold": 0.3,
             },
-            enabled=True,
+            template_type_id="simple_threshold",
+            template_version="1.0.0",
+            config_hash="hash_1",
+            desired_state=StrategyLifecycleState.RUNNING,
+            actual_state=StrategyLifecycleState.RUNNING,
         ),
         StrategyRecord(
             strategy_id="strategy_2",
             name="Strategy 2",
             config={
-                "type": "simple_threshold",
                 "market_pattern": "btc-updown-15m",
                 "buy_threshold": 0.35,
             },
-            enabled=True,
+            template_type_id="simple_threshold",
+            template_version="1.0.0",
+            config_hash="hash_2",
+            desired_state=StrategyLifecycleState.RUNNING,
+            actual_state=StrategyLifecycleState.RUNNING,
         ),
     ]
 
@@ -168,11 +175,14 @@ async def test_add_strategy_creates_runner(
             strategy_id="strategy_new",
             name="New Strategy",
             config={
-                "type": "simple_threshold",
                 "market_pattern": "btc-updown-15m",
                 "buy_threshold": 0.3,
             },
-            enabled=True,
+            template_type_id="simple_threshold",
+            template_version="1.0.0",
+            config_hash="hash_new",
+            desired_state=StrategyLifecycleState.RUNNING,
+            actual_state=StrategyLifecycleState.RUNNING,
         )
         db_session.add(new_strategy)
         await db_session.commit()
@@ -222,11 +232,14 @@ async def test_add_strategy_uses_existing_supervisor(
             strategy_id="strategy_new",
             name="New Strategy",
             config={
-                "type": "simple_threshold",
                 "market_pattern": "btc-updown-15m",  # Same pattern
                 "buy_threshold": 0.3,
             },
-            enabled=True,
+            template_type_id="simple_threshold",
+            template_version="1.0.0",
+            config_hash="hash_new",
+            desired_state=StrategyLifecycleState.RUNNING,
+            actual_state=StrategyLifecycleState.RUNNING,
         )
         db_session.add(new_strategy)
         await db_session.commit()
@@ -275,11 +288,14 @@ async def test_add_strategy_creates_new_supervisor_for_different_pattern(
             strategy_id="strategy_new",
             name="New Strategy",
             config={
-                "type": "simple_threshold",
                 "market_pattern": "eth-updown-15m",  # Different pattern
                 "buy_threshold": 0.3,
             },
-            enabled=True,
+            template_type_id="simple_threshold",
+            template_version="1.0.0",
+            config_hash="hash_new",
+            desired_state=StrategyLifecycleState.RUNNING,
+            actual_state=StrategyLifecycleState.RUNNING,
         )
         db_session.add(new_strategy)
         await db_session.commit()
@@ -395,11 +411,14 @@ async def test_remove_last_strategy_destroys_supervisor(
         strategy_id="strategy_solo",
         name="Solo Strategy",
         config={
-            "type": "simple_threshold",
             "market_pattern": "btc-updown-15m",
             "buy_threshold": 0.3,
         },
-        enabled=True,
+        template_type_id="simple_threshold",
+        template_version="1.0.0",
+        config_hash="hash_solo",
+        desired_state=StrategyLifecycleState.RUNNING,
+        actual_state=StrategyLifecycleState.RUNNING,
     )
     db_session.add(strategy)
     await db_session.commit()

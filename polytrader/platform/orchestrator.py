@@ -23,7 +23,9 @@ from polytrader.portfolio.service import PortfolioService
 from polytrader.risk.engine import RiskChecker, RiskEngine
 from polytrader.risk.limits_store import get_default_limits
 from polytrader.store import IMarketDataStore
-from polytrader.strategies import create_simple_threshold_factory
+from polytrader.strategies.lifecycle_models import StrategyLifecycleState
+from polytrader.strategies.registration import register_all_strategies
+from polytrader.strategies.registry import StrategyRegistry as InMemoryStrategyRegistry
 from polytrader.supervisor.market import MarketSupervisor
 
 if TYPE_CHECKING:
@@ -38,33 +40,61 @@ if TYPE_CHECKING:
 
 
 def create_strategy_factory_from_config(
-    strategy_config: dict,
+    strategy: StrategyRecord,
+    registry: InMemoryStrategyRegistry,
     store: IMarketDataStore,
 ) -> Callable[[str], "IStrategy"]:
-    """Create strategy factory from strategy config.
+    """Create strategy factory from strategy record using registry.
+
+    Per architecture.mdc: Factory functions must use registry for discovery
+    and validation. This function:
+    1. Looks up template from registry using template_type_id and template_version
+    2. Validates config against template's parameter schema
+    3. Calls template's factory function with validated config
 
     Args:
-        strategy_config: Strategy configuration dict (from StrategyRecord.config)
+        strategy: StrategyRecord with template_type_id, template_version, and config
+        registry: In-memory StrategyRegistry with registered templates
         store: Market data store
 
     Returns:
         Factory function that creates IStrategy instances
 
     Raises:
-        ValueError: If strategy type is not supported
+        ValueError: If template not found, config validation fails, or factory creation fails
     """
-    strategy_type = strategy_config.get("type", "simple_threshold")
-
-    if strategy_type == "simple_threshold":
-        buy_threshold = strategy_config.get("buy_threshold", 0.30)
-        min_history = strategy_config.get("min_history", 30)
-        return create_simple_threshold_factory(
-            store=store,
-            buy_threshold=buy_threshold,
-            min_history=min_history,
+    # Look up template from registry
+    try:
+        template = registry.get(strategy.template_type_id, strategy.template_version)
+    except ValueError as e:
+        msg = (
+            f"Strategy template {strategy.template_type_id} "
+            f"version {strategy.template_version} not found in registry"
         )
-    else:
-        raise ValueError(f"Unsupported strategy type: {strategy_type}")
+        raise ValueError(msg) from e
+
+    # Extract orchestrator-level fields (not part of strategy parameter schema)
+    # market_pattern is used by orchestrator for grouping strategies
+    orchestrator_fields = {"market_pattern"}
+    strategy_config = {k: v for k, v in strategy.config.items() if k not in orchestrator_fields}
+
+    # Validate config against template's parameter schema
+    validation_errors = template.parameter_schema.validate(strategy_config)
+    if validation_errors:
+        error_msg = "; ".join(validation_errors)
+        raise ValueError(
+            f"Config validation failed for strategy {strategy.strategy_id}: {error_msg}"
+        )
+
+    # Apply defaults to config (schema handles this)
+    config_with_defaults = template.parameter_schema.apply_defaults(strategy_config)
+
+    # Call template's factory function
+    try:
+        strategy_factory = template.factory(config_with_defaults, store)
+        return strategy_factory
+    except Exception as e:
+        raise ValueError(f"Factory creation failed for strategy {strategy.strategy_id}: {e}") from e
 
 
 class PlatformOrchestrator:
@@ -169,6 +199,9 @@ class PlatformOrchestrator:
         self._oms_tasks: list[asyncio.Task] = []
         self._execution_tasks: list[asyncio.Task] = []
 
+        # In-memory strategy registry (initialized in start())
+        self._strategy_template_registry: InMemoryStrategyRegistry | None = None
+
     async def start(self) -> None:
         """Start the platform orchestrator.
 
@@ -185,12 +218,22 @@ class PlatformOrchestrator:
         logger.info("Starting PlatformOrchestrator")
 
         try:
-            # Step 1: Load strategies from registry
+            # Step 0: Initialize in-memory strategy template registry
+            self._strategy_template_registry = InMemoryStrategyRegistry()
+            register_all_strategies(self._strategy_template_registry)
+            logger.info(
+                "Registered {count} strategy templates",
+                count=len(self._strategy_template_registry.list_templates()),
+            )
+
+            # Step 1: Load strategy instances from database registry
             registry = StrategyRegistry(self._session)
             strategies = await registry.list_strategies()
 
             total_count = len(strategies)
-            enabled_count = sum(1 for s in strategies if s.enabled)
+            enabled_count = sum(
+                1 for s in strategies if s.desired_state == StrategyLifecycleState.RUNNING
+            )
             logger.info(
                 "Loaded strategies from registry: {total} total, {enabled} enabled",
                 total=total_count,
@@ -222,7 +265,9 @@ class PlatformOrchestrator:
                 await self._create_live_lane()
 
             # Step 6: Group strategies by market_pattern and create shared supervisors
-            enabled_list = [s for s in strategies if s.enabled]
+            enabled_list = [
+                s for s in strategies if s.desired_state == StrategyLifecycleState.RUNNING
+            ]
             logger.info(
                 "Starting {count} enabled strategies...",
                 count=len(enabled_list),
@@ -428,9 +473,13 @@ class PlatformOrchestrator:
         Raises:
             ValueError: If strategy type is not supported
         """
-        # Create strategy factory from config
+        # Create strategy factory from config using registry
+        if self._strategy_template_registry is None:
+            raise RuntimeError("Strategy template registry not initialized. Call start() first.")
+
         strategy_factory = create_strategy_factory_from_config(
-            strategy_config=strategy.config,
+            strategy=strategy,
+            registry=self._strategy_template_registry,
             store=self._store,
         )
 
@@ -441,6 +490,7 @@ class PlatformOrchestrator:
             store=self._store,
             market_supervisor=market_supervisor,
             strategy_factory=strategy_factory,
+            session=self._session,
             position_manager=self._position_manager,
         )
 
@@ -500,8 +550,11 @@ class PlatformOrchestrator:
         if strategy is None:
             raise ValueError(f"Strategy not found: {strategy_id}")
 
-        if not strategy.enabled:
-            raise ValueError(f"Strategy is not enabled: {strategy_id}")
+        if strategy.desired_state != StrategyLifecycleState.RUNNING:
+            raise ValueError(
+                f"Strategy is not in RUNNING state: {strategy_id} "
+                f"(current state: {strategy.desired_state})"
+            )
 
         # Check if strategy already running (idempotent)
         if strategy_id in self._strategy_runners:
@@ -634,8 +687,11 @@ class PlatformOrchestrator:
         if strategy is None:
             raise ValueError(f"Strategy not found: {strategy_id}")
 
-        if not strategy.enabled:
-            raise ValueError(f"Strategy is not enabled: {strategy_id}")
+        if strategy.desired_state != StrategyLifecycleState.RUNNING:
+            raise ValueError(
+                f"Strategy is not in RUNNING state: {strategy_id} "
+                f"(current state: {strategy.desired_state})"
+            )
 
         # Check if strategy is running
         runner = self._strategy_runners.get(strategy_id)

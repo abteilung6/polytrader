@@ -457,8 +457,12 @@ class TestSimpleThresholdStrategy:
         assert signal is not None
         assert signal.outcome == "UP"  # Always UP, never DOWN or SELL
 
-    def test_strategy_stateless(self) -> None:
-        """Test that strategy is stateless (deterministic)."""
+    def test_strategy_signal_deduplication(self) -> None:
+        """Test that strategy deduplicates signals (prevents spamming).
+
+        Strategy tracks last signal sent per market/outcome and skips
+        duplicate signals until price goes above threshold.
+        """
         store = MemoryMarketDataStore()
         strategy = SimpleThresholdStrategy(
             market_slug="test-market",
@@ -477,20 +481,36 @@ class TestSimpleThresholdStrategy:
             )
             store.add(event)
 
-        event = MarketDataEvent(
+        # Price below threshold - should generate signal
+        event_below = MarketDataEvent(
             market_slug="test-market",
             outcome="UP",
             best_bid=0.25,
-            best_ask=0.30,
+            best_ask=0.30,  # mid = 0.275 < 0.30 threshold
         )
 
-        # Same input should produce same output
-        signal1 = strategy.evaluate(event)
-        signal2 = strategy.evaluate(event)
-
+        # First evaluation should produce signal
+        signal1 = strategy.evaluate(event_below)
         assert signal1 is not None
-        assert signal2 is not None
-        assert signal1.edge == signal2.edge
-        assert signal1.confidence == signal2.confidence
-        assert signal1.p_up == signal2.p_up
-        assert signal1.p_down == signal2.p_down
+        assert signal1.edge > 0
+        assert signal1.confidence > 0
+
+        # Second evaluation with same price should skip (deduplication)
+        signal2 = strategy.evaluate(event_below)
+        assert signal2 is None, "Should skip duplicate signal for same market/outcome"
+
+        # Price above threshold - should clear tracking
+        event_above = MarketDataEvent(
+            market_slug="test-market",
+            outcome="UP",
+            best_bid=0.35,
+            best_ask=0.40,  # mid = 0.375 > 0.30 threshold
+        )
+        signal3 = strategy.evaluate(event_above)
+        assert signal3 is None, "No signal when price above threshold"
+
+        # Price drops below threshold again - should generate new signal
+        signal4 = strategy.evaluate(event_below)
+        assert signal4 is not None, "Should generate new signal after price went above threshold"
+        assert signal4.edge == signal1.edge, "Same price should produce same edge"
+        assert signal4.confidence == signal1.confidence, "Same price should produce same confidence"

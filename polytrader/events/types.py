@@ -793,6 +793,45 @@ class ReconcileEvent(Event):
     )
 
 
+class StrategyStateTransitionEvent(Event):
+    """Event emitted when a strategy instance transitions between lifecycle states.
+
+    Per observability.mdc §1: All state transitions must emit events.
+    This event provides an audit trail for strategy lifecycle changes, enabling
+    replay, debugging, and correlation of logs/metrics/events.
+
+    Per Commit 12: StrategyStateTransitionEvent includes all necessary fields
+    for deterministic replay and incident debugging.
+
+    Attributes:
+        strategy_id: Unique strategy instance identifier
+        from_state: Previous lifecycle state
+        to_state: New lifecycle state
+        reason: Optional human-readable reason for the transition
+        deployment_id: UUID for each activation (correlates logs/metrics/events)
+
+    Note:
+        - Timestamps come from Event base class (ts_wall, ts_mono)
+        - Source is automatically set to EventSource.OPS
+        - run_id comes from Event base class (process run_id when strategy is active)
+        - All Event base class fields are inherited (event_id, correlation_id, etc.)
+    """
+
+    source: EventSource = Field(default=EventSource.OPS)
+
+    strategy_id: str = Field(min_length=1, description="Unique strategy instance identifier")
+    from_state: str = Field(
+        min_length=1, description="Previous lifecycle state (STOPPED, STARTING, RUNNING, etc.)"
+    )
+    to_state: str = Field(
+        min_length=1, description="New lifecycle state (STOPPED, STARTING, RUNNING, etc.)"
+    )
+    reason: str | None = Field(default=None, description="Optional reason for the transition")
+    deployment_id: str | None = Field(
+        default=None, description="UUID for each activation (correlates logs/metrics/events)"
+    )
+
+
 class CircuitBreakerEvent(Event):
     """Event emitted when circuit breaker triggers or resets.
 
