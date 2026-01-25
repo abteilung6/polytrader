@@ -13,6 +13,7 @@ Per unit_testing_technical.md:
 
 import asyncio
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -24,6 +25,9 @@ from polytrader.position_manager import IPositionManager
 from polytrader.store import IMarketDataStore
 from polytrader.strategies.base import IStrategy
 from polytrader.supervisor.market import MarketSupervisor
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 
 class FakeStrategy(IStrategy):
@@ -176,6 +180,24 @@ def position_manager() -> IPositionManager | None:
     return None
 
 
+@pytest.fixture
+def session(strategy_record: StrategyRecord) -> "AsyncSession":
+    """Create a mock AsyncSession for tests."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    # Create a mock session that supports flush() and execute()
+    mock_session = MagicMock(spec=AsyncSession)
+    mock_session.flush = AsyncMock()
+    # Mock execute() to return the strategy record by default
+    # This is used by the lifecycle manager to query the database
+    mock_result = MagicMock()
+    mock_result.scalar_one = MagicMock(return_value=strategy_record)
+    mock_session.execute = AsyncMock(return_value=mock_result)
+    return mock_session
+
+
 @pytest.mark.asyncio
 async def test_init_accepts_shared_supervisor(
     strategy_record: StrategyRecord,
@@ -183,6 +205,7 @@ async def test_init_accepts_shared_supervisor(
     store: IMarketDataStore,
     market_supervisor: MarketSupervisor,
     strategy_factory: Callable[[str], IStrategy],
+    session: "AsyncSession",
 ) -> None:
     """Test that StrategyRunner accepts shared MarketSupervisor parameter."""
     runner = StrategyRunner(
@@ -191,6 +214,7 @@ async def test_init_accepts_shared_supervisor(
         store=store,
         market_supervisor=market_supervisor,
         strategy_factory=strategy_factory,
+        session=session,
     )
 
     assert runner.market_supervisor is market_supervisor
@@ -204,6 +228,7 @@ async def test_start_subscribes_to_market_data(
     store: IMarketDataStore,
     market_supervisor: MarketSupervisor,
     strategy_factory: Callable[[str], IStrategy],
+    session: "AsyncSession",
 ) -> None:
     """Test that StrategyRunner subscribes to MARKET_DATA on start."""
     # Start supervisor first
@@ -215,6 +240,7 @@ async def test_start_subscribes_to_market_data(
         store=store,
         market_supervisor=market_supervisor,
         strategy_factory=strategy_factory,
+        session=session,
     )
 
     await runner.start()
@@ -233,6 +259,7 @@ async def test_evaluate_strategy_on_market_data(
     store: IMarketDataStore,
     market_supervisor: MarketSupervisor,
     strategy_factory: Callable[[str], IStrategy],
+    session: "AsyncSession",
 ) -> None:
     """Test that StrategyRunner evaluates strategy on market data events."""
     # Start supervisor first
@@ -244,6 +271,7 @@ async def test_evaluate_strategy_on_market_data(
         store=store,
         market_supervisor=market_supervisor,
         strategy_factory=strategy_factory,
+        session=session,
     )
 
     await runner.start()
@@ -298,6 +326,7 @@ async def test_signal_event_has_correct_model_id(
     store: IMarketDataStore,
     market_supervisor: MarketSupervisor,
     strategy_factory: Callable[[str], IStrategy],
+    session: "AsyncSession",
 ) -> None:
     """Test that SignalEvent.model_id equals strategy.strategy_id."""
     # Start supervisor first
@@ -309,6 +338,7 @@ async def test_signal_event_has_correct_model_id(
         store=store,
         market_supervisor=market_supervisor,
         strategy_factory=strategy_factory,
+        session=session,
     )
 
     await runner.start()
@@ -360,6 +390,7 @@ async def test_strategy_created_on_first_market_data(
     store: IMarketDataStore,
     market_supervisor: MarketSupervisor,
     strategy_factory: Callable[[str], IStrategy],
+    session: "AsyncSession",
 ) -> None:
     """Test that strategy instance is created lazily on first market data."""
     # Start supervisor first
@@ -371,6 +402,7 @@ async def test_strategy_created_on_first_market_data(
         store=store,
         market_supervisor=market_supervisor,
         strategy_factory=strategy_factory,
+        session=session,
     )
 
     await runner.start()
@@ -401,6 +433,7 @@ async def test_stop_unsubscribes(
     store: IMarketDataStore,
     market_supervisor: MarketSupervisor,
     strategy_factory: Callable[[str], IStrategy],
+    session: "AsyncSession",
 ) -> None:
     """Test that StrategyRunner unsubscribes from MARKET_DATA on stop."""
     # Start supervisor first
@@ -412,6 +445,7 @@ async def test_stop_unsubscribes(
         store=store,
         market_supervisor=market_supervisor,
         strategy_factory=strategy_factory,
+        session=session,
     )
 
     await runner.start()
@@ -430,6 +464,7 @@ async def test_stop_cancels_tasks(
     store: IMarketDataStore,
     market_supervisor: MarketSupervisor,
     strategy_factory: Callable[[str], IStrategy],
+    session: "AsyncSession",
 ) -> None:
     """Test that StrategyRunner cancels tasks on stop."""
     # Start supervisor first
@@ -441,6 +476,7 @@ async def test_stop_cancels_tasks(
         store=store,
         market_supervisor=market_supervisor,
         strategy_factory=strategy_factory,
+        session=session,
     )
 
     await runner.start()
@@ -460,6 +496,7 @@ async def test_evaluation_errors_handled(
     bus: EventBus,
     store: IMarketDataStore,
     market_supervisor: MarketSupervisor,
+    session: "AsyncSession",
 ) -> None:
     """Test that evaluation errors don't crash the loop."""
 
@@ -498,6 +535,7 @@ async def test_evaluation_errors_handled(
         store=store,
         market_supervisor=market_supervisor,
         strategy_factory=strategy_factory,
+        session=session,
     )
 
     await runner.start()

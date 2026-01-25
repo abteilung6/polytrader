@@ -47,7 +47,11 @@ class TestStrategyLifecycleManagerTransitionToDesiredState:
     def session(self) -> MagicMock:
         """Create mock database session."""
         session = MagicMock()
-        session.commit = AsyncMock()
+        session.flush = AsyncMock()
+        # Mock execute() to return a result that has scalar_one() method
+        mock_result = MagicMock()
+        mock_result.scalar_one = MagicMock(return_value=None)  # Will be set per test
+        session.execute = AsyncMock(return_value=mock_result)
         return session
 
     @pytest.fixture
@@ -78,6 +82,11 @@ class TestStrategyLifecycleManagerTransitionToDesiredState:
         session: MagicMock,
     ) -> None:
         """Test valid transition from STOPPED to STARTING."""
+        # Mock the database query to return the strategy record
+        mock_result = MagicMock()
+        mock_result.scalar_one = MagicMock(return_value=strategy_stopped)
+        session.execute = AsyncMock(return_value=mock_result)
+
         new_state = await manager.transition_to_desired_state(
             strategy_stopped, reason="Operator requested start"
         )
@@ -97,8 +106,8 @@ class TestStrategyLifecycleManagerTransitionToDesiredState:
         assert event.to_state == StrategyLifecycleState.STARTING.value
         assert event.reason == "Operator requested start"
 
-        # Verify database commit was called
-        session.commit.assert_called_once()
+        # Verify database flush was called
+        session.flush.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_transition_to_desired_state_already_in_desired(
@@ -124,8 +133,8 @@ class TestStrategyLifecycleManagerTransitionToDesiredState:
         assert new_state == StrategyLifecycleState.RUNNING
         # No event should be emitted
         bus.publish.assert_not_called()
-        # No database commit should occur
-        session.commit.assert_not_called()
+        # No database flush should occur
+        session.flush.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_transition_to_desired_state_invalid_raises_error(
@@ -201,6 +210,11 @@ class TestStrategyLifecycleManagerTransitionToDesiredState:
             last_error="Previous error",
         )
 
+        # Mock the database query to return the strategy record
+        mock_result = MagicMock()
+        mock_result.scalar_one = MagicMock(return_value=strategy)
+        session.execute = AsyncMock(return_value=mock_result)
+
         new_state = await manager.transition_to_desired_state(
             strategy, reason="Recovery from error"
         )
@@ -223,7 +237,11 @@ class TestStrategyLifecycleManagerTransitionToState:
     def session(self) -> MagicMock:
         """Create mock database session."""
         session = MagicMock()
-        session.commit = AsyncMock()
+        session.flush = AsyncMock()
+        # Mock execute() to return a result that has scalar_one() method
+        mock_result = MagicMock()
+        mock_result.scalar_one = MagicMock(return_value=None)  # Will be set per test
+        session.execute = AsyncMock(return_value=mock_result)
         return session
 
     @pytest.fixture
@@ -250,6 +268,11 @@ class TestStrategyLifecycleManagerTransitionToState:
             actual_state=StrategyLifecycleState.STOPPED.value,
         )
 
+        # Mock the database query to return the strategy record
+        mock_result = MagicMock()
+        mock_result.scalar_one = MagicMock(return_value=strategy)
+        session.execute = AsyncMock(return_value=mock_result)
+
         new_state = await manager.transition_to_state(
             strategy, StrategyLifecycleState.STARTING, reason="Starting strategy"
         )
@@ -268,8 +291,8 @@ class TestStrategyLifecycleManagerTransitionToState:
         assert event.to_state == StrategyLifecycleState.STARTING.value
         assert event.reason == "Starting strategy"
 
-        # Verify database commit was called
-        session.commit.assert_called_once()
+        # Verify database flush was called
+        session.flush.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_transition_to_state_already_in_state(
@@ -295,8 +318,8 @@ class TestStrategyLifecycleManagerTransitionToState:
         assert new_state == StrategyLifecycleState.RUNNING
         # No event should be emitted
         bus.publish.assert_not_called()
-        # No database commit should occur
-        session.commit.assert_not_called()
+        # No database flush should occur
+        session.flush.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_transition_to_state_invalid_raises_error(
@@ -341,6 +364,11 @@ class TestStrategyLifecycleManagerTransitionToState:
             actual_state=StrategyLifecycleState.STOPPED.value,
         )
 
+        # Mock the database query to return the strategy record
+        mock_result = MagicMock()
+        mock_result.scalar_one = MagicMock(return_value=strategy)
+        session.execute = AsyncMock(return_value=mock_result)
+
         await manager.transition_to_state(
             strategy, StrategyLifecycleState.STARTING, reason="Force start"
         )
@@ -363,7 +391,11 @@ class TestStrategyLifecycleManagerEventEmission:
     def session(self) -> MagicMock:
         """Create mock database session."""
         session = MagicMock()
-        session.commit = AsyncMock()
+        session.flush = AsyncMock()
+        # Mock execute() to return a result that has scalar_one() method
+        mock_result = MagicMock()
+        mock_result.scalar_one = MagicMock(return_value=None)  # Will be set per test
+        session.execute = AsyncMock(return_value=mock_result)
         return session
 
     @pytest.fixture
@@ -392,6 +424,11 @@ class TestStrategyLifecycleManagerEventEmission:
             deployment_id=deployment_id,
         )
 
+        # Mock the database query to return the strategy record
+        mock_result = MagicMock()
+        mock_result.scalar_one = MagicMock(return_value=strategy)
+        session.execute = AsyncMock(return_value=mock_result)
+
         await manager.transition_to_desired_state(strategy, reason="Start with deployment")
 
         call_args = bus.publish.call_args
@@ -418,6 +455,11 @@ class TestStrategyLifecycleManagerEventEmission:
             actual_state=StrategyLifecycleState.STOPPED.value,
             deployment_id=None,
         )
+
+        # Mock the database query to return the strategy record
+        mock_result = MagicMock()
+        mock_result.scalar_one = MagicMock(return_value=strategy)
+        session.execute = AsyncMock(return_value=mock_result)
 
         await manager.transition_to_desired_state(strategy, reason="Start without deployment")
 

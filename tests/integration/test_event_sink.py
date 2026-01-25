@@ -242,6 +242,11 @@ async def test_event_sink_stop_flushes_remaining_events(event_sink: EventSink) -
     """Test that stop() flushes remaining events in buffer."""
     from polytrader.events import SYSTEM_LIFECYCLE
 
+    # Get initial event count to filter out events from other tests
+    initial_events = list(event_sink._store.read_stream())
+    initial_count = len(initial_events)
+    initial_event_ids = {e.event_id for e in initial_events}
+
     # Publish events
     events_published = []
     for _ in range(3):
@@ -249,19 +254,32 @@ async def test_event_sink_stop_flushes_remaining_events(event_sink: EventSink) -
         events_published.append(event)
         await event_sink._bus.publish(SYSTEM_LIFECYCLE, event)
 
-    # Wait a bit for events to be consumed into buffer
-    await asyncio.sleep(0.15)
+    # Wait a short time for events to be consumed into buffer (but less than flush_interval)
+    # flush_interval is 0.1s, so wait 0.05s to ensure events are in buffer but not flushed yet
+    await asyncio.sleep(0.05)
 
     # Stop sink (should flush remaining events in buffer)
     await event_sink.stop()
 
     # Verify events were flushed on stop
-    events = list(event_sink._store.read_stream())
-    assert len(events) >= 3
+    all_events = list(event_sink._store.read_stream())
 
+    # Filter to only new events (those we just published)
     published_ids = {e.event_id for e in events_published}
-    stored_ids = {e.event_id for e in events}
-    assert published_ids.issubset(stored_ids)
+    stored_ids = {e.event_id for e in all_events}
+
+    # All published events should be in store
+    assert published_ids.issubset(stored_ids), (
+        f"Expected all published events to be in store. "
+        f"Published: {published_ids}, Stored: {stored_ids}"
+    )
+
+    # Verify we have at least 3 new events (our published ones)
+    new_events = [e for e in all_events if e.event_id not in initial_event_ids]
+    assert len(new_events) >= 3, (
+        f"Expected at least 3 new events after stop(), got {len(new_events)}. "
+        f"Total events: {len(all_events)}, Initial: {initial_count}"
+    )
 
 
 @pytest.mark.asyncio

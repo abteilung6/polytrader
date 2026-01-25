@@ -1,6 +1,7 @@
 """Unit tests for BufferedTickWriter."""
 
 import asyncio
+from collections.abc import Generator
 from datetime import UTC, datetime
 from decimal import Decimal
 from unittest.mock import AsyncMock
@@ -14,6 +15,25 @@ from polytrader.db.tick_writer import (
     _convert_event_to_db_format,
 )
 from polytrader.events.types import EventSource, MarketDataEvent
+from polytrader.obs.metrics import MemoryMetricsCollector, set_metrics_collector
+
+
+@pytest.fixture(autouse=True)
+def metrics_collector() -> Generator[MemoryMetricsCollector, None, None]:
+    """Use MemoryMetricsCollector for all tick writer tests.
+
+    Prevents Prometheus metric duplication errors. Per testing.mdc: Unit tests
+    must be isolated. This fixture ensures each test gets a fresh metrics
+    collector, preventing "Duplicated timeseries" errors.
+
+    Yields:
+        MemoryMetricsCollector instance
+    """
+    collector = MemoryMetricsCollector()
+    set_metrics_collector(collector)
+    yield collector
+    # Cleanup: reset to None so next test gets fresh collector
+    set_metrics_collector(None)
 
 
 @pytest.fixture

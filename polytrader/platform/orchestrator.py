@@ -490,6 +490,7 @@ class PlatformOrchestrator:
             store=self._store,
             market_supervisor=market_supervisor,
             strategy_factory=strategy_factory,
+            session=self._session,
             position_manager=self._position_manager,
         )
 
