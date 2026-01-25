@@ -80,8 +80,10 @@ def test_strategy(client: TestClient) -> str:
         "strategy_id": strategy_id,
         "name": "Test Strategy",
         "description": "Test strategy for API tests",
-        "config": {"param": "value"},
-        "enabled": True,
+        "config": {"buy_threshold": 0.3, "min_history": 30},
+        "template_type_id": "simple_threshold",
+        "version_selector": {"exact": "1.0.0"},
+        "desired_state": "RUNNING",
     }
     response = client.post("/api/v1/commands/strategies", json=request)
     assert response.status_code == 201
@@ -233,8 +235,10 @@ def test_create_strategy(client: TestClient) -> None:
         "strategy_id": strategy_id,
         "name": "New Strategy",
         "description": "A new strategy",
-        "config": {"param": "value"},
-        "enabled": True,
+        "config": {"buy_threshold": 0.3, "min_history": 30},
+        "template_type_id": "simple_threshold",
+        "version_selector": {"exact": "1.0.0"},
+        "desired_state": "RUNNING",
     }
 
     response = client.post("/api/v1/commands/strategies", json=request)
@@ -242,7 +246,7 @@ def test_create_strategy(client: TestClient) -> None:
     data = response.json()
     assert data["strategy_id"] == strategy_id
     assert data["name"] == "New Strategy"
-    assert data["enabled"] is True
+    assert data["enabled"] is True  # Computed field derived from desired_state == RUNNING
 
     # Verify Pydantic model structure
     from polytrader.api.models import StrategyResponse
@@ -255,8 +259,10 @@ def test_create_strategy_duplicate(client: TestClient, test_strategy: str) -> No
     request = {
         "strategy_id": test_strategy,
         "name": "Duplicate Strategy",
-        "config": {},
-        "enabled": True,
+        "config": {"buy_threshold": 0.3, "min_history": 30},
+        "template_type_id": "simple_threshold",
+        "version_selector": {"exact": "1.0.0"},
+        "desired_state": "RUNNING",
     }
 
     response = client.post("/api/v1/commands/strategies", json=request)
@@ -269,7 +275,7 @@ def test_update_strategy(client: TestClient, test_strategy: str) -> None:
     """Test PATCH /commands/strategies/{strategy_id} updates strategy."""
     request = {
         "name": "Updated Strategy Name",
-        "enabled": False,
+        "desired_state": "STOPPED",
     }
 
     response = client.patch(f"/api/v1/commands/strategies/{test_strategy}", json=request)
@@ -277,7 +283,7 @@ def test_update_strategy(client: TestClient, test_strategy: str) -> None:
     data = response.json()
     assert data["strategy_id"] == test_strategy
     assert data["name"] == "Updated Strategy Name"
-    assert data["enabled"] is False
+    assert data["enabled"] is False  # Computed field derived from desired_state == STOPPED
 
 
 def test_update_strategy_not_found(client: TestClient) -> None:

@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from polytrader.api.dependencies import (
     get_control_command_repo,
     get_execution_control_repo,
+    get_in_memory_strategy_registry,
     get_live_strategy_repo,
     get_strategy_registry,
 )
@@ -29,6 +30,8 @@ from polytrader.api.models import (
     RunIdentityResponse,
     StrategiesResponse,
     StrategyResponse,
+    StrategyTypeResponse,
+    StrategyTypesResponse,
     UpdateStrategyRequest,
     VersionConflictResponse,
 )
@@ -40,6 +43,8 @@ from polytrader.platform.control import (
     LiveStrategyRepository,
 )
 from polytrader.platform.registry import StrategyRegistry
+from polytrader.strategies.registry import StrategyRegistry as InMemoryStrategyRegistry
+from polytrader.strategies.registry import StrategyTemplate
 
 router = APIRouter(prefix="/api/v1", tags=["control"])
 
@@ -163,6 +168,149 @@ async def get_strategies(
             )
             for s in strategies
         ]
+    )
+
+
+@router.get("/state/strategies/templates", response_model=StrategyTypesResponse)
+async def list_strategy_templates(
+    in_memory_registry: InMemoryStrategyRegistry = Depends(get_in_memory_strategy_registry),  # noqa: B008
+) -> StrategyTypesResponse:
+    """List all available strategy templates.
+
+    Per Commit 15: Template discovery endpoint for clients to discover
+    available strategy types and their versions.
+
+    Returns:
+        StrategyTypesResponse with list of all registered templates
+    """
+    templates = in_memory_registry.list_templates()
+
+    # Group templates by type_id to get available versions
+    type_map: dict[str, list[str]] = {}
+    template_map: dict[str, StrategyTemplate] = {}
+
+    for template in templates:
+        if template.type_id not in type_map:
+            type_map[template.type_id] = []
+            # Use the first template we encounter for name/description
+            # (all versions should have same name/description)
+            template_map[template.type_id] = template
+        type_map[template.type_id].append(template.version)
+
+    # Sort versions for each type
+    for type_id in type_map:
+        type_map[type_id] = sorted(type_map[type_id])
+
+    # Build response
+    types = []
+    for type_id, versions in type_map.items():
+        template = template_map[type_id]
+        types.append(
+            StrategyTypeResponse(
+                type_id=type_id,
+                name=template.name,
+                description=template.description,
+                available_versions=versions,
+                parameter_schema=template.parameter_schema.to_openapi_schema(),
+            )
+        )
+
+    return StrategyTypesResponse(types=types)
+
+
+@router.get(
+    "/state/strategies/templates/{type_id}",
+    response_model=StrategyTypeResponse,
+    responses={
+        404: {"model": ErrorResponse, "description": "Template not found"},
+    },
+)
+async def get_strategy_template(
+    type_id: str,
+    in_memory_registry: InMemoryStrategyRegistry = Depends(get_in_memory_strategy_registry),  # noqa: B008
+) -> StrategyTypeResponse:
+    """Get details for a specific strategy template type.
+
+    Per Commit 15: Returns template information including all available versions
+    and parameter schema.
+
+    Args:
+        type_id: Template type identifier (e.g., "simple_threshold")
+
+    Returns:
+        StrategyTypeResponse with template details
+
+    Raises:
+        HTTPException: 404 if template type not found
+    """
+    # Get all versions for this type
+    versions = in_memory_registry.list_versions(type_id)
+    if not versions:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=ErrorResponse(
+                error="Template not found",
+                detail=f"No template found with type_id: {type_id}",
+            ).model_dump(),
+        )
+
+    # Get latest version template for name/description
+    latest_version = versions[-1]
+    template = in_memory_registry.get(type_id, latest_version)
+
+    return StrategyTypeResponse(
+        type_id=type_id,
+        name=template.name,
+        description=template.description,
+        available_versions=versions,
+        parameter_schema=template.parameter_schema.to_openapi_schema(),
+    )
+
+
+@router.get(
+    "/state/strategies/templates/{type_id}/versions/{version}",
+    response_model=StrategyTypeResponse,
+    responses={
+        404: {"model": ErrorResponse, "description": "Template version not found"},
+    },
+)
+async def get_strategy_template_version(
+    type_id: str,
+    version: str,
+    in_memory_registry: InMemoryStrategyRegistry = Depends(get_in_memory_strategy_registry),  # noqa: B008
+) -> StrategyTypeResponse:
+    """Get details for a specific strategy template version.
+
+    Per Commit 15: Returns template information for a specific version
+    including parameter schema.
+
+    Args:
+        type_id: Template type identifier (e.g., "simple_threshold")
+        version: Template version (e.g., "1.0.0")
+
+    Returns:
+        StrategyTypeResponse with template details (single version in available_versions)
+
+    Raises:
+        HTTPException: 404 if template version not found
+    """
+    try:
+        template = in_memory_registry.get(type_id, version)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=ErrorResponse(
+                error="Template version not found",
+                detail=str(e),
+            ).model_dump(),
+        ) from e
+
+    return StrategyTypeResponse(
+        type_id=type_id,
+        name=template.name,
+        description=template.description,
+        available_versions=[version],  # Single version
+        parameter_schema=template.parameter_schema.to_openapi_schema(),
     )
 
 
