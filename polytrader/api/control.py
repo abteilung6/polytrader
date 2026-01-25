@@ -39,6 +39,7 @@ from polytrader.platform.control import (
     LiveStrategyRepository,
 )
 from polytrader.platform.registry import StrategyRegistry
+from polytrader.strategies.lifecycle_models import StrategyLifecycleState
 
 router = APIRouter(prefix="/api/v1", tags=["control"])
 
@@ -139,7 +140,7 @@ async def get_strategies(
                 name=s.name,
                 description=s.description,
                 config=s.config,
-                enabled=s.enabled,
+                enabled=s.desired_state == StrategyLifecycleState.RUNNING,
                 created_at=s.created_at,
                 updated_at=s.updated_at,
             )
@@ -434,12 +435,21 @@ async def create_strategy(
     registry: StrategyRegistry = Depends(get_strategy_registry),  # noqa: B008
 ) -> StrategyResponse:
     """Create a new strategy in registry."""
+    # Map enabled boolean to lifecycle state
+    desired_state = (
+        StrategyLifecycleState.RUNNING if request.enabled else StrategyLifecycleState.STOPPED
+    )
+
     strategy = StrategyRecordModel(
         strategy_id=request.strategy_id,
         name=request.name,
         description=request.description,
         config=request.config,
-        enabled=request.enabled,
+        template_type_id="simple_threshold",  # Default for now, should come from request
+        template_version="1.0.0",  # Default for now, should come from request
+        config_hash="",  # Will be calculated by registry
+        desired_state=desired_state,
+        actual_state=desired_state,
     )
 
     try:
@@ -474,7 +484,7 @@ async def create_strategy(
         name=strategy.name,
         description=strategy.description,
         config=strategy.config,
-        enabled=strategy.enabled,
+        enabled=strategy.desired_state == StrategyLifecycleState.RUNNING,
         created_at=strategy.created_at,
         updated_at=strategy.updated_at,
     )
@@ -514,7 +524,13 @@ async def update_strategy(
     if request.config is not None:
         strategy.config = request.config
     if request.enabled is not None:
-        strategy.enabled = request.enabled
+        # Map enabled boolean to lifecycle state
+        strategy.desired_state = (
+            StrategyLifecycleState.RUNNING if request.enabled else StrategyLifecycleState.STOPPED
+        )
+        # Also update actual_state if strategy is not currently running
+        if strategy.actual_state != StrategyLifecycleState.RUNNING:
+            strategy.actual_state = strategy.desired_state
 
     try:
         await registry.update_strategy(strategy)
@@ -537,7 +553,7 @@ async def update_strategy(
         name=updated_strategy.name,
         description=updated_strategy.description,
         config=updated_strategy.config,
-        enabled=updated_strategy.enabled,
+        enabled=updated_strategy.desired_state == StrategyLifecycleState.RUNNING,
         created_at=updated_strategy.created_at,
         updated_at=updated_strategy.updated_at,
     )

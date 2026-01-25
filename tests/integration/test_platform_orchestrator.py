@@ -34,13 +34,13 @@ async def db_session(
         # Clean up strategies table
         from sqlalchemy import text
 
-        await session.execute(text("TRUNCATE TABLE strategies CASCADE"))
+        await session.execute(text("TRUNCATE TABLE strategy_instances CASCADE"))
         await session.commit()
 
         yield session
 
         # Cleanup
-        await session.execute(text("TRUNCATE TABLE strategies CASCADE"))
+        await session.execute(text("TRUNCATE TABLE strategy_instances CASCADE"))
         await session.commit()
 
     await engine.dispose()
@@ -94,24 +94,38 @@ def observer_factory() -> Callable[[MagicMock], MagicMock]:  # noqa: ARG001
 @pytest.fixture
 async def test_strategies(db_session: AsyncSession) -> list[str]:
     """Create test strategies and return their IDs."""
+    from polytrader.strategies.lifecycle_models import StrategyLifecycleState
+
     strategies = [
         StrategyRecord(
             strategy_id="strategy_1",
             name="Strategy 1",
             config={"type": "simple_threshold", "buy_threshold": 0.3, "min_history": 30},
-            enabled=True,
+            template_type_id="simple_threshold",
+            template_version="1.0.0",
+            config_hash="hash_1",
+            desired_state=StrategyLifecycleState.RUNNING,
+            actual_state=StrategyLifecycleState.RUNNING,
         ),
         StrategyRecord(
             strategy_id="strategy_2",
             name="Strategy 2",
             config={"type": "simple_threshold", "buy_threshold": 0.35, "min_history": 40},
-            enabled=True,
+            template_type_id="simple_threshold",
+            template_version="1.0.0",
+            config_hash="hash_2",
+            desired_state=StrategyLifecycleState.RUNNING,
+            actual_state=StrategyLifecycleState.RUNNING,
         ),
         StrategyRecord(
             strategy_id="strategy_disabled",
             name="Disabled Strategy",
             config={"type": "simple_threshold", "buy_threshold": 0.3, "min_history": 30},
-            enabled=False,
+            template_type_id="simple_threshold",
+            template_version="1.0.0",
+            config_hash="hash_disabled",
+            desired_state=StrategyLifecycleState.STOPPED,
+            actual_state=StrategyLifecycleState.STOPPED,
         ),
     ]
     for strategy in strategies:

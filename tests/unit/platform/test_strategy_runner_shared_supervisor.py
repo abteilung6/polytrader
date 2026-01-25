@@ -81,13 +81,19 @@ def strategy_record() -> StrategyRecord:
     """Create a test StrategyRecord."""
     import uuid
 
+    from polytrader.strategies.lifecycle_models import StrategyLifecycleState
+
     strategy_id = f"test-strategy-{uuid.uuid4().hex[:8]}"
     return StrategyRecord(
         strategy_id=strategy_id,
         name="Test Strategy",
         description="Test strategy for unit tests",
         config={"market_pattern": "test-pattern", "param": "value"},
-        enabled=True,
+        template_type_id="simple_threshold",
+        template_version="1.0.0",
+        config_hash="test_hash",
+        desired_state=StrategyLifecycleState.RUNNING,
+        actual_state=StrategyLifecycleState.RUNNING,
     )
 
 

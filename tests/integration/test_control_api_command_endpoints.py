@@ -43,7 +43,7 @@ def client(postgres_test_url: str, postgres_db: AsyncGenerator[None, None]) -> I
 
         async with Session() as session:
             try:
-                await session.execute(text("TRUNCATE TABLE strategies CASCADE"))
+                await session.execute(text("TRUNCATE TABLE strategy_instances CASCADE"))
                 await session.commit()
             except Exception:
                 await session.rollback()

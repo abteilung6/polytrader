@@ -17,6 +17,7 @@ from polytrader.db.models import (
     LiveStrategyActivationRecord,
     StrategyRecord,
 )
+from polytrader.strategies.lifecycle_models import StrategyLifecycleState
 
 
 @pytest.mark.integration
@@ -35,7 +36,11 @@ class TestStrategyRecord:
                 name="Test Strategy",
                 description="A test strategy",
                 config={"buy_threshold": 0.3, "min_history": 30},
-                enabled=True,
+                template_type_id="simple_threshold",
+                template_version="1.0.0",
+                config_hash="test_hash",
+                desired_state=StrategyLifecycleState.RUNNING,
+                actual_state=StrategyLifecycleState.RUNNING,
             )
             session.add(strategy)
             await session.commit()
@@ -50,7 +55,7 @@ class TestStrategyRecord:
             assert loaded.name == "Test Strategy"
             assert loaded.description == "A test strategy"
             assert loaded.config == {"buy_threshold": 0.3, "min_history": 30}
-            assert loaded.enabled is True
+            assert loaded.desired_state == StrategyLifecycleState.RUNNING
             assert isinstance(loaded.created_at, datetime)
             assert isinstance(loaded.updated_at, datetime)
 
@@ -67,7 +72,11 @@ class TestStrategyRecord:
                 strategy_id="test_strategy",
                 name="Test Strategy",
                 config={},
-                enabled=True,
+                template_type_id="simple_threshold",
+                template_version="1.0.0",
+                config_hash="test_hash",
+                desired_state=StrategyLifecycleState.RUNNING,
+                actual_state=StrategyLifecycleState.RUNNING,
             )
             session.add(strategy)
             await session.commit()
@@ -152,6 +161,11 @@ class TestLiveStrategyActivationRecord:
                 strategy_id="test_strategy",
                 name="Test Strategy",
                 config={},
+                template_type_id="simple_threshold",
+                template_version="1.0.0",
+                config_hash="test_hash",
+                desired_state=StrategyLifecycleState.RUNNING,
+                actual_state=StrategyLifecycleState.RUNNING,
             )
             session.add(strategy)
             await session.commit()
@@ -199,6 +213,11 @@ class TestLiveStrategyActivationRecord:
                 strategy_id="test_strategy",
                 name="Test Strategy",
                 config={},
+                template_type_id="simple_threshold",
+                template_version="1.0.0",
+                config_hash="test_hash",
+                desired_state=StrategyLifecycleState.RUNNING,
+                actual_state=StrategyLifecycleState.RUNNING,
             )
             session.add(strategy)
             await session.commit()
@@ -247,6 +266,11 @@ class TestControlCommandRecord:
                 strategy_id="test_strategy",
                 name="Test Strategy",
                 config={},
+                template_type_id="simple_threshold",
+                template_version="1.0.0",
+                config_hash="test_hash",
+                desired_state=StrategyLifecycleState.RUNNING,
+                actual_state=StrategyLifecycleState.RUNNING,
             )
             session.add(strategy)
             await session.commit()

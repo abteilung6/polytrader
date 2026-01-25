@@ -42,18 +42,28 @@ async def repository(db_session: AsyncSession) -> LiveStrategyRepository:
 @pytest.fixture
 async def test_strategies(db_session: AsyncSession) -> list[str]:
     """Create test strategies and return their IDs."""
+    from polytrader.strategies.lifecycle_models import StrategyLifecycleState
+
     strategies = [
         StrategyRecord(
             strategy_id="strategy_1",
             name="Strategy 1",
             config={"type": "simple_threshold"},
-            enabled=True,
+            template_type_id="simple_threshold",
+            template_version="1.0.0",
+            config_hash="hash_1",
+            desired_state=StrategyLifecycleState.RUNNING,
+            actual_state=StrategyLifecycleState.RUNNING,
         ),
         StrategyRecord(
             strategy_id="strategy_2",
             name="Strategy 2",
             config={"type": "simple_threshold"},
-            enabled=True,
+            template_type_id="simple_threshold",
+            template_version="1.0.0",
+            config_hash="hash_2",
+            desired_state=StrategyLifecycleState.RUNNING,
+            actual_state=StrategyLifecycleState.RUNNING,
         ),
     ]
     for strategy in strategies:

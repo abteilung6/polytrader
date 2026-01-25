@@ -44,11 +44,17 @@ async def repository(db_session: AsyncSession) -> ControlCommandRepository:
 @pytest.fixture
 async def test_strategy(db_session: AsyncSession) -> str:
     """Create test strategy and return its ID."""
+    from polytrader.strategies.lifecycle_models import StrategyLifecycleState
+
     strategy = StrategyRecord(
         strategy_id="test_strategy",
         name="Test Strategy",
         config={"type": "simple_threshold"},
-        enabled=True,
+        template_type_id="simple_threshold",
+        template_version="1.0.0",
+        config_hash="test_hash",
+        desired_state=StrategyLifecycleState.RUNNING,
+        actual_state=StrategyLifecycleState.RUNNING,
     )
     db_session.add(strategy)
     await db_session.commit()

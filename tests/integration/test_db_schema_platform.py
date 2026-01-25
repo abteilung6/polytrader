@@ -22,7 +22,7 @@ class TestPlatformSchema:
                 """
                 SELECT column_name, data_type, is_nullable, column_default
                 FROM information_schema.columns
-                WHERE table_name = 'strategies'
+                WHERE table_name = 'strategy_instances'
                 ORDER BY ordinal_position
                 """
             )
@@ -43,9 +43,14 @@ class TestPlatformSchema:
         assert "config" in columns
         assert columns["config"][0] == "jsonb"
 
-        assert "enabled" in columns
-        assert columns["enabled"][0] == "boolean"
-        assert "true" in columns["enabled"][2]  # DEFAULT true
+        assert "desired_state" in columns
+        assert columns["desired_state"][0] == "character varying"
+        assert "STOPPED" in columns["desired_state"][2]  # DEFAULT 'STOPPED'
+
+        assert "actual_state" in columns
+        assert "template_type_id" in columns
+        assert "template_version" in columns
+        assert "config_hash" in columns
 
         assert "created_at" in columns
         assert "updated_at" in columns
@@ -172,7 +177,7 @@ class TestPlatformSchema:
         fk = fks[0]
         assert fk[1] == "live_strategy_activation"
         assert fk[2] == "strategy_id"
-        assert fk[3] == "strategies"
+        assert fk[3] == "strategy_instances"
         assert fk[4] == "strategy_id"
 
     async def test_control_commands_table_exists(
@@ -245,8 +250,12 @@ class TestPlatformSchema:
         async with postgres_connection.cursor() as cur:
             await cur.execute(
                 """
-                INSERT INTO strategies (strategy_id, name, config)
-                VALUES ('test_strategy', 'Test Strategy', '{}')
+                INSERT INTO strategy_instances (
+                    strategy_id, name, config, template_type_id, template_version, config_hash
+                )
+                VALUES (
+                    'test_strategy', 'Test Strategy', '{}', 'simple_threshold', '1.0.0', 'test_hash'
+                )
                 """
             )
             await postgres_connection.commit()

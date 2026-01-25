@@ -75,11 +75,16 @@ class StrategyRegistry:
 
         Example:
             >>> from polytrader.db.models import StrategyRecord
+            >>> from polytrader.strategies.lifecycle_models import StrategyLifecycleState
             >>> strategy = StrategyRecord(
             ...     strategy_id="my_strategy",
             ...     name="My Strategy",
             ...     config={"type": "simple_threshold", "buy_threshold": 0.3},
-            ...     enabled=True,
+            ...     template_type_id="simple_threshold",
+            ...     template_version="1.0.0",
+            ...     config_hash="hash_123",
+            ...     desired_state=StrategyLifecycleState.RUNNING,
+            ...     actual_state=StrategyLifecycleState.RUNNING,
             ... )
             >>> await registry.create_strategy(strategy)
         """

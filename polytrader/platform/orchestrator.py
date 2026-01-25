@@ -24,6 +24,7 @@ from polytrader.risk.engine import RiskChecker, RiskEngine
 from polytrader.risk.limits_store import get_default_limits
 from polytrader.store import IMarketDataStore
 from polytrader.strategies import create_simple_threshold_factory
+from polytrader.strategies.lifecycle_models import StrategyLifecycleState
 from polytrader.supervisor.market import MarketSupervisor
 
 if TYPE_CHECKING:
@@ -190,7 +191,9 @@ class PlatformOrchestrator:
             strategies = await registry.list_strategies()
 
             total_count = len(strategies)
-            enabled_count = sum(1 for s in strategies if s.enabled)
+            enabled_count = sum(
+                1 for s in strategies if s.desired_state == StrategyLifecycleState.RUNNING
+            )
             logger.info(
                 "Loaded strategies from registry: {total} total, {enabled} enabled",
                 total=total_count,
@@ -222,7 +225,9 @@ class PlatformOrchestrator:
                 await self._create_live_lane()
 
             # Step 6: Group strategies by market_pattern and create shared supervisors
-            enabled_list = [s for s in strategies if s.enabled]
+            enabled_list = [
+                s for s in strategies if s.desired_state == StrategyLifecycleState.RUNNING
+            ]
             logger.info(
                 "Starting {count} enabled strategies...",
                 count=len(enabled_list),
@@ -500,8 +505,11 @@ class PlatformOrchestrator:
         if strategy is None:
             raise ValueError(f"Strategy not found: {strategy_id}")
 
-        if not strategy.enabled:
-            raise ValueError(f"Strategy is not enabled: {strategy_id}")
+        if strategy.desired_state != StrategyLifecycleState.RUNNING:
+            raise ValueError(
+                f"Strategy is not in RUNNING state: {strategy_id} "
+                f"(current state: {strategy.desired_state})"
+            )
 
         # Check if strategy already running (idempotent)
         if strategy_id in self._strategy_runners:
@@ -634,8 +642,11 @@ class PlatformOrchestrator:
         if strategy is None:
             raise ValueError(f"Strategy not found: {strategy_id}")
 
-        if not strategy.enabled:
-            raise ValueError(f"Strategy is not enabled: {strategy_id}")
+        if strategy.desired_state != StrategyLifecycleState.RUNNING:
+            raise ValueError(
+                f"Strategy is not in RUNNING state: {strategy_id} "
+                f"(current state: {strategy.desired_state})"
+            )
 
         # Check if strategy is running
         runner = self._strategy_runners.get(strategy_id)

@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from polytrader.db.models import StrategyRecord
 from polytrader.platform.registry import StrategyRegistry
+from polytrader.strategies.lifecycle_models import StrategyLifecycleState
 
 
 @pytest.fixture
@@ -60,13 +61,21 @@ class TestListStrategies:
             strategy_id="strategy_1",
             name="Strategy 1",
             config={"type": "simple_threshold", "buy_threshold": 0.3},
-            enabled=True,
+            template_type_id="simple_threshold",
+            template_version="1.0.0",
+            config_hash="hash_1",
+            desired_state=StrategyLifecycleState.RUNNING,
+            actual_state=StrategyLifecycleState.RUNNING,
         )
         strategy2 = StrategyRecord(
             strategy_id="strategy_2",
             name="Strategy 2",
             config={"type": "simple_threshold", "buy_threshold": 0.4},
-            enabled=False,
+            template_type_id="simple_threshold",
+            template_version="1.0.0",
+            config_hash="hash_2",
+            desired_state=StrategyLifecycleState.STOPPED,
+            actual_state=StrategyLifecycleState.STOPPED,
         )
         db_session.add(strategy1)
         db_session.add(strategy2)
@@ -101,7 +110,11 @@ class TestGetStrategy:
             name="Test Strategy",
             description="Test description",
             config={"type": "simple_threshold", "buy_threshold": 0.3},
-            enabled=True,
+            template_type_id="simple_threshold",
+            template_version="1.0.0",
+            config_hash="test_hash",
+            desired_state=StrategyLifecycleState.RUNNING,
+            actual_state=StrategyLifecycleState.RUNNING,
         )
         db_session.add(strategy)
         await db_session.commit()
@@ -113,7 +126,7 @@ class TestGetStrategy:
         assert retrieved.name == "Test Strategy"
         assert retrieved.description == "Test description"
         assert retrieved.config == {"type": "simple_threshold", "buy_threshold": 0.3}
-        assert retrieved.enabled is True
+        assert retrieved.desired_state == StrategyLifecycleState.RUNNING
 
 
 class TestCreateStrategy:
@@ -126,7 +139,11 @@ class TestCreateStrategy:
             strategy_id="new_strategy",
             name="New Strategy",
             config={"type": "simple_threshold", "buy_threshold": 0.3},
-            enabled=True,
+            template_type_id="simple_threshold",
+            template_version="1.0.0",
+            config_hash="test_hash",
+            desired_state=StrategyLifecycleState.RUNNING,
+            actual_state=StrategyLifecycleState.RUNNING,
         )
 
         await registry.create_strategy(strategy)
@@ -148,7 +165,11 @@ class TestCreateStrategy:
             strategy_id="duplicate",
             name="Strategy 1",
             config={"type": "simple_threshold"},
-            enabled=True,
+            template_type_id="simple_threshold",
+            template_version="1.0.0",
+            config_hash="test_hash_1",
+            desired_state=StrategyLifecycleState.RUNNING,
+            actual_state=StrategyLifecycleState.RUNNING,
         )
         db_session.add(strategy1)
         await db_session.commit()
@@ -161,7 +182,11 @@ class TestCreateStrategy:
             strategy_id="duplicate",
             name="Strategy 2",
             config={"type": "simple_threshold"},
-            enabled=True,
+            template_type_id="simple_threshold",
+            template_version="1.0.0",
+            config_hash="test_hash_2",
+            desired_state=StrategyLifecycleState.RUNNING,
+            actual_state=StrategyLifecycleState.RUNNING,
         )
 
         import sqlalchemy.exc
@@ -183,7 +208,11 @@ class TestUpdateStrategy:
             strategy_id="update_test",
             name="Original Name",
             config={"type": "simple_threshold", "buy_threshold": 0.3},
-            enabled=True,
+            template_type_id="simple_threshold",
+            template_version="1.0.0",
+            config_hash="test_hash",
+            desired_state=StrategyLifecycleState.RUNNING,
+            actual_state=StrategyLifecycleState.RUNNING,
         )
         db_session.add(strategy)
         await db_session.commit()
@@ -191,7 +220,8 @@ class TestUpdateStrategy:
         # Update strategy
         strategy.name = "Updated Name"
         strategy.config = {"type": "simple_threshold", "buy_threshold": 0.35}
-        strategy.enabled = False
+        strategy.desired_state = StrategyLifecycleState.STOPPED
+        strategy.actual_state = StrategyLifecycleState.STOPPED
 
         await registry.update_strategy(strategy)
 
@@ -200,4 +230,4 @@ class TestUpdateStrategy:
         assert retrieved is not None
         assert retrieved.name == "Updated Name"
         assert retrieved.config == {"type": "simple_threshold", "buy_threshold": 0.35}
-        assert retrieved.enabled is False
+        assert retrieved.desired_state == StrategyLifecycleState.STOPPED
