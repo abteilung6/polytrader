@@ -2,14 +2,12 @@
 
 Per Commit 3: Verify create_metrics_collector() factory function works correctly
 with both prometheus and memory backends, defaults to prometheus, and handles
-environment variables properly.
+configuration properly.
 """
-
-import os
-from unittest.mock import patch
 
 import pytest
 
+from polytrader.config import MetricsConfig
 from polytrader.obs.metrics import (
     MemoryMetricsCollector,
     create_metrics_collector,
@@ -23,13 +21,11 @@ class TestCreateMetricsCollector:
 
     def test_create_metrics_collector_defaults_to_prometheus(self) -> None:
         """Test that create_metrics_collector defaults to prometheus."""
-        # Clear any env var
-        with patch.dict(os.environ, {}, clear=True):
-            collector = create_metrics_collector()
-            # Should be PrometheusMetricsCollector
-            from polytrader.obs.metrics_prometheus import PrometheusMetricsCollector
+        collector = create_metrics_collector()
+        # Should be PrometheusMetricsCollector
+        from polytrader.obs.metrics_prometheus import PrometheusMetricsCollector
 
-            assert isinstance(collector, PrometheusMetricsCollector)
+        assert isinstance(collector, PrometheusMetricsCollector)
 
     def test_create_metrics_collector_with_prometheus_backend(self) -> None:
         """Test that create_metrics_collector works with 'prometheus' backend."""
@@ -43,31 +39,34 @@ class TestCreateMetricsCollector:
         collector = create_metrics_collector(backend="memory")
         assert isinstance(collector, MemoryMetricsCollector)
 
-    def test_create_metrics_collector_reads_env_var(self) -> None:
-        """Test that create_metrics_collector reads METRICS_BACKEND env var."""
-        with patch.dict(os.environ, {"METRICS_BACKEND": "memory"}):
-            collector = create_metrics_collector()
-            assert isinstance(collector, MemoryMetricsCollector)
+    def test_create_metrics_collector_reads_config(self) -> None:
+        """Test that create_metrics_collector reads MetricsConfig."""
+        # Use model_construct to bypass env file reading for explicit test values
+        config = MetricsConfig.model_construct(metrics_backend="memory")
+        collector = create_metrics_collector(config=config)
+        assert isinstance(collector, MemoryMetricsCollector)
 
-        with patch.dict(os.environ, {"METRICS_BACKEND": "prometheus"}):
-            collector = create_metrics_collector()
-            from polytrader.obs.metrics_prometheus import PrometheusMetricsCollector
+        config = MetricsConfig.model_construct(metrics_backend="prometheus")
+        collector = create_metrics_collector(config=config)
+        from polytrader.obs.metrics_prometheus import PrometheusMetricsCollector
 
-            assert isinstance(collector, PrometheusMetricsCollector)
+        assert isinstance(collector, PrometheusMetricsCollector)
 
-    def test_create_metrics_collector_env_var_overrides_default(self) -> None:
-        """Test that METRICS_BACKEND env var overrides default."""
-        with patch.dict(os.environ, {"METRICS_BACKEND": "memory"}):
-            collector = create_metrics_collector()
-            assert isinstance(collector, MemoryMetricsCollector)
+    def test_create_metrics_collector_config_overrides_default(self) -> None:
+        """Test that MetricsConfig overrides default."""
+        # Use model_construct to bypass env file reading for explicit test values
+        config = MetricsConfig.model_construct(metrics_backend="memory")
+        collector = create_metrics_collector(config=config)
+        assert isinstance(collector, MemoryMetricsCollector)
 
-    def test_create_metrics_collector_explicit_backend_overrides_env(self) -> None:
-        """Test that explicit backend parameter overrides env var."""
-        with patch.dict(os.environ, {"METRICS_BACKEND": "memory"}):
-            collector = create_metrics_collector(backend="prometheus")
-            from polytrader.obs.metrics_prometheus import PrometheusMetricsCollector
+    def test_create_metrics_collector_explicit_backend_overrides_config(self) -> None:
+        """Test that explicit backend parameter overrides config."""
+        # Use model_construct to bypass env file reading for explicit test values
+        config = MetricsConfig.model_construct(metrics_backend="memory")
+        collector = create_metrics_collector(backend="prometheus", config=config)
+        from polytrader.obs.metrics_prometheus import PrometheusMetricsCollector
 
-            assert isinstance(collector, PrometheusMetricsCollector)
+        assert isinstance(collector, PrometheusMetricsCollector)
 
     def test_create_metrics_collector_invalid_backend_raises_error(self) -> None:
         """Test that invalid backend raises ValueError."""
@@ -89,18 +88,19 @@ class TestGetMetricsCollectorUsesFactory:
         """Test that get_metrics_collector defaults to prometheus via factory."""
         # Reset to None to test default
         set_metrics_collector(None)
-        with patch.dict(os.environ, {}, clear=True):
-            collector = get_metrics_collector()
-            from polytrader.obs.metrics_prometheus import PrometheusMetricsCollector
+        collector = get_metrics_collector()
+        from polytrader.obs.metrics_prometheus import PrometheusMetricsCollector
 
-            assert isinstance(collector, PrometheusMetricsCollector)
+        assert isinstance(collector, PrometheusMetricsCollector)
 
-    def test_get_metrics_collector_respects_env_var(self) -> None:
-        """Test that get_metrics_collector respects METRICS_BACKEND env var."""
+    def test_get_metrics_collector_uses_default_config(self) -> None:
+        """Test that get_metrics_collector uses default MetricsConfig."""
         set_metrics_collector(None)
-        with patch.dict(os.environ, {"METRICS_BACKEND": "memory"}):
-            collector = get_metrics_collector()
-            assert isinstance(collector, MemoryMetricsCollector)
+        # Default config should use prometheus backend
+        collector = get_metrics_collector()
+        from polytrader.obs.metrics_prometheus import PrometheusMetricsCollector
+
+        assert isinstance(collector, PrometheusMetricsCollector)
 
     def test_get_metrics_collector_returns_singleton(self) -> None:
         """Test that get_metrics_collector returns singleton instance."""

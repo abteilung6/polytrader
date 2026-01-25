@@ -5,9 +5,11 @@ and querying metrics. Defaults to PrometheusMetricsCollector for
 operator visibility via Grafana dashboards.
 """
 
-import os
 from collections import defaultdict
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
+
+if TYPE_CHECKING:
+    from polytrader.config import MetricsConfig
 
 
 class IMetricsCollector(Protocol):
@@ -280,11 +282,14 @@ class MemoryMetricsCollector(IMetricsCollector):
 _metrics_collector: IMetricsCollector | None = None
 
 
-def create_metrics_collector(backend: str | None = None) -> IMetricsCollector:
+def create_metrics_collector(
+    backend: str | None = None, config: "MetricsConfig | None" = None
+) -> IMetricsCollector:
     """Create metrics collector based on backend.
 
     Args:
-        backend: Backend type ('prometheus' or 'memory'), or None to read from env
+        backend: Backend type ('prometheus' or 'memory'), or None to read from config/env
+        config: MetricsConfig instance. If None, loads from environment.
 
     Returns:
         IMetricsCollector instance
@@ -293,7 +298,11 @@ def create_metrics_collector(backend: str | None = None) -> IMetricsCollector:
         ValueError: If backend is not 'prometheus' or 'memory'
     """
     if backend is None:
-        backend = os.getenv("METRICS_BACKEND", "prometheus")  # Default to prometheus
+        if config is None:
+            from polytrader.config import MetricsConfig
+
+            config = MetricsConfig()
+        backend = config.metrics_backend
 
     if backend == "prometheus":
         from polytrader.obs.metrics_prometheus import PrometheusMetricsCollector
