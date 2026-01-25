@@ -106,6 +106,33 @@ class DatabaseConfig(BaseSettings):
     )
 
 
+class MetricsConfig(BaseSettings):
+    """Metrics configuration (Prometheus metrics backend and server).
+
+    Per Commit 3 & 4: Configuration for metrics backend selection and
+    dedicated metrics server port. Defaults to Prometheus backend on port 9100.
+    """
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    metrics_backend: str = Field(
+        default="prometheus",
+        description="Metrics backend: 'prometheus' or 'memory' (default: prometheus)",
+        alias="METRICS_BACKEND",
+    )
+
+    metrics_port: int = Field(
+        default=9100,
+        description="Metrics server port (default: 9100, separate from control API :8000)",
+        alias="METRICS_PORT",
+    )
+
+
 def get_database_url(config: DatabaseConfig | None = None) -> str:
     """Get PostgreSQL connection URL from configuration.
 

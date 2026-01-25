@@ -16,3 +16,26 @@ services:
       start_period: 5s
     tmpfs:
       - /var/lib/postgresql/data  # In-memory for speed
+
+  prometheus-test:
+    image: prom/prometheus:latest
+    container_name: polytrader-prometheus-test
+    ports:
+      - "9091:9090"
+    volumes:
+      - ./infra/prometheus.test.yml:/etc/prometheus/prometheus.yml
+      - prometheus_test_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=1h'  # Short retention for tests
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+
+volumes:
+  prometheus_test_data:

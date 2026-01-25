@@ -18,7 +18,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from polytrader.db.repository import MarketTickRepository
 from polytrader.events.types import EventSource, MarketDataEvent
-from polytrader.obs.metrics import get_metrics_collector
+from polytrader.obs.metrics import (
+    MemoryMetricsCollector,
+    set_metrics_collector,
+)
 from polytrader.store import PostgreSQLMarketTickStore
 
 
@@ -52,6 +55,18 @@ async def db_session(
         await session.commit()
 
     await engine.dispose()
+
+
+@pytest.fixture
+def metrics_collector() -> MemoryMetricsCollector:
+    """Create a MemoryMetricsCollector for tests that need to query values directly.
+
+    Some tests need to verify gauge values via get_gauge(), which PrometheusMetricsCollector
+    doesn't support (returns 0.0). This fixture provides MemoryMetricsCollector for those tests.
+    """
+    collector = MemoryMetricsCollector()
+    set_metrics_collector(collector)
+    return collector
 
 
 @pytest.fixture
@@ -117,10 +132,13 @@ class TestWriteMetrics:
 
     @pytest.mark.asyncio
     async def test_write_updates_buffer_size_gauge(
-        self, store: PostgreSQLMarketTickStore, sample_event: MarketDataEvent
+        self,
+        store: PostgreSQLMarketTickStore,
+        sample_event: MarketDataEvent,
+        metrics_collector: MemoryMetricsCollector,
     ) -> None:
         """Test that write operations update buffer size gauge."""
-        collector = get_metrics_collector()
+        collector = metrics_collector
 
         # Add event (non-blocking, schedules async work)
         store.add(sample_event)
@@ -161,10 +179,13 @@ class TestFlushMetrics:
 
     @pytest.mark.asyncio
     async def test_flush_updates_buffer_size_gauge(
-        self, store: PostgreSQLMarketTickStore, sample_event: MarketDataEvent
+        self,
+        store: PostgreSQLMarketTickStore,
+        sample_event: MarketDataEvent,
+        metrics_collector: MemoryMetricsCollector,
     ) -> None:
         """Test that flush operations update buffer size gauge."""
-        collector = get_metrics_collector()
+        collector = metrics_collector
 
         # Add event
         store.add(sample_event)
@@ -256,9 +277,11 @@ class TestErrorMetrics:
 class TestBufferMetrics:
     """Test buffer-related metrics."""
 
-    def test_buffer_capacity_set_on_init(self, store: PostgreSQLMarketTickStore) -> None:
+    def test_buffer_capacity_set_on_init(
+        self, metrics_collector: MemoryMetricsCollector, store: PostgreSQLMarketTickStore
+    ) -> None:
         """Test that buffer capacity is set on initialization."""
-        collector = get_metrics_collector()
+        collector = metrics_collector
 
         # Buffer capacity should be set to batch_size (10 in fixture)
         capacity = collector.get_gauge("tick_buffer_capacity")
@@ -266,10 +289,13 @@ class TestBufferMetrics:
 
     @pytest.mark.asyncio
     async def test_buffer_size_reflects_actual_state(
-        self, store: PostgreSQLMarketTickStore, sample_event: MarketDataEvent
+        self,
+        store: PostgreSQLMarketTickStore,
+        sample_event: MarketDataEvent,
+        metrics_collector: MemoryMetricsCollector,
     ) -> None:
         """Test that buffer size gauge reflects actual buffer state."""
-        collector = get_metrics_collector()
+        collector = metrics_collector
 
         # Add event (should increase buffer size)
         store.add(sample_event)
@@ -290,9 +316,11 @@ class TestBufferMetrics:
 class TestStoreHealthMetrics:
     """Test store health metrics."""
 
-    def test_store_health_set_to_open_on_init(self, store: PostgreSQLMarketTickStore) -> None:
+    def test_store_health_set_to_open_on_init(
+        self, metrics_collector: MemoryMetricsCollector, store: PostgreSQLMarketTickStore
+    ) -> None:
         """Test that store health is set to 'open' on initialization."""
-        collector = get_metrics_collector()
+        collector = metrics_collector
 
         # Get gauge value (may be 0.0 if not set, or 1.0 if set)
         # The important thing is that set_tick_store_health doesn't raise
@@ -308,10 +336,10 @@ class TestStoreHealthMetrics:
 
     @pytest.mark.asyncio
     async def test_store_health_set_to_closed_on_close(
-        self, store: PostgreSQLMarketTickStore
+        self, store: PostgreSQLMarketTickStore, metrics_collector: MemoryMetricsCollector
     ) -> None:
         """Test that store health is set to 'closed' on close()."""
-        collector = get_metrics_collector()
+        collector = metrics_collector
 
         # Close store
         await store.close()

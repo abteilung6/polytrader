@@ -1,6 +1,8 @@
 .PHONY: help install install-dev lint format type-check test test-unit test-integration test-replay clean-test-cache
 .PHONY: db-up db-down db-migrate db-logs db-psql
 .PHONY: test-db-up test-db-down test-db-migrate
+.PHONY: prometheus-up prometheus-down prometheus-logs
+.PHONY: test-prometheus-up test-prometheus-down test-prometheus-logs
 
 PYTHON ?= python3
 
@@ -66,3 +68,40 @@ test-db-down:
 
 test-db-migrate:
 	ALEMBIC_SQLALCHEMY_URL=postgresql+psycopg://test_user:test_password@localhost:5433/polytrader_test $(PYTHON) -m alembic upgrade head
+
+# Development Prometheus
+prometheus-up:
+	docker compose up -d prometheus
+	@echo "Waiting for Prometheus to be ready..."
+	@timeout 30 bash -c 'until curl -s http://localhost:9092/-/healthy > /dev/null; do sleep 1; done' || echo "Prometheus may not be ready yet"
+
+prometheus-down:
+	docker compose stop prometheus
+
+prometheus-logs:
+	docker compose logs -f prometheus
+
+# Test Prometheus
+test-prometheus-up:
+	docker compose -f docker-compose.test.yml up -d prometheus-test
+	@echo "Waiting for test Prometheus to be ready..."
+	@timeout 30 bash -c 'until curl -s http://localhost:9091/-/healthy > /dev/null; do sleep 1; done' || echo "Test Prometheus may not be ready yet"
+
+test-prometheus-down:
+	docker compose -f docker-compose.test.yml stop prometheus-test
+
+test-prometheus-logs:
+	docker compose -f docker-compose.test.yml logs -f prometheus-test
+
+# Grafana
+grafana-up:
+	docker compose up -d grafana
+	@echo "Waiting for Grafana to be ready..."
+	@timeout 30 bash -c 'until curl -s http://localhost:3000/api/health > /dev/null; do sleep 1; done' || echo "Grafana may not be ready yet"
+	@echo "Grafana is available at http://localhost:3000 (admin/admin)"
+
+grafana-down:
+	docker compose stop grafana
+
+grafana-logs:
+	docker compose logs -f grafana

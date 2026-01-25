@@ -382,8 +382,14 @@ All inter-component communication uses **typed models**, never raw dicts:
 ### Observability
 - All actions emit events (audit trail)
 - Structured logging with correlation IDs
-- Metrics for key operations
+- Metrics for key operations (Prometheus-compatible)
 - Replay support for debugging
+
+**Metrics Infrastructure:**
+- Dedicated metrics server on port 9100 (separate from control API on port 8000)
+- Prometheus metrics collector (default) for operator visibility via Grafana
+- Metrics exposed at `http://localhost:9100/metrics` in Prometheus format
+- All metrics follow `observability.mdc` §4 specifications (market data, strategy, risk, OMS, posttrade, safety)
 
 ---
 

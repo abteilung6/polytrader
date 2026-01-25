@@ -145,8 +145,21 @@ async def platform_start_task(
         # Start server in background task
         server_task = asyncio.create_task(server.serve())
 
+        # Start dedicated metrics server on separate port
+        from polytrader.config import MetricsConfig
+        from polytrader.obs.metrics_server import start_metrics_server
+
+        metrics_config = MetricsConfig()
+        start_metrics_server(port=metrics_config.metrics_port, config=metrics_config)
+        logger.info("Metrics server started on port {port}", port=metrics_config.metrics_port)
+
         logger.info("🚀 Platform started")
         logger.info("Control API: http://{host}:{port}/docs", host=api_host, port=api_port)
+        logger.info(
+            "Metrics server: http://{host}:{port}/metrics",
+            host="localhost",
+            port=metrics_config.metrics_port,
+        )
         logger.info("Press Ctrl+C to stop")
 
         try:

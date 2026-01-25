@@ -6,9 +6,11 @@ Per unit_testing_techinical.mdc §5: Fixtures with function scope by default.
 from unittest.mock import MagicMock
 
 import pytest
+from prometheus_client import CollectorRegistry
 
 from polytrader.events.bus import EventBus
 from polytrader.events.types import OrderIntentEvent
+from polytrader.obs.metrics import set_metrics_collector
 from polytrader.oms.core import OMSCore
 from polytrader.oms.idempotency import IdempotencyStore
 from polytrader.oms.store import InMemoryOrderStore
@@ -64,3 +66,28 @@ def fixed_clock():
     from tests.factories.clocks import create_fixed_clock
 
     return create_fixed_clock(base_monotonic=1000.0)
+
+
+# Metrics collector fixture (autouse to ensure isolated metrics for all tests)
+@pytest.fixture(autouse=True)
+def isolated_metrics_collector():
+    """Set up isolated metrics collector for each test.
+
+    This fixture ensures that each test gets an isolated PrometheusMetricsCollector
+    with its own registry, preventing metric name conflicts in parallel test execution.
+    Tests that need a specific collector can use set_metrics_collector() to override.
+
+    Yields:
+        None (cleanup happens automatically)
+    """
+    from polytrader.obs.metrics_prometheus import PrometheusMetricsCollector
+
+    # Create isolated collector with its own registry
+    isolated_registry = CollectorRegistry()
+    collector = PrometheusMetricsCollector(registry=isolated_registry)
+    set_metrics_collector(collector)
+
+    yield
+
+    # Cleanup: reset to None so next test gets a fresh collector
+    set_metrics_collector(None)

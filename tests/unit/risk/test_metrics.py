@@ -102,11 +102,14 @@ class TestMetricsCollectorSingleton:
 
         assert collector is mock_collector
 
-        # Reset to default
+        # Reset to default (now PrometheusMetricsCollector)
         set_metrics_collector(None)
         collector2 = get_metrics_collector()
         assert collector2 is not mock_collector
-        assert isinstance(collector2, MemoryMetricsCollector)
+        # Default is now PrometheusMetricsCollector
+        from polytrader.obs.metrics_prometheus import PrometheusMetricsCollector
+
+        assert isinstance(collector2, PrometheusMetricsCollector)
 
 
 class TestRiskMetrics:

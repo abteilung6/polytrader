@@ -28,10 +28,20 @@ from polytrader.events.types import (
     OrderIntentEvent,
     OrderSubmittedEvent,
 )
+from polytrader.obs.metrics import MemoryMetricsCollector, set_metrics_collector
 from polytrader.oms.core import OMSCore
 from polytrader.oms.idempotency import IdempotencyStore
 from polytrader.oms.models import OrderState
 from polytrader.oms.store import InMemoryOrderStore
+
+
+@pytest.fixture(autouse=True)
+def memory_metrics_collector():
+    """Use MemoryMetricsCollector for tests that need to query values directly."""
+    collector = MemoryMetricsCollector()
+    set_metrics_collector(collector)
+    yield collector
+    set_metrics_collector(None)
 
 
 @pytest.fixture
