@@ -273,8 +273,8 @@ class ParameterSchema:
     def to_openapi_schema(self) -> dict[str, Any]:
         """Convert ParameterSchema to OpenAPI 3.0 schema format.
 
-        Per Commit 15: OpenAPI schema is needed for API documentation
-        and client code generation.
+        Per Commit 21: Uses parameter_schema_to_openapi() function for conversion.
+        This method delegates to the standalone function for consistency and reusability.
 
         Returns:
             OpenAPI schema dictionary with properties, required fields, and descriptions
@@ -294,53 +294,6 @@ class ParameterSchema:
                 "required": ["buy_threshold"]  # Only if required=True
             }
         """
-        properties: dict[str, Any] = {}
-        required: list[str] = []
+        from polytrader.strategies.openapi import parameter_schema_to_openapi
 
-        for param_name, param_def in self.parameters.items():
-            # Map Python types to OpenAPI types
-            openapi_type: str
-            if param_def.type is int:
-                openapi_type = "integer"
-            elif param_def.type is float:
-                openapi_type = "number"
-            elif param_def.type is str:
-                openapi_type = "string"
-            elif param_def.type is bool:
-                openapi_type = "boolean"
-            else:
-                # Fallback for unknown types
-                openapi_type = "string"
-
-            prop: dict[str, Any] = {
-                "type": openapi_type,
-                "description": param_def.description,
-            }
-
-            # Add default if provided
-            if param_def.default is not None:
-                prop["default"] = param_def.default
-
-            # Add min/max for numeric types
-            if param_def.type is int or param_def.type is float:
-                if param_def.min_value is not None:
-                    prop["minimum"] = param_def.min_value
-                if param_def.max_value is not None:
-                    prop["maximum"] = param_def.max_value
-
-            properties[param_name] = prop
-
-            # Add to required list if parameter is required
-            if param_def.required:
-                required.append(param_name)
-
-        schema: dict[str, Any] = {
-            "type": "object",
-            "properties": properties,
-        }
-
-        # Only include "required" if there are required parameters
-        if required:
-            schema["required"] = required
-
-        return schema
+        return parameter_schema_to_openapi(self)
