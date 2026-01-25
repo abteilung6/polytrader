@@ -44,6 +44,10 @@ class SimpleThresholdStrategy(IStrategy):
         self.buy_threshold = buy_threshold
         self.min_history = min_history
 
+        # Track last signal sent per market/outcome to avoid spamming SignalEvents
+        # Key: (market_slug, outcome), Value: SignalEvent (or None if no signal sent)
+        self._last_signal_sent: dict[tuple[str, str], SignalEvent | None] = {}
+
     def evaluate(
         self,
         market_data: MarketDataEvent,
@@ -88,9 +92,16 @@ class SimpleThresholdStrategy(IStrategy):
                 return None
 
             mid_price = market_data.mid
+            market_key = (market_data.market_slug, market_data.outcome)
 
             # Generate signal if price is attractive (below threshold)
             if mid_price < self.buy_threshold:
+                # Check if we've already sent a signal for this market/outcome
+                # Skip if we've already sent one (deduplication)
+                last_signal = self._last_signal_sent.get(market_key)
+                if last_signal is not None:
+                    # Already sent a signal for this market/outcome, skip
+                    return None
                 # Calculate probabilities
                 # If price is low, UP is more likely to win
                 # Simple model: p_up = 1 - price, p_down = price
@@ -129,7 +140,15 @@ class SimpleThresholdStrategy(IStrategy):
                     correlation_id=market_data.correlation_id,
                 )
 
+                # Track that we've sent a signal for this market/outcome
+                self._last_signal_sent[market_key] = signal
+
                 return signal
+            else:
+                # Price is above threshold, clear any previous signal for this market/outcome
+                # This allows a new signal to be sent if price drops below threshold again
+                if market_key in self._last_signal_sent:
+                    self._last_signal_sent[market_key] = None
 
             return None  # No signal
         finally:

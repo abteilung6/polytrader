@@ -11,7 +11,7 @@ Tests POST endpoints for creating commands:
 Tests idempotency, version checks, and command envelope responses.
 """
 
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Iterator
 
 import pytest
 from fastapi.testclient import TestClient
@@ -22,7 +22,7 @@ from polytrader.api.dependencies import get_db_session
 
 
 @pytest.fixture
-def client(postgres_test_url: str, postgres_db: None) -> TestClient:
+def client(postgres_test_url: str, postgres_db: AsyncGenerator[None, None]) -> Iterator[TestClient]:
     """Create FastAPI test client with test database.
 
     Overrides get_db_session dependency to use test database instead of dev database.
