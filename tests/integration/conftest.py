@@ -8,10 +8,22 @@ import os
 import subprocess
 import time
 from collections.abc import AsyncGenerator
+from typing import TYPE_CHECKING
 
 import psycopg
 import pytest
 from psycopg import AsyncConnection
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from unittest.mock import MagicMock
+
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from polytrader.adapters import IMarketDataAdapter
+    from polytrader.events import EventBus
+    from polytrader.observer import IObserver
+    from polytrader.store import IMarketDataStore
 
 # These values must match docker-compose.test.yml environment variables.
 # If you change these, update docker-compose.test.yml accordingly.
@@ -340,3 +352,145 @@ async def postgres_db(
             await postgres_connection.rollback()
         except Exception:
             pass
+
+
+# Shared fixtures for orchestrator and strategy tests
+# These fixtures are used across multiple test files to avoid duplication
+
+
+@pytest.fixture
+async def db_session(
+    postgres_test_url: str, postgres_db: None
+) -> AsyncGenerator["AsyncSession", None]:
+    """Provide SQLAlchemy session for tests.
+
+    This fixture creates an async SQLAlchemy session and automatically
+    truncates the strategy_instances table before and after each test.
+
+    Args:
+        postgres_test_url: PostgreSQL connection URL from postgres_test_url fixture
+        postgres_db: Database migration fixture (ensures schema is up to date)
+
+    Yields:
+        AsyncSession: SQLAlchemy async session
+
+    Note:
+        This fixture is shared across multiple orchestrator and strategy tests.
+        It automatically cleans up strategy_instances table for test isolation.
+    """
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+    sqlalchemy_url = postgres_test_url
+    if sqlalchemy_url.startswith("postgresql://"):
+        sqlalchemy_url = sqlalchemy_url.replace("postgresql://", "postgresql+psycopg://", 1)
+
+    engine = create_async_engine(sqlalchemy_url, echo=False)
+    Session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    async with Session() as session:
+        # Clean up strategies table
+        from sqlalchemy import text
+
+        await session.execute(text("TRUNCATE TABLE strategy_instances CASCADE"))
+        await session.commit()
+
+        yield session
+
+        # Cleanup
+        await session.execute(text("TRUNCATE TABLE strategy_instances CASCADE"))
+        await session.commit()
+
+    await engine.dispose()
+
+
+@pytest.fixture
+def bus() -> "EventBus":
+    """Create event bus for tests.
+
+    Returns:
+        EventBus: Fresh event bus instance for each test
+    """
+    from polytrader.events import EventBus
+
+    return EventBus()
+
+
+@pytest.fixture
+def store() -> "IMarketDataStore":
+    """Create market data store for tests.
+
+    Returns:
+        IMarketDataStore: Fresh in-memory market data store for each test
+    """
+    from polytrader.store import MemoryMarketDataStore
+
+    return MemoryMarketDataStore()
+
+
+@pytest.fixture
+def discovery_service() -> "MagicMock":
+    """Create mock discovery service for tests.
+
+    Returns:
+        MagicMock: Mock discovery service with get_current_market and get_next_market methods
+
+    Note:
+        Default market is "btc-updown-15m". Tests can override this by
+        modifying the mock's return_value.
+    """
+    from unittest.mock import AsyncMock, MagicMock
+
+    discovery = MagicMock()
+    discovery.get_current_market = AsyncMock(return_value="btc-updown-15m")
+    discovery.get_next_market = AsyncMock(return_value=None)
+    return discovery
+
+
+@pytest.fixture
+def adapter_factory() -> "Callable[[str], MagicMock]":
+    """Create mock adapter factory for tests.
+
+    Returns:
+        Callable[[str], MagicMock]: Factory function that creates mock adapters
+
+    Note:
+        Default market_slug is "btc-updown-15m". The factory updates
+        the adapter's market_slug based on the provided slug parameter.
+    """
+    from typing import cast
+    from unittest.mock import AsyncMock, MagicMock
+
+    adapter = MagicMock()
+    adapter.market_slug = "btc-updown-15m"
+    adapter.ticks = AsyncMock(return_value=iter([]))
+    adapter.stop = MagicMock()
+
+    def factory(slug: str) -> MagicMock:
+        adapter.market_slug = slug
+        return adapter
+
+    return cast("Callable[[str], MagicMock]", factory)
+
+
+@pytest.fixture
+def observer_factory() -> "Callable[[IMarketDataAdapter], IObserver]":
+    """Create mock observer factory for tests.
+
+    Returns:
+        Callable[[IMarketDataAdapter], IObserver]: Factory function that creates mock observers
+
+    Note:
+        The factory ignores the adapter parameter and returns a mock observer
+        with run() and stop() methods.
+    """
+    from typing import cast
+    from unittest.mock import AsyncMock, MagicMock
+
+    observer = MagicMock()
+    observer.run = AsyncMock()
+    observer.stop = MagicMock()
+
+    def factory(adapter: "IMarketDataAdapter") -> "IObserver":  # noqa: ARG001
+        return cast("IObserver", observer)
+
+    return cast("Callable[[IMarketDataAdapter], IObserver]", factory)
