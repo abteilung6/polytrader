@@ -110,7 +110,6 @@ async def initial_strategies(db_session: AsyncSession) -> list[str]:
             strategy_id="strategy_1",
             name="Strategy 1",
             config={
-                "type": "simple_threshold",
                 "market_pattern": "btc-updown-15m",
                 "buy_threshold": 0.3,
             },
@@ -124,7 +123,6 @@ async def initial_strategies(db_session: AsyncSession) -> list[str]:
             strategy_id="strategy_2",
             name="Strategy 2",
             config={
-                "type": "simple_threshold",
                 "market_pattern": "btc-updown-15m",
                 "buy_threshold": 0.35,
             },
@@ -177,7 +175,6 @@ async def test_add_strategy_creates_runner(
             strategy_id="strategy_new",
             name="New Strategy",
             config={
-                "type": "simple_threshold",
                 "market_pattern": "btc-updown-15m",
                 "buy_threshold": 0.3,
             },
@@ -235,7 +232,6 @@ async def test_add_strategy_uses_existing_supervisor(
             strategy_id="strategy_new",
             name="New Strategy",
             config={
-                "type": "simple_threshold",
                 "market_pattern": "btc-updown-15m",  # Same pattern
                 "buy_threshold": 0.3,
             },
@@ -292,7 +288,6 @@ async def test_add_strategy_creates_new_supervisor_for_different_pattern(
             strategy_id="strategy_new",
             name="New Strategy",
             config={
-                "type": "simple_threshold",
                 "market_pattern": "eth-updown-15m",  # Different pattern
                 "buy_threshold": 0.3,
             },
@@ -416,7 +411,6 @@ async def test_remove_last_strategy_destroys_supervisor(
         strategy_id="strategy_solo",
         name="Solo Strategy",
         config={
-            "type": "simple_threshold",
             "market_pattern": "btc-updown-15m",
             "buy_threshold": 0.3,
         },

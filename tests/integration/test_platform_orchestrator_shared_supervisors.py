@@ -114,7 +114,6 @@ async def test_orchestrator_groups_strategies_by_pattern(
             strategy_id="strategy_pattern_a_1",
             name="Strategy Pattern A 1",
             config={
-                "type": "simple_threshold",
                 "market_pattern": "pattern-a",
                 "buy_threshold": 0.3,
             },
@@ -128,7 +127,6 @@ async def test_orchestrator_groups_strategies_by_pattern(
             strategy_id="strategy_pattern_a_2",
             name="Strategy Pattern A 2",
             config={
-                "type": "simple_threshold",
                 "market_pattern": "pattern-a",
                 "buy_threshold": 0.35,
             },
@@ -142,7 +140,6 @@ async def test_orchestrator_groups_strategies_by_pattern(
             strategy_id="strategy_pattern_b_1",
             name="Strategy Pattern B 1",
             config={
-                "type": "simple_threshold",
                 "market_pattern": "pattern-b",
                 "buy_threshold": 0.3,
             },
@@ -209,7 +206,6 @@ async def test_orchestrator_creates_one_supervisor_per_pattern(
             strategy_id=f"strategy_{i}",
             name=f"Strategy {i}",
             config={
-                "type": "simple_threshold",
                 "market_pattern": "btc-updown-15m",
                 "buy_threshold": 0.3,
             },
@@ -269,7 +265,6 @@ async def test_orchestrator_passes_shared_supervisor_to_runners(
             strategy_id=f"strategy_{i}",
             name=f"Strategy {i}",
             config={
-                "type": "simple_threshold",
                 "market_pattern": "test-pattern",
                 "buy_threshold": 0.3,
             },
@@ -329,7 +324,6 @@ async def test_orchestrator_stop_releases_supervisors(
             strategy_id="strategy_1",
             name="Strategy 1",
             config={
-                "type": "simple_threshold",
                 "market_pattern": "test-pattern",
                 "buy_threshold": 0.3,
             },
@@ -386,7 +380,6 @@ async def test_multiple_strategies_same_pattern_share_supervisor(
             strategy_id=f"strategy_{i}",
             name=f"Strategy {i}",
             config={
-                "type": "simple_threshold",
                 "market_pattern": "shared-pattern",
                 "buy_threshold": 0.3,
             },
@@ -446,7 +439,6 @@ async def test_strategies_different_patterns_separate_supervisors(
             strategy_id="strategy_pattern_1",
             name="Strategy Pattern 1",
             config={
-                "type": "simple_threshold",
                 "market_pattern": "pattern-1",
                 "buy_threshold": 0.3,
             },
@@ -460,7 +452,6 @@ async def test_strategies_different_patterns_separate_supervisors(
             strategy_id="strategy_pattern_2",
             name="Strategy Pattern 2",
             config={
-                "type": "simple_threshold",
                 "market_pattern": "pattern-2",
                 "buy_threshold": 0.3,
             },
@@ -474,7 +465,6 @@ async def test_strategies_different_patterns_separate_supervisors(
             strategy_id="strategy_pattern_3",
             name="Strategy Pattern 3",
             config={
-                "type": "simple_threshold",
                 "market_pattern": "pattern-3",
                 "buy_threshold": 0.3,
             },

@@ -119,7 +119,6 @@ async def test_update_strategy_pattern_migrates_runner(
         strategy_id="strategy_migrate",
         name="Migrating Strategy",
         config={
-            "type": "simple_threshold",
             "market_pattern": "btc-updown-15m",
             "buy_threshold": 0.3,
         },
@@ -186,7 +185,6 @@ async def test_update_strategy_pattern_releases_old_supervisor(
         strategy_id="strategy_1",
         name="Strategy 1",
         config={
-            "type": "simple_threshold",
             "market_pattern": "btc-updown-15m",
             "buy_threshold": 0.3,
         },
@@ -200,7 +198,6 @@ async def test_update_strategy_pattern_releases_old_supervisor(
         strategy_id="strategy_2",
         name="Strategy 2",
         config={
-            "type": "simple_threshold",
             "market_pattern": "btc-updown-15m",
             "buy_threshold": 0.35,
         },
@@ -263,7 +260,6 @@ async def test_update_strategy_pattern_joins_existing_supervisor(
         strategy_id="strategy_1",
         name="Strategy 1",
         config={
-            "type": "simple_threshold",
             "market_pattern": "btc-updown-15m",
             "buy_threshold": 0.3,
         },
@@ -277,7 +273,6 @@ async def test_update_strategy_pattern_joins_existing_supervisor(
         strategy_id="strategy_2",
         name="Strategy 2",
         config={
-            "type": "simple_threshold",
             "market_pattern": "eth-updown-15m",
             "buy_threshold": 0.35,
         },
@@ -337,7 +332,6 @@ async def test_update_strategy_no_pattern_change_no_migration(
         strategy_id="strategy_no_change",
         name="No Change Strategy",
         config={
-            "type": "simple_threshold",
             "market_pattern": "btc-updown-15m",
             "buy_threshold": 0.3,
         },

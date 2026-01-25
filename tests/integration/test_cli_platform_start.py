@@ -56,7 +56,7 @@ async def seeded_strategies(db_session: AsyncSession) -> list[StrategyRecord]:
         StrategyRecord(
             strategy_id="test_strategy_1",
             name="Test Strategy 1",
-            config={"type": "simple_threshold", "buy_threshold": 0.3, "min_history": 30},
+            config={"buy_threshold": 0.3, "min_history": 30},
             template_type_id="simple_threshold",
             template_version="1.0.0",
             config_hash="hash_1",
@@ -66,7 +66,7 @@ async def seeded_strategies(db_session: AsyncSession) -> list[StrategyRecord]:
         StrategyRecord(
             strategy_id="test_strategy_2",
             name="Test Strategy 2",
-            config={"type": "simple_threshold", "buy_threshold": 0.35, "min_history": 30},
+            config={"buy_threshold": 0.35, "min_history": 30},
             template_type_id="simple_threshold",
             template_version="1.0.0",
             config_hash="hash_2",

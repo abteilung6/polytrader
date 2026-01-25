@@ -100,7 +100,7 @@ async def test_strategies(db_session: AsyncSession) -> list[str]:
         StrategyRecord(
             strategy_id="strategy_1",
             name="Strategy 1",
-            config={"type": "simple_threshold", "buy_threshold": 0.3, "min_history": 30},
+            config={"buy_threshold": 0.3, "min_history": 30},
             template_type_id="simple_threshold",
             template_version="1.0.0",
             config_hash="hash_1",
@@ -110,7 +110,7 @@ async def test_strategies(db_session: AsyncSession) -> list[str]:
         StrategyRecord(
             strategy_id="strategy_2",
             name="Strategy 2",
-            config={"type": "simple_threshold", "buy_threshold": 0.35, "min_history": 40},
+            config={"buy_threshold": 0.35, "min_history": 40},
             template_type_id="simple_threshold",
             template_version="1.0.0",
             config_hash="hash_2",
@@ -120,7 +120,7 @@ async def test_strategies(db_session: AsyncSession) -> list[str]:
         StrategyRecord(
             strategy_id="strategy_disabled",
             name="Disabled Strategy",
-            config={"type": "simple_threshold", "buy_threshold": 0.3, "min_history": 30},
+            config={"buy_threshold": 0.3, "min_history": 30},
             template_type_id="simple_threshold",
             template_version="1.0.0",
             config_hash="hash_disabled",
