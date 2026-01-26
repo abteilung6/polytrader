@@ -223,6 +223,85 @@ class LiveStrategiesResponse(BaseModel):
 
 
 # ============================================================================
+# Strategy Timeline & Performance Models
+# ============================================================================
+
+
+class MarketDataPoint(BaseModel):
+    """Market data point for timeline visualization."""
+
+    ts_wall: datetime = Field(description="Wall-clock timestamp (UTC)")
+    ts_mono: float = Field(description="Monotonic timestamp for ordering")
+    best_bid: float = Field(description="Best bid price")
+    best_ask: float = Field(description="Best ask price")
+    mid: float = Field(description="Mid price")
+    spread: float = Field(description="Bid-ask spread")
+
+
+class SignalPoint(BaseModel):
+    """Signal event point for timeline visualization."""
+
+    ts_wall: datetime = Field(description="Wall-clock timestamp (UTC)")
+    ts_mono: float = Field(description="Monotonic timestamp for ordering")
+    market_slug: str = Field(description="Market identifier")
+    outcome: Literal["UP", "DOWN"] = Field(description="Market outcome")
+    p_up: float = Field(description="Probability UP")
+    p_down: float = Field(description="Probability DOWN")
+    edge: float = Field(description="Signal edge")
+    confidence: float = Field(description="Signal confidence")
+    model_id: str = Field(description="Strategy/model identifier")
+    model_version: str = Field(description="Model version")
+    rationale: str = Field(description="Signal rationale")
+    snapshot_hash: str | None = Field(default=None, description="Snapshot hash (optional)")
+    snapshot_version: str | None = Field(default=None, description="Snapshot version (optional)")
+
+
+class StrategyTimelineResponse(BaseModel):
+    """Combined market data + signal timeline for a strategy instance."""
+
+    strategy_id: str = Field(description="Strategy identifier")
+    market_slug: str = Field(description="Market identifier")
+    outcome: Literal["UP", "DOWN"] = Field(description="Market outcome")
+    from_ts: datetime | None = Field(default=None, description="Start time (UTC)")
+    to_ts: datetime | None = Field(default=None, description="End time (UTC)")
+    ticks: list[MarketDataPoint] = Field(description="Market data points")
+    signals: list[SignalPoint] = Field(description="Signal events")
+
+
+class StrategyPerformanceSummary(BaseModel):
+    """Performance summary for a strategy instance."""
+
+    strategy_id: str = Field(description="Strategy identifier")
+    name: str | None = Field(default=None, description="Strategy name (if available)")
+    description: str | None = Field(default=None, description="Strategy description (if available)")
+    total_trades: int = Field(description="Total number of closed trades")
+    win_rate_pct: float = Field(description="Win rate percentage")
+    total_realized_pnl: float = Field(description="Total realized PnL")
+    unrealized_pnl: float = Field(description="Unrealized PnL")
+    total_pnl: float = Field(description="Total PnL (realized + unrealized)")
+    average_pnl: float = Field(description="Average PnL per trade")
+    average_win: float = Field(description="Average PnL of winning trades")
+    average_loss: float = Field(description="Average PnL of losing trades")
+    best_trade_pnl: float | None = Field(
+        default=None, description="Best trade PnL (if any)"
+    )
+    worst_trade_pnl: float | None = Field(
+        default=None, description="Worst trade PnL (if any)"
+    )
+    drawdown: float = Field(description="Current drawdown")
+    peak_equity: float = Field(description="Peak equity")
+    current_equity: float = Field(description="Current equity")
+
+
+class StrategyPerformanceLeaderboardResponse(BaseModel):
+    """List of strategies sorted by performance."""
+
+    strategies: list[StrategyPerformanceSummary] = Field(
+        description="Strategy performance entries"
+    )
+
+
+# ============================================================================
 # Command Models
 # ============================================================================
 

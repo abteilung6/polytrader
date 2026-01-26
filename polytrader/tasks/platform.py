@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from polytrader.adapters import create_adapter_factory
 from polytrader.api.app import create_app
+from polytrader.api.runtime import RuntimeState, set_runtime_state
 from polytrader.config import PolymarketSecrets, get_database_url
 from polytrader.events import SYSTEM_LIFECYCLE, EventBus
 from polytrader.events.store import MemoryEventStore
@@ -89,6 +90,15 @@ async def platform_start_task(
         bus=bus,
         store=oms_store_paper,
         starting_equity=starting_equity,
+    )
+
+    # Register runtime state for API access (read-only)
+    set_runtime_state(
+        RuntimeState(
+            market_data_store=store,
+            event_store=event_store,
+            position_manager=position_manager,
+        )
     )
 
     # Create execution control for control plane

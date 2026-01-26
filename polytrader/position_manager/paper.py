@@ -608,6 +608,63 @@ class PaperPositionManager(IPositionManager):
         """
         return self._starting_equity
 
+    def _calculate_strategy_unrealized_pnl(self, strategy_id: str) -> float:
+        """Calculate unrealized P&L for a specific strategy.
+
+        Uses current market prices from the latest MarketDataEvent updates.
+
+        Args:
+            strategy_id: Strategy identifier
+
+        Returns:
+            Unrealized P&L for the strategy
+        """
+        unrealized = 0.0
+        for key, position in self._positions.items():
+            if self._position_strategy.get(key) != strategy_id:
+                continue
+            if key in self._latest_prices:
+                current_price = self._latest_prices[key]
+            else:
+                current_price = position.entry_price
+            unrealized += (current_price - position.entry_price) * position.size
+        return unrealized
+
+    def get_strategy_performance_summary(
+        self, strategy_id: str
+    ) -> dict[str, float | int | None]:
+        """Get performance summary for a specific strategy.
+
+        Args:
+            strategy_id: Strategy identifier
+
+        Returns:
+            Performance summary dict with realized/unrealized metrics
+        """
+        metrics = self._per_strategy_tracker.get_metrics(strategy_id)
+        unrealized = self._calculate_strategy_unrealized_pnl(strategy_id)
+        summary = metrics.get_summary(
+            starting_equity=self._starting_equity,
+            unrealized_pnl=unrealized,
+        )
+        total_realized = float(summary.get("total_realized_pnl") or 0.0)
+        total_unrealized = float(summary.get("unrealized_pnl") or 0.0)
+        summary["total_pnl"] = total_realized + total_unrealized
+        return summary
+
+    def list_strategy_performance_summaries(
+        self,
+    ) -> list[tuple[str, dict[str, float | int | None]]]:
+        """List performance summaries for all tracked strategies.
+
+        Returns:
+            List of (strategy_id, summary dict) tuples
+        """
+        results: list[tuple[str, dict[str, float | int | None]]] = []
+        for strategy_id in self._per_strategy_tracker.list_strategies():
+            results.append((strategy_id, self.get_strategy_performance_summary(strategy_id)))
+        return results
+
     def calculate_unrealized_pnl(
         self, current_prices: dict[tuple[str, Outcome], float] | None = None
     ) -> float:

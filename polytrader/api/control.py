@@ -4,6 +4,9 @@ Per Platform_Proposal.md: Elite-style API design with separation of
 state endpoints (/state/*) and command endpoints (/commands/*).
 """
 
+from datetime import datetime
+from typing import Protocol, runtime_checkable
+
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from polytrader.api.dependencies import (
@@ -27,18 +30,25 @@ from polytrader.api.models import (
     HealthGateStatus,
     HealthResponse,
     LiveStrategiesResponse,
+    MarketDataPoint,
     RunIdentityResponse,
     StrategiesResponse,
+    StrategyPerformanceLeaderboardResponse,
+    StrategyPerformanceSummary,
     StrategyResponse,
+    StrategyTimelineResponse,
     StrategyTypeResponse,
     StrategyTypesResponse,
+    SignalPoint,
     UpdateStrategyRequest,
     ValidateStrategyConfigRequest,
     ValidateStrategyConfigResponse,
     VersionConflictResponse,
 )
+from polytrader.api.runtime import get_runtime_state
 from polytrader.db.models import ControlCommandRecord
 from polytrader.db.models import StrategyRecord as StrategyRecordModel
+from polytrader.events.types import SignalEvent
 from polytrader.platform.control import (
     ControlCommandRepository,
     ExecutionControlRepository,
@@ -47,8 +57,28 @@ from polytrader.platform.control import (
 from polytrader.platform.registry import StrategyRegistry
 from polytrader.strategies.registry import StrategyRegistry as InMemoryStrategyRegistry
 from polytrader.strategies.registry import StrategyTemplate
+from polytrader.types import Outcome
 
 router = APIRouter(prefix="/api/v1", tags=["control"])
+
+
+@runtime_checkable
+class StrategyPerformanceProvider(Protocol):
+    """Protocol for per-strategy performance summaries."""
+
+    def list_strategy_performance_summaries(
+        self,
+    ) -> list[tuple[str, dict[str, float | int | None]]]:
+        """List performance summaries for all tracked strategies."""
+        ...
+
+
+def _parse_ts_wall(ts_wall: str) -> datetime | None:
+    """Parse ISO timestamp string to datetime (UTC if available)."""
+    try:
+        return datetime.fromisoformat(ts_wall.replace("Z", "+00:00"))
+    except ValueError:
+        return None
 
 
 # ============================================================================
@@ -171,6 +201,171 @@ async def get_strategies(
             for s in strategies
         ]
     )
+
+
+@router.get(
+    "/state/strategies/{strategy_id}/timeline",
+    response_model=StrategyTimelineResponse,
+)
+async def get_strategy_timeline(
+    strategy_id: str,
+    market_slug: str,
+    outcome: Outcome,
+    from_ts: datetime | None = None,
+    to_ts: datetime | None = None,
+    limit: int = 1000,
+    signal_limit: int = 500,
+) -> StrategyTimelineResponse:
+    """Get market data + signal timeline for a strategy instance.
+
+    Uses runtime in-process stores (paper mode) to support live UI graphs.
+    """
+    runtime_state = get_runtime_state()
+    if runtime_state is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=ErrorResponse(
+                error="Runtime state not initialized",
+                detail="Platform runtime state is required for timeline data.",
+            ).model_dump(),
+        )
+
+    # Market data points
+    ticks = runtime_state.market_data_store.history(market_slug, outcome)
+    filtered_ticks: list[MarketDataPoint] = []
+    for tick in ticks:
+        ts_wall = _parse_ts_wall(tick.ts_wall)
+        if ts_wall is None:
+            continue
+        if from_ts and ts_wall < from_ts:
+            continue
+        if to_ts and ts_wall > to_ts:
+            continue
+        filtered_ticks.append(
+            MarketDataPoint(
+                ts_wall=ts_wall,
+                ts_mono=tick.ts_mono,
+                best_bid=tick.best_bid,
+                best_ask=tick.best_ask,
+                mid=tick.mid,
+                spread=tick.spread,
+            )
+        )
+    filtered_ticks.sort(key=lambda item: (item.ts_wall, item.ts_mono))
+    if limit > 0:
+        filtered_ticks = filtered_ticks[-limit:]
+
+    # Signal points
+    filtered_signals: list[SignalPoint] = []
+    for event in runtime_state.event_store.read_stream(event_type=SignalEvent):
+        if event.model_id != strategy_id:
+            continue
+        if event.market_slug != market_slug or event.outcome != outcome:
+            continue
+        ts_wall = _parse_ts_wall(event.ts_wall)
+        if ts_wall is None:
+            continue
+        if from_ts and ts_wall < from_ts:
+            continue
+        if to_ts and ts_wall > to_ts:
+            continue
+        filtered_signals.append(
+            SignalPoint(
+                ts_wall=ts_wall,
+                ts_mono=event.ts_mono,
+                market_slug=event.market_slug,
+                outcome=event.outcome,
+                p_up=event.p_up,
+                p_down=event.p_down,
+                edge=event.edge,
+                confidence=event.confidence,
+                model_id=event.model_id,
+                model_version=event.model_version,
+                rationale=event.rationale,
+                snapshot_hash=event.snapshot_hash,
+                snapshot_version=event.snapshot_version,
+            )
+        )
+    filtered_signals.sort(key=lambda item: (item.ts_wall, item.ts_mono))
+    if signal_limit > 0:
+        filtered_signals = filtered_signals[-signal_limit:]
+
+    return StrategyTimelineResponse(
+        strategy_id=strategy_id,
+        market_slug=market_slug,
+        outcome=outcome,
+        from_ts=from_ts,
+        to_ts=to_ts,
+        ticks=filtered_ticks,
+        signals=filtered_signals,
+    )
+
+
+@router.get(
+    "/state/strategies/performance/top",
+    response_model=StrategyPerformanceLeaderboardResponse,
+)
+async def get_top_strategy_performance(
+    limit: int = 10,
+    registry: StrategyRegistry = Depends(get_strategy_registry),  # noqa: B008
+) -> StrategyPerformanceLeaderboardResponse:
+    """Get best performing strategies (paper mode runtime)."""
+    runtime_state = get_runtime_state()
+    if runtime_state is None or runtime_state.position_manager is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=ErrorResponse(
+                error="Runtime state not initialized",
+                detail="Position manager runtime is required for performance data.",
+            ).model_dump(),
+        )
+
+    position_manager = runtime_state.position_manager
+    if not isinstance(position_manager, StrategyPerformanceProvider):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=ErrorResponse(
+                error="Performance provider unavailable",
+                detail="Position manager does not expose per-strategy performance.",
+            ).model_dump(),
+        )
+
+    summaries = position_manager.list_strategy_performance_summaries()
+    if not summaries:
+        return StrategyPerformanceLeaderboardResponse(strategies=[])
+
+    strategy_records = await registry.list_strategies()
+    strategy_map = {record.strategy_id: record for record in strategy_records}
+
+    entries: list[StrategyPerformanceSummary] = []
+    for strategy_id, summary in summaries:
+        record = strategy_map.get(strategy_id)
+        entries.append(
+            StrategyPerformanceSummary(
+                strategy_id=strategy_id,
+                name=record.name if record else None,
+                description=record.description if record else None,
+                total_trades=int(summary.get("total_trades") or 0),
+                win_rate_pct=float(summary.get("win_rate_pct") or 0.0),
+                total_realized_pnl=float(summary.get("total_realized_pnl") or 0.0),
+                unrealized_pnl=float(summary.get("unrealized_pnl") or 0.0),
+                total_pnl=float(summary.get("total_pnl") or 0.0),
+                average_pnl=float(summary.get("average_pnl") or 0.0),
+                average_win=float(summary.get("average_win") or 0.0),
+                average_loss=float(summary.get("average_loss") or 0.0),
+                best_trade_pnl=summary.get("best_trade_pnl"),
+                worst_trade_pnl=summary.get("worst_trade_pnl"),
+                drawdown=float(summary.get("drawdown") or 0.0),
+                peak_equity=float(summary.get("peak_equity") or 0.0),
+                current_equity=float(summary.get("current_equity") or 0.0),
+            )
+        )
+
+    entries.sort(key=lambda entry: entry.total_pnl, reverse=True)
+    if limit > 0:
+        entries = entries[:limit]
+
+    return StrategyPerformanceLeaderboardResponse(strategies=entries)
 
 
 @router.get("/state/strategies/templates", response_model=StrategyTypesResponse)
