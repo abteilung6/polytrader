@@ -244,3 +244,150 @@ def test_get_latest_tick_invalid_outcome(client: TestClient) -> None:
     detail = data["detail"]
     assert detail["error"] == "Invalid outcome"
     assert detail["code"] == "INVALID_OUTCOME"
+
+
+@pytest.mark.integration
+def test_get_historical_ticks_empty(client: TestClient) -> None:
+    """Test GET /api/v1/market/ticks/history returns empty list when no data."""
+    response = client.get(
+        "/api/v1/market/ticks/history",
+        params={"market_slug": "nonexistent-market", "outcome": "UP"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert "ticks" in data
+    assert "count" in data
+    assert data["ticks"] == []
+    assert data["count"] == 0
+
+
+@pytest.mark.integration
+def test_get_historical_ticks_success(client: TestClient, sample_tick: tuple[str, str]) -> None:
+    """Test GET /api/v1/market/ticks/history returns 200 with actual tick data."""
+    market_slug, outcome = sample_tick
+
+    response = client.get(
+        "/api/v1/market/ticks/history",
+        params={"market_slug": market_slug, "outcome": outcome},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+
+    # Verify response structure
+    assert "ticks" in data
+    assert "count" in data
+    assert len(data["ticks"]) == 1
+    assert data["count"] == 1
+
+    # Verify tick structure
+    tick = data["ticks"][0]
+    assert "tick_id" in tick
+    assert "ts_wall" in tick
+    assert tick["market_slug"] == market_slug
+    assert tick["outcome"] == outcome
+
+    # Verify Pydantic model structure
+    from polytrader.api.models import HistoricalTicksResponse
+
+    HistoricalTicksResponse(**data)  # Should not raise
+
+
+@pytest.mark.integration
+def test_get_historical_ticks_with_time_range(
+    client: TestClient, sample_tick: tuple[str, str], postgres_test_url: str
+) -> None:
+    """Test GET /api/v1/market/ticks/history with time range filters."""
+    import asyncio
+
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+    market_slug, outcome = sample_tick
+
+    # Add another tick outside the time range
+    async def add_tick_outside_range() -> None:
+        from datetime import UTC, datetime
+
+        sqlalchemy_url = postgres_test_url
+        if sqlalchemy_url.startswith("postgresql://"):
+            sqlalchemy_url = sqlalchemy_url.replace("postgresql://", "postgresql+psycopg://", 1)
+
+        engine = create_async_engine(sqlalchemy_url, echo=False)
+        Session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+        async with Session() as session:
+            repo = MarketTickRepository(session)
+            # Create a tick outside the time range (earlier)
+            earlier_tick_id = uuid.uuid4()
+            earlier_ts_wall = datetime(2025, 1, 27, 11, 0, 0, tzinfo=UTC)
+
+            await repo.create_tick(
+                tick_id=earlier_tick_id,
+                ts_wall=earlier_ts_wall,
+                ts_mono=1234567800.123456,
+                market_slug=market_slug,
+                outcome=outcome,
+                best_bid=Decimal("0.44000000"),
+                best_ask=Decimal("0.45000000"),
+                mid=Decimal("0.44500000"),
+                spread=Decimal("0.01000000"),
+                spread_bps=Decimal("100.00"),
+                event_id=None,
+                run_id="test-run-123",
+            )
+
+            await session.commit()
+
+    # Run async function synchronously
+    asyncio.run(add_tick_outside_range())
+
+    # Query with time range that excludes the earlier tick
+    from datetime import UTC, datetime
+
+    from_ts = datetime(2025, 1, 27, 11, 30, 0, tzinfo=UTC)
+    to_ts = datetime(2025, 1, 27, 13, 0, 0, tzinfo=UTC)
+
+    response = client.get(
+        "/api/v1/market/ticks/history",
+        params={
+            "market_slug": market_slug,
+            "outcome": outcome,
+            "from_ts": from_ts.isoformat(),
+            "to_ts": to_ts.isoformat(),
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+
+    # Should only return the tick within the time range
+    assert len(data["ticks"]) == 1
+    assert data["count"] == 1
+    assert Decimal(data["ticks"][0]["best_bid"]) == Decimal("0.45000000")
+
+
+@pytest.mark.integration
+def test_get_historical_ticks_invalid_time_range(client: TestClient) -> None:
+    """Test that from_ts > to_ts returns 400."""
+    from datetime import UTC, datetime
+
+    from_ts = datetime(2025, 1, 27, 12, 0, 0, tzinfo=UTC)
+    to_ts = datetime(2025, 1, 27, 11, 0, 0, tzinfo=UTC)  # Before from_ts
+
+    response = client.get(
+        "/api/v1/market/ticks/history",
+        params={
+            "market_slug": "btc-updown-15m-1767900600",
+            "outcome": "UP",
+            "from_ts": from_ts.isoformat(),
+            "to_ts": to_ts.isoformat(),
+        },
+    )
+
+    assert response.status_code == 400
+    data = response.json()
+    assert "detail" in data
+    detail = data["detail"]
+    assert detail["error"] == "Invalid time range"
+    assert detail["code"] == "INVALID_TIME_RANGE"
