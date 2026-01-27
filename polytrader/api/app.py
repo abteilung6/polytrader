@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from polytrader.api.control import router as control_router
+from polytrader.api.market import router as market_router
 
 
 def create_app() -> FastAPI:
@@ -45,5 +46,6 @@ def create_app() -> FastAPI:
 
     # Register routers
     app.include_router(control_router)
+    app.include_router(market_router)
 
     return app

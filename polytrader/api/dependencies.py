@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from polytrader.config import get_database_url
+from polytrader.db.repository import MarketTickRepository
 from polytrader.platform.control import (
     ControlCommandRepository,
     ExecutionControlRepository,
@@ -158,3 +159,17 @@ def get_in_memory_strategy_registry() -> InMemoryStrategyRegistry:
         _in_memory_registry = InMemoryStrategyRegistry()
         register_all_strategies(_in_memory_registry)
     return _in_memory_registry
+
+
+def get_market_tick_repository(
+    session: AsyncSession = Depends(get_db_session),  # noqa: B008
+) -> MarketTickRepository:
+    """Provide MarketTickRepository.
+
+    Args:
+        session: Database session (injected via FastAPI)
+
+    Returns:
+        MarketTickRepository instance
+    """
+    return MarketTickRepository(session)
