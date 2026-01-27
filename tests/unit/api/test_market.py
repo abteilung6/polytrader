@@ -73,7 +73,7 @@ class TestGetLatestTickEndpoint:
         data = response.json()
         assert "detail" in data
         detail = data["detail"]
-        assert detail["error"] == "Invalid outcome"
+        assert detail["error"] == "Invalid parameter"
         assert detail["code"] == "INVALID_OUTCOME"
 
         # Verify repository was not called
@@ -264,7 +264,7 @@ class TestGetHistoricalTicksEndpoint:
         data = response.json()
         assert "detail" in data
         detail = data["detail"]
-        assert detail["error"] == "Invalid outcome"
+        assert detail["error"] == "Invalid parameter"
         assert detail["code"] == "INVALID_OUTCOME"
 
         # Verify repository was not called

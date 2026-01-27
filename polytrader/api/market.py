@@ -6,7 +6,7 @@ Provides endpoints for querying market data (latest ticks, historical ticks, mar
 
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from polytrader.api.dependencies import get_market_tick_repository
 from polytrader.api.models import (
@@ -18,7 +18,9 @@ from polytrader.api.models import (
 )
 from polytrader.db.models import MarketTickRecord
 from polytrader.db.repository import MarketTickRepository
+from polytrader.logging_config import logger
 from polytrader.market_discovery.patterns import MarketPattern
+from polytrader.obs.logging import bind_correlation_context
 
 
 def _convert_record_to_response(record: MarketTickRecord) -> MarketTickResponse:
@@ -100,6 +102,7 @@ router = APIRouter(prefix="/api/v1/market", tags=["market"])
     },
 )
 async def get_latest_tick(
+    request: Request,
     market_slug: str = Query(
         ..., description="Market identifier (e.g., 'btc-updown-15m-1767900600')"
     ),
@@ -112,6 +115,7 @@ async def get_latest_tick(
     Used for quick price checks and initial UI state.
 
     Args:
+        request: FastAPI request (for correlation ID)
         market_slug: Market identifier (e.g., "btc-updown-15m-1767900600")
         outcome: Market outcome ("UP" or "DOWN")
         repository: MarketTickRepository (injected via FastAPI)
@@ -122,13 +126,27 @@ async def get_latest_tick(
     Raises:
         HTTPException: 400 if outcome is invalid, 404 if no data found, 500 on database error
     """
+    # Get correlation ID from request state (set by middleware)
+    correlation_id = getattr(request.state, "correlation_id", "unknown")
+    log_ctx = bind_correlation_context(
+        logger,
+        correlation_id=correlation_id,
+        market_slug=market_slug,
+        outcome=outcome,
+        event_type="GetLatestTick",
+    )
+
     # Validate outcome
     if outcome not in ("UP", "DOWN"):
+        log_ctx.bind(error_class="client_error").warning(
+            "Invalid outcome parameter: {outcome}",
+            outcome=outcome,
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=ErrorResponse(
-                error="Invalid outcome",
-                detail=f"Outcome must be 'UP' or 'DOWN', got: {outcome}",
+                error="Invalid parameter",
+                detail="Outcome must be 'UP' or 'DOWN'",
                 code="INVALID_OUTCOME",
             ).model_dump(),
         )
@@ -138,16 +156,26 @@ async def get_latest_tick(
         record = await repository.get_latest(market_slug, outcome)
 
         if record is None:
+            log_ctx.bind(error_class="not_found").info(
+                "Market not found: {market_slug}/{outcome}",
+                market_slug=market_slug,
+                outcome=outcome,
+            )
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=ErrorResponse(
                     error="Market not found",
-                    detail=(
-                        f"No tick data found for market '{market_slug}' with outcome '{outcome}'"
-                    ),
+                    detail=f"No data available for market '{market_slug}' with outcome '{outcome}'",
                     code="MARKET_NOT_FOUND",
                 ).model_dump(),
             )
+
+        # Log successful response
+        log_ctx.info(
+            "Latest tick retrieved: {market_slug}/{outcome}",
+            market_slug=market_slug,
+            outcome=outcome,
+        )
 
         # Convert record to response
         return _convert_record_to_response(record)
@@ -157,11 +185,16 @@ async def get_latest_tick(
         raise
     except Exception as e:
         # Handle database errors and other unexpected errors
+        log_ctx.bind(error_class="fatal").error(
+            "Database error while fetching latest tick: {error}",
+            error=str(e),
+            exc_info=True,
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=ErrorResponse(
                 error="Internal server error",
-                detail=f"Database error: {str(e)}",
+                detail="Unable to retrieve market data. Please try again later.",
                 code="DATABASE_ERROR",
             ).model_dump(),
         ) from e
@@ -176,6 +209,7 @@ async def get_latest_tick(
     },
 )
 async def get_historical_ticks(
+    request: Request,
     market_slug: str = Query(
         ..., description="Market identifier (e.g., 'btc-updown-15m-1767900600')"
     ),
@@ -191,6 +225,7 @@ async def get_historical_ticks(
     optionally filtered by time range. Used for charting and historical analysis.
 
     Args:
+        request: FastAPI request (for correlation ID)
         market_slug: Market identifier (e.g., "btc-updown-15m-1767900600")
         outcome: Market outcome ("UP" or "DOWN")
         from_ts: Start timestamp (inclusive, optional)
@@ -209,24 +244,43 @@ async def get_historical_ticks(
         - Ticks are ordered by ts_wall ascending, ts_mono ascending
         - Use from_ts/to_ts to narrow the time range if needed
     """
+    # Get correlation ID from request state (set by middleware)
+    correlation_id = getattr(request.state, "correlation_id", "unknown")
+    log_ctx = bind_correlation_context(
+        logger,
+        correlation_id=correlation_id,
+        market_slug=market_slug,
+        outcome=outcome,
+        event_type="GetHistoricalTicks",
+    )
+
     # Validate outcome
     if outcome not in ("UP", "DOWN"):
+        log_ctx.bind(error_class="client_error").warning(
+            "Invalid outcome parameter: {outcome}",
+            outcome=outcome,
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=ErrorResponse(
-                error="Invalid outcome",
-                detail=f"Outcome must be 'UP' or 'DOWN', got: {outcome}",
+                error="Invalid parameter",
+                detail="Outcome must be 'UP' or 'DOWN'",
                 code="INVALID_OUTCOME",
             ).model_dump(),
         )
 
     # Validate time range
     if from_ts is not None and to_ts is not None and from_ts > to_ts:
+        log_ctx.bind(error_class="client_error").warning(
+            "Invalid time range: from_ts ({from_ts}) > to_ts ({to_ts})",
+            from_ts=from_ts.isoformat() if from_ts else None,
+            to_ts=to_ts.isoformat() if to_ts else None,
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=ErrorResponse(
                 error="Invalid time range",
-                detail="from_ts must be less than or equal to to_ts",
+                detail="Start timestamp must be before or equal to end timestamp",
                 code="INVALID_TIME_RANGE",
             ).model_dump(),
         )
@@ -244,6 +298,14 @@ async def get_historical_ticks(
         # Convert records to responses
         ticks = [_convert_record_to_response(record) for record in records]
 
+        # Log successful response
+        log_ctx.info(
+            "Historical ticks retrieved: {market_slug}/{outcome} ({count} ticks)",
+            market_slug=market_slug,
+            outcome=outcome,
+            count=len(ticks),
+        )
+
         return HistoricalTicksResponse(ticks=ticks, count=len(ticks))
 
     except HTTPException:
@@ -251,11 +313,16 @@ async def get_historical_ticks(
         raise
     except Exception as e:
         # Handle database errors and other unexpected errors
+        log_ctx.bind(error_class="fatal").error(
+            "Database error while fetching historical ticks: {error}",
+            error=str(e),
+            exc_info=True,
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=ErrorResponse(
                 error="Internal server error",
-                detail=f"Database error: {str(e)}",
+                detail="Unable to retrieve market data. Please try again later.",
                 code="DATABASE_ERROR",
             ).model_dump(),
         ) from e
@@ -269,6 +336,7 @@ async def get_historical_ticks(
     },
 )
 async def get_markets(
+    request: Request,
     pattern: str | None = Query(None, description="Market pattern filter (e.g., 'btc-updown-15m')"),  # noqa: B008
     active_only: bool = Query(False, description="Filter to only active markets"),  # noqa: B008
     repository: MarketTickRepository = Depends(get_market_tick_repository),  # noqa: B008
@@ -279,6 +347,7 @@ async def get_markets(
     and active status. Markets are ordered by latest_tick_ts descending (newest first).
 
     Args:
+        request: FastAPI request (for correlation ID)
         pattern: Market pattern filter (e.g., "btc-updown-15m", optional)
         active_only: If true, only return active markets (default: false)
         repository: MarketTickRepository (injected via FastAPI)
@@ -294,6 +363,16 @@ async def get_markets(
         - Markets with null latest_tick_ts appear last
         - Active status is determined by comparing market window start to current window start
     """
+    # Get correlation ID from request state (set by middleware)
+    correlation_id = getattr(request.state, "correlation_id", "unknown")
+    log_ctx = bind_correlation_context(
+        logger,
+        correlation_id=correlation_id,
+        pattern=pattern,
+        active_only=active_only,
+        event_type="GetMarkets",
+    )
+
     try:
         # Get all markets from repository
         market_pairs = await repository.get_markets()
@@ -337,15 +416,31 @@ async def get_markets(
             reverse=True,
         )
 
+        # Log successful response
+        log_ctx.info(
+            (
+                "Markets list retrieved: {count} markets "
+                "(pattern={pattern}, active_only={active_only})"
+            ),
+            count=len(market_infos),
+            pattern=pattern,
+            active_only=active_only,
+        )
+
         return MarketsResponse(markets=market_infos, count=len(market_infos))
 
     except Exception as e:
         # Handle database errors and other unexpected errors
+        log_ctx.bind(error_class="fatal").error(
+            "Database error while fetching markets list: {error}",
+            error=str(e),
+            exc_info=True,
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=ErrorResponse(
                 error="Internal server error",
-                detail=f"Database error: {str(e)}",
+                detail="Unable to retrieve market list. Please try again later.",
                 code="DATABASE_ERROR",
             ).model_dump(),
         ) from e

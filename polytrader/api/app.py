@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from polytrader.api.control import router as control_router
 from polytrader.api.market import router as market_router
+from polytrader.api.middleware import ObservabilityMiddleware
 
 
 def create_app() -> FastAPI:
@@ -34,6 +35,10 @@ def create_app() -> FastAPI:
         redoc_url="/redoc",  # ReDoc
         openapi_url="/openapi.json",  # OpenAPI spec
     )
+
+    # Observability middleware (logging, metrics, correlation IDs)
+    # Must be added before CORS to capture all requests
+    app.add_middleware(ObservabilityMiddleware)
 
     # CORS middleware (configure appropriately for production)
     app.add_middleware(

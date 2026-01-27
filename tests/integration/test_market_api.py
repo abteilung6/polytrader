@@ -242,7 +242,7 @@ def test_get_latest_tick_invalid_outcome(client: TestClient) -> None:
     data = response.json()
     assert "detail" in data
     detail = data["detail"]
-    assert detail["error"] == "Invalid outcome"
+    assert detail["error"] == "Invalid parameter"
     assert detail["code"] == "INVALID_OUTCOME"
 
 
