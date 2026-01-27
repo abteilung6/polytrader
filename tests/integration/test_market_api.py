@@ -391,3 +391,134 @@ def test_get_historical_ticks_invalid_time_range(client: TestClient) -> None:
     detail = data["detail"]
     assert detail["error"] == "Invalid time range"
     assert detail["code"] == "INVALID_TIME_RANGE"
+
+
+@pytest.mark.integration
+def test_get_markets_empty(client: TestClient) -> None:
+    """Test GET /api/v1/market/markets returns empty list when no data."""
+    response = client.get("/api/v1/market/markets")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert "markets" in data
+    assert "count" in data
+    assert data["markets"] == []
+    assert data["count"] == 0
+
+
+@pytest.mark.integration
+def test_get_markets_success(client: TestClient, sample_tick: tuple[str, str]) -> None:
+    """Test GET /api/v1/market/markets returns 200 with actual market data."""
+    market_slug, outcome = sample_tick
+
+    response = client.get("/api/v1/market/markets")
+
+    assert response.status_code == 200
+    data = response.json()
+
+    # Verify response structure
+    assert "markets" in data
+    assert "count" in data
+    assert len(data["markets"]) >= 1
+    assert data["count"] >= 1
+
+    # Find our market in the list
+    market = next(
+        (m for m in data["markets"] if m["market_slug"] == market_slug and m["outcome"] == outcome),
+        None,
+    )
+    assert market is not None
+    assert market["market_slug"] == market_slug
+    assert market["outcome"] == outcome
+    assert market["latest_tick_ts"] is not None
+    assert "active" in market
+
+    # Verify Pydantic model structure
+    from polytrader.api.models import MarketsResponse
+
+    MarketsResponse(**data)  # Should not raise
+
+
+@pytest.mark.integration
+def test_get_markets_pattern_filter(client: TestClient, sample_tick: tuple[str, str]) -> None:
+    """Test GET /api/v1/market/markets with pattern filter."""
+    market_slug, outcome = sample_tick
+
+    # Extract pattern from market slug
+    pattern = "-".join(market_slug.split("-")[:-1])  # Everything except timestamp
+
+    response = client.get("/api/v1/market/markets", params={"pattern": pattern})
+
+    assert response.status_code == 200
+    data = response.json()
+
+    # All returned markets should match the pattern
+    for market in data["markets"]:
+        assert market["market_slug"].startswith(pattern + "-")
+
+
+@pytest.mark.integration
+def test_get_markets_ordering(
+    client: TestClient, sample_tick: tuple[str, str], postgres_test_url: str
+) -> None:
+    """Test that GET /api/v1/market/markets orders markets by latest_tick_ts descending."""
+    import asyncio
+
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+    market_slug, outcome = sample_tick
+
+    # Add another market with earlier timestamp
+    async def add_earlier_market() -> None:
+        sqlalchemy_url = postgres_test_url
+        if sqlalchemy_url.startswith("postgresql://"):
+            sqlalchemy_url = sqlalchemy_url.replace("postgresql://", "postgresql+psycopg://", 1)
+
+        engine = create_async_engine(sqlalchemy_url, echo=False)
+        Session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+        async with Session() as session:
+            repo = MarketTickRepository(session)
+            # Create a market with earlier timestamp
+            earlier_market_slug = "btc-updown-15m-1767899700"
+            earlier_tick_id = uuid.uuid4()
+            earlier_ts_wall = datetime(2025, 1, 27, 11, 45, 0, tzinfo=UTC)
+
+            await repo.create_tick(
+                tick_id=earlier_tick_id,
+                ts_wall=earlier_ts_wall,
+                ts_mono=1234567800.123456,
+                market_slug=earlier_market_slug,
+                outcome=outcome,
+                best_bid=Decimal("0.44000000"),
+                best_ask=Decimal("0.45000000"),
+                mid=Decimal("0.44500000"),
+                spread=Decimal("0.01000000"),
+                spread_bps=Decimal("100.00"),
+                event_id=None,
+                run_id="test-run-123",
+            )
+
+            await session.commit()
+
+    # Run async function synchronously
+    asyncio.run(add_earlier_market())
+
+    response = client.get("/api/v1/market/markets")
+
+    assert response.status_code == 200
+    data = response.json()
+
+    # Markets should be ordered by latest_tick_ts descending
+    # Find our markets in the list
+    markets_with_ts = [m for m in data["markets"] if m["latest_tick_ts"] is not None]
+    if len(markets_with_ts) >= 2:
+        # Verify ordering (newest first)
+        for i in range(len(markets_with_ts) - 1):
+            current_ts = datetime.fromisoformat(
+                markets_with_ts[i]["latest_tick_ts"].replace("Z", "+00:00")
+            )
+            next_ts = datetime.fromisoformat(
+                markets_with_ts[i + 1]["latest_tick_ts"].replace("Z", "+00:00")
+            )
+            assert current_ts >= next_ts

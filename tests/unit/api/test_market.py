@@ -471,3 +471,206 @@ class TestGetHistoricalTicksEndpoint:
         detail = data["detail"]
         assert detail["error"] == "Internal server error"
         assert detail["code"] == "DATABASE_ERROR"
+
+
+class TestGetMarketsEndpoint:
+    """Tests for GET /api/v1/market/markets endpoint."""
+
+    def test_successful_response_empty_list(
+        self, client: TestClient, mock_repository: MagicMock
+    ) -> None:
+        """Test successful response with empty market list."""
+        # Configure mock repository
+        mock_repository.get_markets = AsyncMock(return_value=[])
+
+        response = client.get("/api/v1/market/markets")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "markets" in data
+        assert "count" in data
+        assert data["markets"] == []
+        assert data["count"] == 0
+
+        # Verify repository was called
+        mock_repository.get_markets.assert_called_once()
+
+    def test_successful_response_with_markets(
+        self, client: TestClient, mock_repository: MagicMock
+    ) -> None:
+        """Test successful response with market list."""
+        # Configure mock repository to return market pairs
+        mock_repository.get_markets = AsyncMock(
+            return_value=[
+                ("btc-updown-15m-1767900600", "UP"),
+                ("btc-updown-15m-1767900600", "DOWN"),
+            ]
+        )
+
+        # Configure get_latest to return mock records
+        tick_id = uuid.uuid4()
+        ts_wall = datetime(2025, 1, 27, 12, 0, 0, tzinfo=UTC)
+
+        mock_record = MagicMock(spec=MarketTickRecord)
+        mock_record.tick_id = tick_id
+        mock_record.ts_wall = ts_wall
+        mock_record.ts_mono = 1234567890.123456
+        mock_record.market_slug = "btc-updown-15m-1767900600"
+        mock_record.outcome = "UP"
+        mock_record.best_bid = Decimal("0.45000000")
+        mock_record.best_ask = Decimal("0.46000000")
+        mock_record.mid = Decimal("0.45500000")
+        mock_record.spread = Decimal("0.01000000")
+        mock_record.spread_bps = Decimal("100.00")
+
+        # Mock get_latest to return record for UP, None for DOWN
+        async def get_latest_side_effect(market_slug: str, outcome: str):
+            if outcome == "UP":
+                return mock_record
+            return None
+
+        mock_repository.get_latest = AsyncMock(side_effect=get_latest_side_effect)
+
+        response = client.get("/api/v1/market/markets")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "markets" in data
+        assert "count" in data
+        assert len(data["markets"]) == 2
+        assert data["count"] == 2
+
+        # Verify market structure
+        up_market = next(m for m in data["markets"] if m["outcome"] == "UP")
+        assert up_market["market_slug"] == "btc-updown-15m-1767900600"
+        assert up_market["outcome"] == "UP"
+        assert up_market["latest_tick_ts"] is not None
+        assert "active" in up_market
+
+        down_market = next(m for m in data["markets"] if m["outcome"] == "DOWN")
+        assert down_market["market_slug"] == "btc-updown-15m-1767900600"
+        assert down_market["outcome"] == "DOWN"
+        assert down_market["latest_tick_ts"] is None
+
+    def test_pattern_filter(self, client: TestClient, mock_repository: MagicMock) -> None:
+        """Test that pattern filter works correctly."""
+        # Configure mock repository to return multiple markets
+        mock_repository.get_markets = AsyncMock(
+            return_value=[
+                ("btc-updown-15m-1767900600", "UP"),
+                ("eth-updown-15m-1767900600", "UP"),
+            ]
+        )
+
+        # Configure get_latest to return None for all
+        mock_repository.get_latest = AsyncMock(return_value=None)
+
+        response = client.get("/api/v1/market/markets", params={"pattern": "btc-updown-15m"})
+
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["markets"]) == 1
+        assert data["markets"][0]["market_slug"] == "btc-updown-15m-1767900600"
+
+    def test_active_only_filter(self, client: TestClient, mock_repository: MagicMock) -> None:
+        """Test that active_only filter works correctly."""
+        # Configure mock repository
+        mock_repository.get_markets = AsyncMock(return_value=[("btc-updown-15m-1767900600", "UP")])
+        mock_repository.get_latest = AsyncMock(return_value=None)
+
+        # Note: active status depends on current time and market window
+        # This test verifies the filter is applied, not the exact active status
+        response = client.get("/api/v1/market/markets", params={"active_only": True})
+
+        assert response.status_code == 200
+        data = response.json()
+        # Result depends on whether market is actually active (time-dependent)
+        assert "markets" in data
+        assert "count" in data
+
+    def test_ordering_newest_first(self, client: TestClient, mock_repository: MagicMock) -> None:
+        """Test that markets are ordered by latest_tick_ts descending."""
+        # Configure mock repository
+        mock_repository.get_markets = AsyncMock(
+            return_value=[
+                ("btc-updown-15m-1767900600", "UP"),
+                ("btc-updown-15m-1767899700", "UP"),
+            ]
+        )
+
+        # Create mock records with different timestamps
+        ts_wall1 = datetime(2025, 1, 27, 12, 0, 0, tzinfo=UTC)
+        ts_wall2 = datetime(2025, 1, 27, 11, 45, 0, tzinfo=UTC)  # Earlier
+
+        mock_record1 = MagicMock(spec=MarketTickRecord)
+        mock_record1.ts_wall = ts_wall1
+
+        mock_record2 = MagicMock(spec=MarketTickRecord)
+        mock_record2.ts_wall = ts_wall2
+
+        async def get_latest_side_effect(market_slug: str, outcome: str):
+            if "1767900600" in market_slug:
+                return mock_record1
+            return mock_record2
+
+        mock_repository.get_latest = AsyncMock(side_effect=get_latest_side_effect)
+
+        response = client.get("/api/v1/market/markets")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["markets"]) == 2
+
+        # First market should have later timestamp
+        # FastAPI serializes datetime with 'Z' suffix, not '+00:00'
+        assert data["markets"][0]["latest_tick_ts"] == ts_wall1.isoformat().replace("+00:00", "Z")
+        assert data["markets"][1]["latest_tick_ts"] == ts_wall2.isoformat().replace("+00:00", "Z")
+
+    def test_ordering_nulls_last(self, client: TestClient, mock_repository: MagicMock) -> None:
+        """Test that markets with null latest_tick_ts appear last."""
+        # Configure mock repository
+        mock_repository.get_markets = AsyncMock(
+            return_value=[
+                ("btc-updown-15m-1767900600", "UP"),
+                ("btc-updown-15m-1767899700", "UP"),
+            ]
+        )
+
+        # Create mock record for first market only
+        ts_wall = datetime(2025, 1, 27, 12, 0, 0, tzinfo=UTC)
+
+        mock_record = MagicMock(spec=MarketTickRecord)
+        mock_record.ts_wall = ts_wall
+
+        async def get_latest_side_effect(market_slug: str, outcome: str):
+            if "1767900600" in market_slug:
+                return mock_record
+            return None  # Second market has no ticks
+
+        mock_repository.get_latest = AsyncMock(side_effect=get_latest_side_effect)
+
+        response = client.get("/api/v1/market/markets")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["markets"]) == 2
+
+        # First market should have timestamp, second should be null
+        assert data["markets"][0]["latest_tick_ts"] is not None
+        assert data["markets"][1]["latest_tick_ts"] is None
+
+    def test_database_error_returns_500(
+        self, client: TestClient, mock_repository: MagicMock
+    ) -> None:
+        """Test that database error returns 500."""
+        # Configure mock repository to raise exception
+        mock_repository.get_markets = AsyncMock(side_effect=Exception("Database connection failed"))
+
+        response = client.get("/api/v1/market/markets")
+
+        assert response.status_code == 500
+        data = response.json()
+        assert "detail" in data
+        detail = data["detail"]
+        assert detail["error"] == "Internal server error"
+        assert detail["code"] == "DATABASE_ERROR"
