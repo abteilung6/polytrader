@@ -8,7 +8,9 @@ All endpoints return Pydantic models (not dicts) to enable:
 """
 
 from datetime import datetime
+from decimal import Decimal
 from typing import Literal
+from uuid import UUID
 
 from pydantic import BaseModel, Field, computed_field, model_validator
 
@@ -403,3 +405,61 @@ class VersionConflictResponse(BaseModel):
     expected_version: int = Field(description="Version that was expected")
     actual_version: int = Field(description="Current version")
     detail: str = Field(description="Explanation of the version conflict")
+
+
+# ============================================================================
+# Market Data API Models
+# ============================================================================
+
+
+class MarketTickResponse(BaseModel):
+    """Market tick response model.
+
+    Represents a single market tick with price data and timestamps.
+    Used for both latest tick and historical ticks endpoints.
+    """
+
+    tick_id: UUID = Field(description="Unique tick identifier")
+    ts_wall: datetime = Field(description="Wall-clock timestamp (UTC)")
+    ts_mono: float = Field(description="Monotonic timestamp")
+    market_slug: str = Field(description="Market identifier")
+    outcome: str = Field(description="Market outcome: UP or DOWN")
+    best_bid: Decimal = Field(description="Best bid price (0-1 range)")
+    best_ask: Decimal = Field(description="Best ask price (0-1 range)")
+    mid: Decimal = Field(description="Mid-market price")
+    spread: Decimal = Field(description="Bid-ask spread")
+    spread_bps: Decimal = Field(description="Spread in basis points")
+
+
+class HistoricalTicksResponse(BaseModel):
+    """Historical ticks response.
+
+    For a 15-minute market window, all ticks should fit in a single response.
+    Use from_ts/to_ts to narrow the time range if needed.
+    """
+
+    ticks: list[MarketTickResponse] = Field(description="List of ticks (ordered by ts_wall)")
+    count: int = Field(description="Number of ticks returned")
+
+
+class MarketInfoResponse(BaseModel):
+    """Market information response.
+
+    Represents a market/outcome pair with latest tick timestamp and active status.
+    """
+
+    market_slug: str = Field(description="Market identifier")
+    outcome: str = Field(description="Market outcome: UP or DOWN")
+    latest_tick_ts: datetime | None = Field(description="Latest tick timestamp (null if no data)")
+    active: bool = Field(description="Whether market is currently active (current window)")
+
+
+class MarketsResponse(BaseModel):
+    """Markets list response.
+
+    Markets are ordered by latest_tick_ts descending (newest first).
+    Markets with null latest_tick_ts appear last.
+    """
+
+    markets: list[MarketInfoResponse] = Field(description="List of markets (ordered newest first)")
+    count: int = Field(description="Number of markets")
