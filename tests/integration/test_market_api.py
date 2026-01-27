@@ -1,0 +1,246 @@
+"""Integration tests for market data API endpoints.
+
+Per Commit 3: Integration tests for GET /api/v1/market/ticks/latest endpoint.
+Per testing.mdc: Integration tests use real database and verify end-to-end behavior.
+"""
+
+import uuid
+from collections.abc import AsyncGenerator, Iterator
+from datetime import UTC, datetime
+from decimal import Decimal
+
+import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+from polytrader.api.app import create_app
+from polytrader.api.dependencies import get_db_session
+from polytrader.db.repository import MarketTickRepository
+
+
+@pytest.fixture
+def client(postgres_test_url: str, postgres_db: AsyncGenerator[None, None]) -> Iterator[TestClient]:
+    """Create FastAPI test client with test database.
+
+    Overrides get_db_session dependency to use test database instead of dev database.
+    """
+    # Convert URL to SQLAlchemy async format
+    sqlalchemy_url = postgres_test_url
+    if sqlalchemy_url.startswith("postgresql://"):
+        sqlalchemy_url = sqlalchemy_url.replace("postgresql://", "postgresql+psycopg://", 1)
+
+    # Create engine and session factory for test database
+    engine = create_async_engine(sqlalchemy_url, echo=False)
+    Session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    # Clean up market_ticks table at test start
+    async def cleanup_ticks() -> None:
+        """Clean up market_ticks table."""
+        from sqlalchemy import text
+
+        async with Session() as session:
+            try:
+                await session.execute(text("TRUNCATE TABLE market_ticks CASCADE"))
+                await session.commit()
+            except Exception:
+                await session.rollback()
+
+    # Run cleanup synchronously using asyncio
+    import asyncio
+
+    asyncio.run(cleanup_ticks())
+
+    app = create_app()
+
+    # Override get_db_session to use test database session
+    async def override_get_db_session() -> AsyncGenerator[AsyncSession, None]:
+        """Override dependency to use test database session."""
+        async with Session() as session:
+            yield session
+
+    app.dependency_overrides[get_db_session] = override_get_db_session
+
+    yield TestClient(app)
+
+    # Cleanup: remove dependency override and clean up ticks
+    app.dependency_overrides.clear()
+    asyncio.run(cleanup_ticks())
+
+
+@pytest.fixture
+def sample_tick(
+    postgres_test_url: str,
+) -> tuple[str, str]:  # Returns (market_slug, outcome)
+    """Create a sample tick in the database and return market_slug and outcome."""
+    import asyncio
+
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+    # Convert URL to SQLAlchemy async format
+    sqlalchemy_url = postgres_test_url
+    if sqlalchemy_url.startswith("postgresql://"):
+        sqlalchemy_url = sqlalchemy_url.replace("postgresql://", "postgresql+psycopg://", 1)
+
+    # Create engine and session factory for test database
+    engine = create_async_engine(sqlalchemy_url, echo=False)
+    Session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    # Create sample tick
+    async def create_tick() -> tuple[str, str]:
+        async with Session() as session:
+            repo = MarketTickRepository(session)
+
+            tick_id = uuid.uuid4()
+            market_slug = "btc-updown-15m-1767900600"
+            outcome = "UP"
+            ts_wall = datetime(2025, 1, 27, 12, 0, 0, tzinfo=UTC)
+
+            await repo.create_tick(
+                tick_id=tick_id,
+                ts_wall=ts_wall,
+                ts_mono=1234567890.123456,
+                market_slug=market_slug,
+                outcome=outcome,
+                best_bid=Decimal("0.45000000"),
+                best_ask=Decimal("0.46000000"),
+                mid=Decimal("0.45500000"),
+                spread=Decimal("0.01000000"),
+                spread_bps=Decimal("100.00"),
+                event_id=None,
+                run_id="test-run-123",
+            )
+
+            await session.commit()
+            return (market_slug, outcome)
+
+    # Run async function synchronously
+    return asyncio.run(create_tick())
+
+
+@pytest.mark.integration
+def test_get_latest_tick_not_found(client: TestClient) -> None:
+    """Test GET /api/v1/market/ticks/latest returns 404 when no data."""
+    response = client.get(
+        "/api/v1/market/ticks/latest",
+        params={"market_slug": "nonexistent-market", "outcome": "UP"},
+    )
+
+    assert response.status_code == 404
+    data = response.json()
+    assert "detail" in data
+    detail = data["detail"]
+    assert detail["error"] == "Market not found"
+    assert detail["code"] == "MARKET_NOT_FOUND"
+
+
+@pytest.mark.integration
+async def test_get_latest_tick_success(client: TestClient, sample_tick: tuple[str, str]) -> None:
+    """Test GET /api/v1/market/ticks/latest returns 200 with actual tick data."""
+    market_slug, outcome = sample_tick
+
+    response = client.get(
+        "/api/v1/market/ticks/latest",
+        params={"market_slug": market_slug, "outcome": outcome},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+
+    # Verify response structure
+    assert "tick_id" in data
+    assert "ts_wall" in data
+    assert "ts_mono" in data
+    assert data["market_slug"] == market_slug
+    assert data["outcome"] == outcome
+    assert "best_bid" in data
+    assert "best_ask" in data
+    assert "mid" in data
+    assert "spread" in data
+    assert "spread_bps" in data
+
+    # Verify Pydantic model structure
+    from polytrader.api.models import MarketTickResponse
+
+    MarketTickResponse(**data)  # Should not raise
+
+    # Verify price values
+    assert Decimal(data["best_bid"]) == Decimal("0.45000000")
+    assert Decimal(data["best_ask"]) == Decimal("0.46000000")
+    assert Decimal(data["mid"]) == Decimal("0.45500000")
+
+
+@pytest.mark.integration
+def test_get_latest_tick_returns_most_recent(
+    client: TestClient, sample_tick: tuple[str, str], postgres_test_url: str
+) -> None:
+    """Test that GET /api/v1/market/ticks/latest returns the most recent tick."""
+    import asyncio
+
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+    market_slug, outcome = sample_tick
+
+    # Use the same database URL as the client fixture
+    async def add_newer_tick() -> None:
+        # Create session using test database (same as client fixture)
+        sqlalchemy_url = postgres_test_url
+        if sqlalchemy_url.startswith("postgresql://"):
+            sqlalchemy_url = sqlalchemy_url.replace("postgresql://", "postgresql+psycopg://", 1)
+
+        engine = create_async_engine(sqlalchemy_url, echo=False)
+        Session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+        async with Session() as session:
+            repo = MarketTickRepository(session)
+            # Create a newer tick (later timestamp)
+            newer_tick_id = uuid.uuid4()
+            newer_ts_wall = datetime(2025, 1, 27, 12, 5, 0, tzinfo=UTC)
+
+            await repo.create_tick(
+                tick_id=newer_tick_id,
+                ts_wall=newer_ts_wall,
+                ts_mono=1234567920.123456,  # Later monotonic time
+                market_slug=market_slug,
+                outcome=outcome,
+                best_bid=Decimal("0.46000000"),  # Different price
+                best_ask=Decimal("0.47000000"),
+                mid=Decimal("0.46500000"),
+                spread=Decimal("0.01000000"),
+                spread_bps=Decimal("100.00"),
+                event_id=None,
+                run_id="test-run-123",
+            )
+
+            await session.commit()
+
+    # Run async function synchronously
+    asyncio.run(add_newer_tick())
+
+    # Request latest tick
+    response = client.get(
+        "/api/v1/market/ticks/latest",
+        params={"market_slug": market_slug, "outcome": outcome},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+
+    # Verify it returns the newer tick (by checking price)
+    assert Decimal(data["best_bid"]) == Decimal("0.46000000")
+    assert Decimal(data["mid"]) == Decimal("0.46500000")
+
+
+@pytest.mark.integration
+def test_get_latest_tick_invalid_outcome(client: TestClient) -> None:
+    """Test that invalid outcome returns 400."""
+    response = client.get(
+        "/api/v1/market/ticks/latest",
+        params={"market_slug": "btc-updown-15m-1767900600", "outcome": "INVALID"},
+    )
+
+    assert response.status_code == 400
+    data = response.json()
+    assert "detail" in data
+    detail = data["detail"]
+    assert detail["error"] == "Invalid outcome"
+    assert detail["code"] == "INVALID_OUTCOME"
