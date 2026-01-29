@@ -1,9 +1,30 @@
 import { render, screen } from '@testing-library/react'
+import { vi } from 'vitest'
 import App from './App'
+import { marketApi } from './lib/api-client'
+import { createMockMarket, createMockMarketsResponse } from './test/mocks'
+import { mockAxiosResponse } from './test/utils'
+
+const defaultedMarket = createMockMarket()
 
 describe('App', () => {
-  it('renders "Hello World"', () => {
+  const customRender = async () => {
+    vi.spyOn(marketApi, 'getMarketsApiV1MarketMarketsGet').mockResolvedValue(
+      mockAxiosResponse({
+        data: createMockMarketsResponse({
+          markets: [defaultedMarket],
+          count: 1,
+        }),
+      }),
+    )
     render(<App />)
-    expect(screen.getByText('Hello World')).toBeInTheDocument()
+    screen.getByText('Loading…')
+    await screen.findByText(/"count":\s*1/)
+  }
+
+  it('renders markets', async () => {
+    await customRender()
+    screen.getByText(new RegExp(defaultedMarket.market_slug))
+    screen.getByText(new RegExp(defaultedMarket.outcome))
   })
 })
