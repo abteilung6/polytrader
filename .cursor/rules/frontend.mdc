@@ -150,7 +150,8 @@ Principles:
 
 - **Runtime:** Standard Vite (avoid experimental bundlers that break tests).
 - **Config:** TS project refs supported (`tsconfig.app.json` / `tsconfig.node.json`). Vitest: separate `vitest.config.ts` merges with `vite.config.ts`.
-- **API client (OpenAPI):** Typed client lives in `src/lib/api` (models + services). Generated from `../openapi/openapi.json`; config in `openapitools.json`. Backend dumps spec from repo root: `make openapi-dump`. Frontend: `make generate-api` (or `npm run generate-api`). Regenerate after backend API or spec changes. See `polytrader-console/README.md`.
+- **API client (OpenAPI):** Typed client lives in `src/lib/api` (models + services). Generated from `../openapi/openapi.json`; config in `openapitools.json`. Backend dumps spec from repo root: `make openapi-dump`. Frontend: `make generate-api` (or `npm run generate-api`). Regenerate after backend API or spec changes. Use `src/lib/api-client.ts` for configured `controlApi` / `marketApi` (base URL from `VITE_API_URL`). See `polytrader-console/README.md`.
+- **Env:** `.env` in **polytrader-console/** only (Vite project root). Set `VITE_API_URL` if the backend is not at `http://localhost:8000`. Repo-root `.env` is for the backend.
 - **Gates:** before commit/PR run:
   - `make test`
   - `make lint`
