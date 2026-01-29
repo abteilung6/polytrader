@@ -3,6 +3,7 @@
 .PHONY: test-db-up test-db-down test-db-migrate
 .PHONY: prometheus-up prometheus-down prometheus-logs
 .PHONY: test-prometheus-up test-prometheus-down test-prometheus-logs
+.PHONY: frontend-install frontend-test frontend-lint frontend-format frontend-format-check frontend-type-check frontend-build
 
 PYTHON ?= python3
 
@@ -105,3 +106,27 @@ grafana-down:
 
 grafana-logs:
 	docker compose logs -f grafana
+
+# Frontend (polytrader-console)
+CONSOLE_DIR = polytrader-console
+
+frontend-install:
+	cd $(CONSOLE_DIR) && npm install
+
+frontend-test:
+	cd $(CONSOLE_DIR) && npm run test
+
+frontend-lint:
+	cd $(CONSOLE_DIR) && npm run lint
+
+frontend-format:
+	cd $(CONSOLE_DIR) && npm run format
+
+frontend-format-check:
+	cd $(CONSOLE_DIR) && npm run format:check
+
+frontend-type-check:
+	cd $(CONSOLE_DIR) && npm run type-check
+
+frontend-build:
+	cd $(CONSOLE_DIR) && npm run build

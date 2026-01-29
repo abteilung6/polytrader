@@ -1,0 +1,14 @@
+# Build output
+dist
+dist-ssr
+node_modules
+
+# Generated / cache
+*.min.js
+*.tsbuildinfo
+coverage
+
+# Lock files
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
