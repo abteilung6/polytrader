@@ -1,14 +1,8 @@
 import type { FC } from 'react'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
+
+import { MarketsDataTable } from '@/components/markets/markets-data-table'
+import { marketColumns } from '@/components/markets/columns'
 import { useMarketsQuery } from './hooks/markets'
-import type { MarketInfoResponse } from './lib/api'
 
 const App: FC = () => {
   const { data, isPending, error } = useMarketsQuery({
@@ -33,37 +27,12 @@ const App: FC = () => {
   }
   if (!data) return null
 
-  const markets: MarketInfoResponse[] = data.markets ?? []
+  const markets = data.markets ?? []
 
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>Market</TableHead>
-          <TableHead>Outcome</TableHead>
-          <TableHead>Latest tick</TableHead>
-          <TableHead>Active</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {markets.length === 0 ? (
-          <TableRow>
-            <TableCell colSpan={4} className="text-center text-muted-foreground">
-              No markets
-            </TableCell>
-          </TableRow>
-        ) : (
-          markets.map((m) => (
-            <TableRow key={`${m.market_slug}-${m.outcome}`}>
-              <TableCell>{m.market_slug}</TableCell>
-              <TableCell>{m.outcome}</TableCell>
-              <TableCell>{m.latest_tick_ts ?? '—'}</TableCell>
-              <TableCell>{m.active ? 'Yes' : 'No'}</TableCell>
-            </TableRow>
-          ))
-        )}
-      </TableBody>
-    </Table>
+    <div className="container mx-auto py-4">
+      <MarketsDataTable columns={marketColumns} data={markets} />
+    </div>
   )
 }
 
