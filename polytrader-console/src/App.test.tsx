@@ -2,8 +2,8 @@ import { render, screen } from '@testing-library/react'
 import App from './App'
 
 describe('App', () => {
-  it('renders headline', () => {
+  it('renders "Hello World"', () => {
     render(<App />)
-    expect(screen.getByRole('heading', { name: /vite \+ react/i })).toBeInTheDocument()
+    expect(screen.getByText('Hello World')).toBeInTheDocument()
   })
 })
