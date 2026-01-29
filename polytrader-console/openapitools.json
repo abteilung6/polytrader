@@ -1,0 +1,23 @@
+{
+  "$schema": "./node_modules/@openapitools/openapi-generator-cli/config.schema.json",
+  "spaces": 2,
+  "generator-cli": {
+    "version": "7.19.0",
+    "generators": {
+      "api-client": {
+        "generatorName": "typescript-axios",
+        "inputSpec": "../openapi/openapi.json",
+        "output": "./src/lib/api",
+        "additionalProperties": {
+          "npmName": "@polytrader/api-client",
+          "npmVersion": "1.0.0",
+          "supportsES6": true,
+          "withSeparateModelsAndApi": true,
+          "modelPackage": "models",
+          "apiPackage": "services",
+          "useSingleRequestParameter": true
+        }
+      }
+    }
+  }
+}

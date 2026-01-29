@@ -1,0 +1,2254 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Polytrader Control API",
+    "description": "Control plane API for Polytrader platform",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/api/v1/state/health": {
+      "get": {
+        "tags": [
+          "control"
+        ],
+        "summary": "Get Health",
+        "description": "Get system health with individual gate statuses.\n\nReturns overall status and individual gate statuses (db, market_data_freshness, etc.).\nOverall status = worst gate status (down > degraded > ok).\n\nNote: Health gates implementation is basic in this commit.\nFull health gate checks will be implemented in later commits.",
+        "operationId": "get_health_api_v1_state_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/state/execution": {
+      "get": {
+        "tags": [
+          "control"
+        ],
+        "summary": "Get Execution State",
+        "description": "Get execution control state (with version for optimistic concurrency).",
+        "operationId": "get_execution_state_api_v1_state_execution_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutionStateResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/state/live-strategies": {
+      "get": {
+        "tags": [
+          "control"
+        ],
+        "summary": "Get Live Strategies",
+        "description": "Get active live strategies.",
+        "operationId": "get_live_strategies_api_v1_state_live_strategies_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LiveStrategiesResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/state/strategies": {
+      "get": {
+        "tags": [
+          "control"
+        ],
+        "summary": "Get Strategies",
+        "description": "Get all strategies in registry.",
+        "operationId": "get_strategies_api_v1_state_strategies_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategiesResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/state/strategies/templates": {
+      "get": {
+        "tags": [
+          "control"
+        ],
+        "summary": "List Strategy Templates",
+        "description": "List all available strategy templates.\n\nPer Commit 15: Template discovery endpoint for clients to discover\navailable strategy types and their versions.\n\nReturns:\n    StrategyTypesResponse with list of all registered templates",
+        "operationId": "list_strategy_templates_api_v1_state_strategies_templates_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyTypesResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/state/strategies/templates/{type_id}": {
+      "get": {
+        "tags": [
+          "control"
+        ],
+        "summary": "Get Strategy Template",
+        "description": "Get details for a specific strategy template type.\n\nPer Commit 15: Returns template information including all available versions\nand parameter schema.\n\nArgs:\n    type_id: Template type identifier (e.g., \"simple_threshold\")\n\nReturns:\n    StrategyTypeResponse with template details\n\nRaises:\n    HTTPException: 404 if template type not found",
+        "operationId": "get_strategy_template_api_v1_state_strategies_templates__type_id__get",
+        "parameters": [
+          {
+            "name": "type_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Type Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyTypeResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Template not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/state/strategies/templates/{type_id}/versions/{version}": {
+      "get": {
+        "tags": [
+          "control"
+        ],
+        "summary": "Get Strategy Template Version",
+        "description": "Get details for a specific strategy template version.\n\nPer Commit 15: Returns template information for a specific version\nincluding parameter schema.\n\nArgs:\n    type_id: Template type identifier (e.g., \"simple_threshold\")\n    version: Template version (e.g., \"1.0.0\")\n\nReturns:\n    StrategyTypeResponse with template details (single version in available_versions)\n\nRaises:\n    HTTPException: 404 if template version not found",
+        "operationId": "get_strategy_template_version_api_v1_state_strategies_templates__type_id__versions__version__get",
+        "parameters": [
+          {
+            "name": "type_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Type Id"
+            }
+          },
+          {
+            "name": "version",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Version"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyTypeResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Template version not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/state/strategies/validate": {
+      "post": {
+        "tags": [
+          "control"
+        ],
+        "summary": "Validate Strategy Config",
+        "description": "Validate a strategy configuration against a template schema.\n\nPer Commit 16: This endpoint allows clients to validate configurations\nbefore creating strategy instances. Returns validation results with\nclear error messages.\n\nArgs:\n    request: Validation request with template_type_id, version_selector, and config\n\nReturns:\n    ValidateStrategyConfigResponse with validation results\n\nRaises:\n    HTTPException: 400 if template not found or version resolution fails",
+        "operationId": "validate_strategy_config_api_v1_state_strategies_validate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ValidateStrategyConfigRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidateStrategyConfigResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Template not found or version resolution failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/state/commands/{command_id}": {
+      "get": {
+        "tags": [
+          "control"
+        ],
+        "summary": "Get Command Status",
+        "description": "Get command status by command_id.",
+        "operationId": "get_command_status_api_v1_state_commands__command_id__get",
+        "parameters": [
+          {
+            "name": "command_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Command Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandStatusResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Command not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/commands/execution/enable": {
+      "post": {
+        "tags": [
+          "control"
+        ],
+        "summary": "Enable Execution",
+        "description": "Enable execution (creates command in queue).\n\nIdempotent: If client_request_id already exists, returns existing command_id.\nVersion check: If expected_version != current version, returns 409 Conflict.",
+        "operationId": "enable_execution_api_v1_commands_execution_enable_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EnableExecutionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandEnvelopeResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Version conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersionConflictResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/commands/execution/disable": {
+      "post": {
+        "tags": [
+          "control"
+        ],
+        "summary": "Disable Execution",
+        "description": "Disable execution (creates command in queue).\n\nIdempotent: If client_request_id already exists, returns existing command_id.\nVersion check: If expected_version != current version, returns 409 Conflict.",
+        "operationId": "disable_execution_api_v1_commands_execution_disable_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DisableExecutionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandEnvelopeResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Version conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersionConflictResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/commands/live-strategies/{strategy_id}/activate": {
+      "post": {
+        "tags": [
+          "control"
+        ],
+        "summary": "Activate Strategy",
+        "description": "Activate strategy for live trading (creates command in queue).\n\nIdempotent: If client_request_id already exists, returns existing command_id.",
+        "operationId": "activate_strategy_api_v1_commands_live_strategies__strategy_id__activate_post",
+        "parameters": [
+          {
+            "name": "strategy_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Strategy Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActivateStrategyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandEnvelopeResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/commands/live-strategies/{strategy_id}/deactivate": {
+      "post": {
+        "tags": [
+          "control"
+        ],
+        "summary": "Deactivate Strategy",
+        "description": "Deactivate strategy for live trading (creates command in queue).\n\nIdempotent: If client_request_id already exists, returns existing command_id.",
+        "operationId": "deactivate_strategy_api_v1_commands_live_strategies__strategy_id__deactivate_post",
+        "parameters": [
+          {
+            "name": "strategy_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Strategy Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeactivateStrategyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandEnvelopeResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/commands/strategies": {
+      "post": {
+        "tags": [
+          "control"
+        ],
+        "summary": "Create Strategy",
+        "description": "Create a new strategy in registry.\n\nPer Commit 17: This endpoint now:\n- Resolves version selector to exact version\n- Validates config before creation\n- Calculates config_hash for reproducibility\n- Generates deployment_id for correlation\n- Adds reproducibility metadata (run_identity)",
+        "operationId": "create_strategy_api_v1_commands_strategies_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateStrategyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Strategy already exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/commands/strategies/{strategy_id}": {
+      "patch": {
+        "tags": [
+          "control"
+        ],
+        "summary": "Update Strategy",
+        "description": "Update an existing strategy in registry.",
+        "operationId": "update_strategy_api_v1_commands_strategies__strategy_id__patch",
+        "parameters": [
+          {
+            "name": "strategy_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Strategy Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateStrategyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Strategy not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/ticks/latest": {
+      "get": {
+        "tags": [
+          "market"
+        ],
+        "summary": "Get Latest Tick",
+        "description": "Get latest tick for a market/outcome.\n\nReturns the most recent market tick for the specified market and outcome.\nUsed for quick price checks and initial UI state.\n\nArgs:\n    request: FastAPI request (for correlation ID)\n    market_slug: Market identifier (e.g., \"btc-updown-15m-1767900600\")\n    outcome: Market outcome (\"UP\" or \"DOWN\")\n    repository: MarketTickRepository (injected via FastAPI)\n\nReturns:\n    MarketTickResponse with latest tick data\n\nRaises:\n    HTTPException: 400 if outcome is invalid, 404 if no data found, 500 on database error",
+        "operationId": "get_latest_tick_api_v1_market_ticks_latest_get",
+        "parameters": [
+          {
+            "name": "market_slug",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Market identifier (e.g., 'btc-updown-15m-1767900600')",
+              "title": "Market Slug"
+            },
+            "description": "Market identifier (e.g., 'btc-updown-15m-1767900600')"
+          },
+          {
+            "name": "outcome",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Market outcome: UP or DOWN",
+              "title": "Outcome"
+            },
+            "description": "Market outcome: UP or DOWN"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarketTickResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Market/outcome not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/ticks/history": {
+      "get": {
+        "tags": [
+          "market"
+        ],
+        "summary": "Get Historical Ticks",
+        "description": "Get historical ticks for a market/outcome.\n\nReturns a list of market ticks for the specified market and outcome,\noptionally filtered by time range. Used for charting and historical analysis.\n\nArgs:\n    request: FastAPI request (for correlation ID)\n    market_slug: Market identifier (e.g., \"btc-updown-15m-1767900600\")\n    outcome: Market outcome (\"UP\" or \"DOWN\")\n    from_ts: Start timestamp (inclusive, optional)\n    to_ts: End timestamp (inclusive, optional)\n    limit: Maximum number of ticks to return (default: 5000, max: 10000)\n    repository: MarketTickRepository (injected via FastAPI)\n\nReturns:\n    HistoricalTicksResponse with list of ticks and count\n\nRaises:\n    HTTPException: 400 if outcome is invalid, 500 on database error\n\nNote:\n    - For a 15-minute market window, all ticks should typically fit within the default limit\n    - Ticks are ordered by ts_wall ascending, ts_mono ascending\n    - Use from_ts/to_ts to narrow the time range if needed",
+        "operationId": "get_historical_ticks_api_v1_market_ticks_history_get",
+        "parameters": [
+          {
+            "name": "market_slug",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Market identifier (e.g., 'btc-updown-15m-1767900600')",
+              "title": "Market Slug"
+            },
+            "description": "Market identifier (e.g., 'btc-updown-15m-1767900600')"
+          },
+          {
+            "name": "outcome",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Market outcome: UP or DOWN",
+              "title": "Outcome"
+            },
+            "description": "Market outcome: UP or DOWN"
+          },
+          {
+            "name": "from_ts",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Start timestamp (ISO 8601 UTC, inclusive)",
+              "title": "From Ts"
+            },
+            "description": "Start timestamp (ISO 8601 UTC, inclusive)"
+          },
+          {
+            "name": "to_ts",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "End timestamp (ISO 8601 UTC, inclusive)",
+              "title": "To Ts"
+            },
+            "description": "End timestamp (ISO 8601 UTC, inclusive)"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 10000,
+              "minimum": 1,
+              "description": "Maximum number of ticks to return",
+              "default": 5000,
+              "title": "Limit"
+            },
+            "description": "Maximum number of ticks to return"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HistoricalTicksResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/markets": {
+      "get": {
+        "tags": [
+          "market"
+        ],
+        "summary": "Get Markets",
+        "description": "Get list of available markets.\n\nReturns a list of all markets with tick data, optionally filtered by pattern\nand active status. Markets are ordered by latest_tick_ts descending (newest first).\n\nArgs:\n    request: FastAPI request (for correlation ID)\n    pattern: Market pattern filter (e.g., \"btc-updown-15m\", optional)\n    active_only: If true, only return active markets (default: false)\n    repository: MarketTickRepository (injected via FastAPI)\n\nReturns:\n    MarketsResponse with list of markets and count\n\nRaises:\n    HTTPException: 500 on database error\n\nNote:\n    - Markets are ordered by latest_tick_ts descending (newest first)\n    - Markets with null latest_tick_ts appear last\n    - Active status is determined by comparing market window start to current window start",
+        "operationId": "get_markets_api_v1_market_markets_get",
+        "parameters": [
+          {
+            "name": "pattern",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Market pattern filter (e.g., 'btc-updown-15m')",
+              "title": "Pattern"
+            },
+            "description": "Market pattern filter (e.g., 'btc-updown-15m')"
+          },
+          {
+            "name": "active_only",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Filter to only active markets",
+              "default": false,
+              "title": "Active Only"
+            },
+            "description": "Filter to only active markets"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarketsResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ActivateStrategyRequest": {
+        "properties": {
+          "reason": {
+            "type": "string",
+            "title": "Reason",
+            "description": "Reason for activation"
+          },
+          "issued_by": {
+            "type": "string",
+            "title": "Issued By",
+            "description": "User/system issuing the command"
+          },
+          "client_request_id": {
+            "type": "string",
+            "title": "Client Request Id",
+            "description": "Client request ID for idempotency"
+          }
+        },
+        "type": "object",
+        "required": [
+          "reason",
+          "issued_by",
+          "client_request_id"
+        ],
+        "title": "ActivateStrategyRequest",
+        "description": "Request to activate strategy for live trading."
+      },
+      "CommandEnvelopeResponse": {
+        "properties": {
+          "command_id": {
+            "type": "string",
+            "title": "Command Id",
+            "description": "Command identifier (UUID)"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "applied",
+              "failed"
+            ],
+            "title": "Status",
+            "description": "Command status"
+          },
+          "submitted_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Submitted At",
+            "description": "Command submission timestamp"
+          },
+          "links": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Links",
+            "description": "Related resource links"
+          }
+        },
+        "type": "object",
+        "required": [
+          "command_id",
+          "status",
+          "submitted_at"
+        ],
+        "title": "CommandEnvelopeResponse",
+        "description": "Command envelope response (standardized for all commands)."
+      },
+      "CommandStatusResponse": {
+        "properties": {
+          "command_id": {
+            "type": "string",
+            "title": "Command Id",
+            "description": "Command identifier (UUID)"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "enable_execution",
+              "disable_execution",
+              "add_active_strategy",
+              "remove_active_strategy"
+            ],
+            "title": "Type",
+            "description": "Command type"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "applied",
+              "failed"
+            ],
+            "title": "Status",
+            "description": "Command status"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message",
+            "description": "Error message if failed"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "Command creation timestamp"
+          },
+          "applied_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applied At",
+            "description": "Timestamp when command was applied"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason",
+            "description": "Reason for the command"
+          },
+          "issued_by": {
+            "type": "string",
+            "title": "Issued By",
+            "description": "User/system that issued the command"
+          }
+        },
+        "type": "object",
+        "required": [
+          "command_id",
+          "type",
+          "status",
+          "created_at",
+          "reason",
+          "issued_by"
+        ],
+        "title": "CommandStatusResponse",
+        "description": "Command status response."
+      },
+      "CreateStrategyRequest": {
+        "properties": {
+          "strategy_id": {
+            "type": "string",
+            "title": "Strategy Id",
+            "description": "Strategy identifier"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Human-readable strategy name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "Strategy description"
+          },
+          "config": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Config",
+            "description": "Strategy configuration (JSONB)"
+          },
+          "template_type_id": {
+            "type": "string",
+            "title": "Template Type Id",
+            "description": "Template type identifier (e.g., 'simple_threshold')"
+          },
+          "version_selector": {
+            "$ref": "#/components/schemas/VersionSelectorRequest",
+            "description": "Version selector (exact version or channel)"
+          },
+          "desired_state": {
+            "type": "string",
+            "enum": [
+              "STOPPED",
+              "STARTING",
+              "RUNNING",
+              "PAUSED",
+              "DRAINING",
+              "STOPPING",
+              "ERROR"
+            ],
+            "title": "Desired State",
+            "description": "Desired lifecycle state (default: STOPPED)",
+            "default": "STOPPED"
+          }
+        },
+        "type": "object",
+        "required": [
+          "strategy_id",
+          "name",
+          "config",
+          "template_type_id",
+          "version_selector"
+        ],
+        "title": "CreateStrategyRequest",
+        "description": "Request to create a new strategy.\n\nPer Commit 14: CreateStrategyRequest includes version_selector and\ndesired_state instead of enabled boolean."
+      },
+      "DeactivateStrategyRequest": {
+        "properties": {
+          "reason": {
+            "type": "string",
+            "title": "Reason",
+            "description": "Reason for deactivation"
+          },
+          "issued_by": {
+            "type": "string",
+            "title": "Issued By",
+            "description": "User/system issuing the command"
+          },
+          "client_request_id": {
+            "type": "string",
+            "title": "Client Request Id",
+            "description": "Client request ID for idempotency"
+          }
+        },
+        "type": "object",
+        "required": [
+          "reason",
+          "issued_by",
+          "client_request_id"
+        ],
+        "title": "DeactivateStrategyRequest",
+        "description": "Request to deactivate strategy for live trading."
+      },
+      "DisableExecutionRequest": {
+        "properties": {
+          "expected_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Version",
+            "description": "Expected version for optimistic concurrency control"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason",
+            "description": "Reason for disabling execution"
+          },
+          "issued_by": {
+            "type": "string",
+            "title": "Issued By",
+            "description": "User/system issuing the command"
+          },
+          "client_request_id": {
+            "type": "string",
+            "title": "Client Request Id",
+            "description": "Client request ID for idempotency"
+          }
+        },
+        "type": "object",
+        "required": [
+          "reason",
+          "issued_by",
+          "client_request_id"
+        ],
+        "title": "DisableExecutionRequest",
+        "description": "Request to disable execution."
+      },
+      "EnableExecutionRequest": {
+        "properties": {
+          "expected_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Version",
+            "description": "Expected version for optimistic concurrency control"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason",
+            "description": "Reason for enabling execution"
+          },
+          "issued_by": {
+            "type": "string",
+            "title": "Issued By",
+            "description": "User/system issuing the command"
+          },
+          "client_request_id": {
+            "type": "string",
+            "title": "Client Request Id",
+            "description": "Client request ID for idempotency"
+          }
+        },
+        "type": "object",
+        "required": [
+          "reason",
+          "issued_by",
+          "client_request_id"
+        ],
+        "title": "EnableExecutionRequest",
+        "description": "Request to enable execution."
+      },
+      "ErrorResponse": {
+        "properties": {
+          "error": {
+            "type": "string",
+            "title": "Error",
+            "description": "Error message"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail",
+            "description": "Error details"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code",
+            "description": "Error code"
+          }
+        },
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "title": "ErrorResponse",
+        "description": "Standard error response."
+      },
+      "ExecutionStateResponse": {
+        "properties": {
+          "execution_enabled": {
+            "type": "boolean",
+            "title": "Execution Enabled",
+            "description": "Whether execution is enabled"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version",
+            "description": "Version for optimistic concurrency"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At",
+            "description": "Last update timestamp"
+          },
+          "updated_by": {
+            "type": "string",
+            "title": "Updated By",
+            "description": "User/system that made the update"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason",
+            "description": "Reason for the update"
+          }
+        },
+        "type": "object",
+        "required": [
+          "execution_enabled",
+          "version",
+          "updated_at",
+          "updated_by",
+          "reason"
+        ],
+        "title": "ExecutionStateResponse",
+        "description": "Execution control state response."
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "HealthGateStatus": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "degraded",
+              "down"
+            ],
+            "title": "Status",
+            "description": "Gate status: ok, degraded, or down"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message",
+            "description": "Optional status message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "HealthGateStatus",
+        "description": "Individual health gate status."
+      },
+      "HealthGates": {
+        "properties": {
+          "db": {
+            "$ref": "#/components/schemas/HealthGateStatus",
+            "description": "Database connectivity"
+          },
+          "market_data_freshness": {
+            "$ref": "#/components/schemas/HealthGateStatus",
+            "description": "Market data staleness check"
+          },
+          "event_bus_lag": {
+            "$ref": "#/components/schemas/HealthGateStatus",
+            "description": "Event bus processing lag"
+          },
+          "venue_connectivity": {
+            "$ref": "#/components/schemas/HealthGateStatus",
+            "description": "Venue API connectivity"
+          },
+          "risk_engine": {
+            "$ref": "#/components/schemas/HealthGateStatus",
+            "description": "Risk engine health"
+          },
+          "clock_skew_ms": {
+            "type": "integer",
+            "title": "Clock Skew Ms",
+            "description": "Clock skew in milliseconds"
+          }
+        },
+        "type": "object",
+        "required": [
+          "db",
+          "market_data_freshness",
+          "event_bus_lag",
+          "venue_connectivity",
+          "risk_engine",
+          "clock_skew_ms"
+        ],
+        "title": "HealthGates",
+        "description": "All health gates status."
+      },
+      "HealthResponse": {
+        "properties": {
+          "overall": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "degraded",
+              "down"
+            ],
+            "title": "Overall",
+            "description": "Overall status (worst gate status)"
+          },
+          "gates": {
+            "$ref": "#/components/schemas/HealthGates",
+            "description": "Individual gate statuses"
+          }
+        },
+        "type": "object",
+        "required": [
+          "overall",
+          "gates"
+        ],
+        "title": "HealthResponse",
+        "description": "System health response with gates."
+      },
+      "HistoricalTicksResponse": {
+        "properties": {
+          "ticks": {
+            "items": {
+              "$ref": "#/components/schemas/MarketTickResponse"
+            },
+            "type": "array",
+            "title": "Ticks",
+            "description": "List of ticks (ordered by ts_wall)"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count",
+            "description": "Number of ticks returned"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ticks",
+          "count"
+        ],
+        "title": "HistoricalTicksResponse",
+        "description": "Historical ticks response.\n\nFor a 15-minute market window, all ticks should fit in a single response.\nUse from_ts/to_ts to narrow the time range if needed."
+      },
+      "LiveStrategiesResponse": {
+        "properties": {
+          "active_strategies": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Active Strategies",
+            "description": "List of active strategy IDs"
+          }
+        },
+        "type": "object",
+        "required": [
+          "active_strategies"
+        ],
+        "title": "LiveStrategiesResponse",
+        "description": "Active live strategies response."
+      },
+      "MarketInfoResponse": {
+        "properties": {
+          "market_slug": {
+            "type": "string",
+            "title": "Market Slug",
+            "description": "Market identifier"
+          },
+          "outcome": {
+            "type": "string",
+            "title": "Outcome",
+            "description": "Market outcome: UP or DOWN"
+          },
+          "latest_tick_ts": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Tick Ts",
+            "description": "Latest tick timestamp (null if no data)"
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active",
+            "description": "Whether market is currently active (current window)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "market_slug",
+          "outcome",
+          "latest_tick_ts",
+          "active"
+        ],
+        "title": "MarketInfoResponse",
+        "description": "Market information response.\n\nRepresents a market/outcome pair with latest tick timestamp and active status."
+      },
+      "MarketTickResponse": {
+        "properties": {
+          "tick_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Tick Id",
+            "description": "Unique tick identifier"
+          },
+          "ts_wall": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Ts Wall",
+            "description": "Wall-clock timestamp (UTC)"
+          },
+          "ts_mono": {
+            "type": "number",
+            "title": "Ts Mono",
+            "description": "Monotonic timestamp"
+          },
+          "market_slug": {
+            "type": "string",
+            "title": "Market Slug",
+            "description": "Market identifier"
+          },
+          "outcome": {
+            "type": "string",
+            "title": "Outcome",
+            "description": "Market outcome: UP or DOWN"
+          },
+          "best_bid": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Best Bid",
+            "description": "Best bid price (0-1 range)"
+          },
+          "best_ask": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Best Ask",
+            "description": "Best ask price (0-1 range)"
+          },
+          "mid": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Mid",
+            "description": "Mid-market price"
+          },
+          "spread": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Spread",
+            "description": "Bid-ask spread"
+          },
+          "spread_bps": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Spread Bps",
+            "description": "Spread in basis points"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tick_id",
+          "ts_wall",
+          "ts_mono",
+          "market_slug",
+          "outcome",
+          "best_bid",
+          "best_ask",
+          "mid",
+          "spread",
+          "spread_bps"
+        ],
+        "title": "MarketTickResponse",
+        "description": "Market tick response model.\n\nRepresents a single market tick with price data and timestamps.\nUsed for both latest tick and historical ticks endpoints."
+      },
+      "MarketsResponse": {
+        "properties": {
+          "markets": {
+            "items": {
+              "$ref": "#/components/schemas/MarketInfoResponse"
+            },
+            "type": "array",
+            "title": "Markets",
+            "description": "List of markets (ordered newest first)"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count",
+            "description": "Number of markets"
+          }
+        },
+        "type": "object",
+        "required": [
+          "markets",
+          "count"
+        ],
+        "title": "MarketsResponse",
+        "description": "Markets list response.\n\nMarkets are ordered by latest_tick_ts descending (newest first).\nMarkets with null latest_tick_ts appear last."
+      },
+      "RunIdentityResponse": {
+        "properties": {
+          "template_code_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Template Code Ref",
+            "description": "Git SHA / build artifact digest of template code"
+          },
+          "config_hash": {
+            "type": "string",
+            "title": "Config Hash",
+            "description": "SHA256 hash of config (for reproducibility)"
+          },
+          "dependency_set": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dependency Set",
+            "description": "Versions of key libs / model artifacts"
+          },
+          "market_data_snapshot_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market Data Snapshot Ref",
+            "description": "Market data stream ID / snapshot reference"
+          }
+        },
+        "type": "object",
+        "required": [
+          "config_hash"
+        ],
+        "title": "RunIdentityResponse",
+        "description": "Reproducibility metadata response.\n\nPer Commit 14: RunIdentityResponse exposes reproducibility metadata\nfor strategy instances, enabling deterministic replay.\n\nAttributes:\n    template_code_ref: Git SHA / build artifact digest of template code\n    config_hash: SHA256 hash of config (for reproducibility)\n    dependency_set: Versions of key libs / model artifacts\n    market_data_snapshot_ref: Market data stream ID / snapshot reference"
+      },
+      "StrategiesResponse": {
+        "properties": {
+          "strategies": {
+            "items": {
+              "$ref": "#/components/schemas/StrategyResponse"
+            },
+            "type": "array",
+            "title": "Strategies",
+            "description": "List of strategies"
+          }
+        },
+        "type": "object",
+        "required": [
+          "strategies"
+        ],
+        "title": "StrategiesResponse",
+        "description": "List of strategies response."
+      },
+      "StrategyResponse": {
+        "properties": {
+          "strategy_id": {
+            "type": "string",
+            "title": "Strategy Id",
+            "description": "Strategy identifier"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Human-readable strategy name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "Strategy description"
+          },
+          "config": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Config",
+            "description": "Strategy configuration (JSONB)"
+          },
+          "template_type_id": {
+            "type": "string",
+            "title": "Template Type Id",
+            "description": "Template type identifier (e.g., 'simple_threshold')"
+          },
+          "template_version": {
+            "type": "string",
+            "title": "Template Version",
+            "description": "Resolved template version (e.g., '1.0.0')"
+          },
+          "desired_state": {
+            "type": "string",
+            "enum": [
+              "STOPPED",
+              "STARTING",
+              "RUNNING",
+              "PAUSED",
+              "DRAINING",
+              "STOPPING",
+              "ERROR"
+            ],
+            "title": "Desired State",
+            "description": "Desired lifecycle state (STOPPED | STARTING | RUNNING | etc.)"
+          },
+          "actual_state": {
+            "type": "string",
+            "enum": [
+              "STOPPED",
+              "STARTING",
+              "RUNNING",
+              "PAUSED",
+              "DRAINING",
+              "STOPPING",
+              "ERROR"
+            ],
+            "title": "Actual State",
+            "description": "Actual runtime state (STOPPED | STARTING | RUNNING | etc.)"
+          },
+          "last_transition_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Transition At",
+            "description": "Timestamp of last state change"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error",
+            "description": "Last error message (if ERROR state)"
+          },
+          "run_identity": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunIdentityResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Reproducibility metadata"
+          },
+          "deployment_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deployment Id",
+            "description": "UUID for each activation (correlates logs/metrics/events)"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id",
+            "description": "Process run_id when strategy is active"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "Creation timestamp"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At",
+            "description": "Last update timestamp"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "description": "Whether strategy is enabled (derived from desired_state == RUNNING).",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "strategy_id",
+          "name",
+          "config",
+          "template_type_id",
+          "template_version",
+          "desired_state",
+          "actual_state",
+          "created_at",
+          "updated_at",
+          "enabled"
+        ],
+        "title": "StrategyResponse",
+        "description": "Strategy registry entry response.\n\nPer Commit 14: StrategyResponse includes all new fields for template\nreference, lifecycle state, and reproducibility metadata."
+      },
+      "StrategyTypeResponse": {
+        "properties": {
+          "type_id": {
+            "type": "string",
+            "title": "Type Id",
+            "description": "Template type identifier (e.g., 'simple_threshold')"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Human-readable template name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "description": "Template description"
+          },
+          "available_versions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Available Versions",
+            "description": "List of available versions"
+          },
+          "parameter_schema": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Parameter Schema",
+            "description": "OpenAPI-compatible parameter schema"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type_id",
+          "name",
+          "description",
+          "available_versions",
+          "parameter_schema"
+        ],
+        "title": "StrategyTypeResponse",
+        "description": "Strategy template type response.\n\nPer Commit 14: StrategyTypeResponse exposes strategy template information\nfor discovery and selection.\n\nAttributes:\n    type_id: Template type identifier (e.g., 'simple_threshold')\n    name: Human-readable template name\n    description: Template description\n    available_versions: List of available versions\n    parameter_schema: OpenAPI-compatible parameter schema"
+      },
+      "StrategyTypesResponse": {
+        "properties": {
+          "types": {
+            "items": {
+              "$ref": "#/components/schemas/StrategyTypeResponse"
+            },
+            "type": "array",
+            "title": "Types",
+            "description": "List of strategy templates"
+          }
+        },
+        "type": "object",
+        "required": [
+          "types"
+        ],
+        "title": "StrategyTypesResponse",
+        "description": "List of strategy types response."
+      },
+      "UpdateStrategyRequest": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "Strategy name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "Strategy description"
+          },
+          "config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config",
+            "description": "Strategy configuration"
+          },
+          "desired_state": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "STOPPED",
+                  "STARTING",
+                  "RUNNING",
+                  "PAUSED",
+                  "DRAINING",
+                  "STOPPING",
+                  "ERROR"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Desired State",
+            "description": "Desired lifecycle state"
+          }
+        },
+        "type": "object",
+        "title": "UpdateStrategyRequest",
+        "description": "Request to update an existing strategy.\n\nPer Commit 14: UpdateStrategyRequest includes desired_state instead\nof enabled boolean."
+      },
+      "ValidateStrategyConfigRequest": {
+        "properties": {
+          "template_type_id": {
+            "type": "string",
+            "title": "Template Type Id",
+            "description": "Template type identifier (e.g., 'simple_threshold')"
+          },
+          "version_selector": {
+            "$ref": "#/components/schemas/VersionSelectorRequest",
+            "description": "Version selector (exact version or channel)"
+          },
+          "config": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Config",
+            "description": "Strategy configuration to validate"
+          }
+        },
+        "type": "object",
+        "required": [
+          "template_type_id",
+          "version_selector",
+          "config"
+        ],
+        "title": "ValidateStrategyConfigRequest",
+        "description": "Request to validate a strategy configuration.\n\nPer Commit 16: ValidateStrategyConfigRequest allows clients to validate\nconfigurations before creating strategy instances.\n\nAttributes:\n    template_type_id: Template type identifier (e.g., 'simple_threshold')\n    version_selector: Version selector (exact version or channel)\n    config: Configuration dictionary to validate"
+      },
+      "ValidateStrategyConfigResponse": {
+        "properties": {
+          "valid": {
+            "type": "boolean",
+            "title": "Valid",
+            "description": "Whether the configuration is valid"
+          },
+          "errors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Errors",
+            "description": "List of validation error messages"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings",
+            "description": "List of validation warnings (optional issues)"
+          },
+          "template_type_id": {
+            "type": "string",
+            "title": "Template Type Id",
+            "description": "Template type identifier used for validation"
+          },
+          "template_version": {
+            "type": "string",
+            "title": "Template Version",
+            "description": "Resolved template version used for validation"
+          }
+        },
+        "type": "object",
+        "required": [
+          "valid",
+          "template_type_id",
+          "template_version"
+        ],
+        "title": "ValidateStrategyConfigResponse",
+        "description": "Response from strategy configuration validation.\n\nPer Commit 16: ValidateStrategyConfigResponse provides validation results\nwith clear error messages and warnings.\n\nAttributes:\n    valid: Whether the configuration is valid\n    errors: List of validation error messages (empty if valid)\n    warnings: List of validation warnings (optional issues)\n    template_type_id: Template type identifier used for validation\n    template_version: Resolved template version used for validation"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "VersionConflictResponse": {
+        "properties": {
+          "error": {
+            "type": "string",
+            "title": "Error",
+            "default": "Version conflict"
+          },
+          "expected_version": {
+            "type": "integer",
+            "title": "Expected Version",
+            "description": "Version that was expected"
+          },
+          "actual_version": {
+            "type": "integer",
+            "title": "Actual Version",
+            "description": "Current version"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Explanation of the version conflict"
+          }
+        },
+        "type": "object",
+        "required": [
+          "expected_version",
+          "actual_version",
+          "detail"
+        ],
+        "title": "VersionConflictResponse",
+        "description": "Version conflict error response (409 Conflict)."
+      },
+      "VersionSelectorRequest": {
+        "properties": {
+          "exact": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exact",
+            "description": "Exact version string (e.g., '1.2.3')"
+          },
+          "channel": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "stable",
+                  "beta",
+                  "dev"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Channel",
+            "description": "Channel name for version selection"
+          },
+          "major": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Major",
+            "description": "Major version number for channel selection"
+          }
+        },
+        "type": "object",
+        "title": "VersionSelectorRequest",
+        "description": "Version selector request model.\n\nPer Commit 14: VersionSelectorRequest allows clients to specify\neither an exact version or a channel selector for strategy templates.\n\nAttributes:\n    exact: Exact version string (e.g., \"1.2.3\") or None\n    channel: Channel name (\"stable\", \"beta\", \"dev\") or None\n    major: Major version number for channel selection (e.g., 1) or None"
+      }
+    }
+  }
+}

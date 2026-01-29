@@ -105,6 +105,13 @@ make db-psql
 | Virtual environment not activated | Activate venv | `source venv/bin/activate` |
 | Environment variables missing | Check `.env` file | See `environment.md` |
 
+### Frontend / OpenAPI (API client)
+
+| Situation | Action | Make Command |
+|-----------|--------|--------------|
+| `generate-api` fails / `openapi.json` not found | Dump spec from backend first | `make openapi-dump` (from repo root) |
+| Regenerate client after backend API change | Dump spec, then generate | `make openapi-dump` then `make frontend-generate-api` or `cd polytrader-console && make generate-api` |
+
 ### Build & CI Issues
 
 | Situation | Action | Notes |
