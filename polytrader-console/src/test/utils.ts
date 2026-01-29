@@ -1,5 +1,7 @@
 import type { AxiosResponse, InternalAxiosRequestConfig } from 'axios'
 
+export { createTestQueryClient, renderWithQuery } from './render'
+
 export interface MockResponseOptions<T> {
   data: T
   status?: number

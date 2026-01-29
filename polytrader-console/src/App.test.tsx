@@ -1,9 +1,9 @@
-import { render, screen } from '@testing-library/react'
+import { screen } from '@testing-library/react'
 import { vi } from 'vitest'
 import App from './App'
 import { marketApi } from './lib/api-client'
 import { createMockMarket, createMockMarketsResponse } from './test/mocks'
-import { mockAxiosResponse } from './test/utils'
+import { mockAxiosResponse, renderWithQuery } from './test/utils'
 
 const defaultedMarket = createMockMarket()
 
@@ -17,7 +17,7 @@ describe('App', () => {
         }),
       }),
     )
-    render(<App />)
+    renderWithQuery(<App />)
     screen.getByText('Loading…')
     await screen.findByText(/"count":\s*1/)
   }

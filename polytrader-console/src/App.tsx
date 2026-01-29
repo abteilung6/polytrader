@@ -1,23 +1,13 @@
-import { useEffect, useState } from 'react'
 import type { FC } from 'react'
-import type { MarketsResponse } from './lib/api'
-import { marketApi } from './lib/api-client'
+import { useMarketsQuery } from './hooks/markets'
 
 const App: FC = () => {
-  const [data, setData] = useState<MarketsResponse | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const { data, isPending, error } = useMarketsQuery({
+    pattern: 'btc-updown-15m',
+  })
 
-  useEffect(() => {
-    marketApi
-      .getMarketsApiV1MarketMarketsGet()
-      .then((res) => setData(res.data))
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)))
-      .finally(() => setLoading(false))
-  }, [])
-
-  if (loading) return <p>Loading…</p>
-  if (error) return <p>Error: {error}</p>
+  if (isPending) return <p>Loading…</p>
+  if (error) return <p>Error: {error instanceof Error ? error.message : String(error)}</p>
   if (!data) return null
 
   return (
