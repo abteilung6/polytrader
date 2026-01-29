@@ -1,6 +1,13 @@
 # Polytrader Console
 
-Web UI for the Polytrader trading platform. React + TypeScript + Vite, with HMR, ESLint, Prettier, and Vitest.
+Web UI for the Polytrader trading platform. React + TypeScript + Vite, with HMR, ESLint, Prettier, Vitest, Tailwind CSS v4, and [shadcn/ui](https://ui.shadcn.com/).
+
+## UI (shadcn/ui)
+
+- **Stack:** Tailwind CSS v4 (`@tailwindcss/vite`), path alias `@/` → `src/`, theme via CSS variables in `src/index.css`.
+- **Config:** `components.json` — style `new-york`, base color `neutral`, components under `src/components/ui`.
+- **Add components:** `npx shadcn@latest add <component>` (e.g. `button`, `card`, `table`). See [shadcn/ui docs](https://ui.shadcn.com/docs/components).
+- **Utilities:** `@/lib/utils` exports `cn()` (clsx + tailwind-merge) for class names.
 
 ## API client (generated from OpenAPI)
 

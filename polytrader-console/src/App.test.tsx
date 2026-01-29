@@ -8,7 +8,7 @@ import { mockAxiosResponse, renderWithQuery } from './test/utils'
 const defaultedMarket = createMockMarket()
 
 describe('App', () => {
-  const customRender = async () => {
+  it('renders markets in a table', async () => {
     vi.spyOn(marketApi, 'getMarketsApiV1MarketMarketsGet').mockResolvedValue(
       mockAxiosResponse({
         data: createMockMarketsResponse({
@@ -18,13 +18,9 @@ describe('App', () => {
       }),
     )
     renderWithQuery(<App />)
-    screen.getByText('Loading…')
-    await screen.findByText(/"count":\s*1/)
-  }
-
-  it('renders markets', async () => {
-    await customRender()
-    screen.getByText(new RegExp(defaultedMarket.market_slug))
-    screen.getByText(new RegExp(defaultedMarket.outcome))
+    expect(screen.getByText('Loading…')).toBeInTheDocument()
+    await screen.findByRole('table')
+    expect(screen.getByText(defaultedMarket.market_slug)).toBeInTheDocument()
+    expect(screen.getByText(defaultedMarket.outcome)).toBeInTheDocument()
   })
 })
