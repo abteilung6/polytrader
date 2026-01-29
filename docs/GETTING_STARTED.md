@@ -145,6 +145,21 @@ The platform provides:
 
 **Note:** The legacy single-strategy mode (`model paper`, `model live`) has been removed. Use `platform start` instead.
 
+### Frontend (polytrader-console)
+
+The operator console is a separate Vite + React app in `polytrader-console/`:
+
+```bash
+cd polytrader-console
+make install
+# Optional: set API URL if backend is not at http://localhost:8000
+# cp env.example .env && edit VITE_API_URL
+npm run dev
+```
+
+- **Env:** Use `.env` in **polytrader-console/** (not repo root). Copy `env.example` to `.env`; set `VITE_API_URL` only if the control API runs on a different host/port.
+- **API client:** Generated from OpenAPI (`make generate-api`). Use `controlApi` and `marketApi` from `src/lib/api-client.ts`. See `polytrader-console/README.md`.
+
 ## Troubleshooting
 
 ### PostgreSQL Connection Errors

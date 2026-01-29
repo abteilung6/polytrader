@@ -58,7 +58,7 @@ Principles:
 
 ### 1.3 Data Contracts & Types
 
-- Types come from: OpenAPI-generated types, shared event schemas, or manual mirror of backend response models.
+- Types come from: **OpenAPI-generated types** (`src/lib/api` — models + services from `openapi/openapi.json`; see §4), shared event schemas, or manual mirror of backend response models.
 - No `any`. If uncertain, use `unknown` and narrow with type guards.
 - Preserve backend naming (IDs, timestamps, field names) unless there is a strong reason to alias.
 
@@ -149,13 +149,15 @@ Principles:
 ## 4) Repo & Tooling Rules (polytrader-console)
 
 - **Runtime:** Standard Vite (avoid experimental bundlers that break tests).
-- **Config:** TS project refs supported (`tsconfig.app.json` / `tsconfig.node.json`).
+- **Config:** TS project refs supported (`tsconfig.app.json` / `tsconfig.node.json`). Vitest: separate `vitest.config.ts` merges with `vite.config.ts`.
+- **API client (OpenAPI):** Typed client lives in `src/lib/api` (models + services). Generated from `../openapi/openapi.json`; config in `openapitools.json`. Backend dumps spec from repo root: `make openapi-dump`. Frontend: `make generate-api` (or `npm run generate-api`). Regenerate after backend API or spec changes. Use `src/lib/api-client.ts` for configured `controlApi` / `marketApi` (base URL from `VITE_API_URL`). See `polytrader-console/README.md`.
+- **Env:** `.env` in **polytrader-console/** only (Vite project root). Set `VITE_API_URL` if the backend is not at `http://localhost:8000`. Repo-root `.env` is for the backend.
 - **Gates:** before commit/PR run:
   - `make test`
   - `make lint`
   - `make format-check`
   - `make type-check`
-  (or repo-root equivalents)
+  (or repo-root equivalents: `make frontend-test`, etc.)
 
 ---
 

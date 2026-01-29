@@ -7,7 +7,14 @@ import eslintConfigPrettier from 'eslint-config-prettier/flat'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist', 'node_modules', 'coverage', '**/*.d.ts', '**/*.generated.*']),
+  globalIgnores([
+    'dist',
+    'node_modules',
+    'coverage',
+    '**/*.d.ts',
+    '**/*.generated.*',
+    'src/lib/api',
+  ]),
 
   js.configs.recommended,
 

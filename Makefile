@@ -3,6 +3,7 @@
 .PHONY: test-db-up test-db-down test-db-migrate
 .PHONY: prometheus-up prometheus-down prometheus-logs
 .PHONY: test-prometheus-up test-prometheus-down test-prometheus-logs
+.PHONY: openapi-dump frontend-generate-api
 .PHONY: frontend-install frontend-test frontend-lint frontend-format frontend-format-check frontend-type-check frontend-build
 
 PYTHON ?= python3
@@ -106,6 +107,13 @@ grafana-down:
 
 grafana-logs:
 	docker compose logs -f grafana
+
+# OpenAPI spec (backend) and API client (frontend)
+openapi-dump:
+	PYTHONPATH=. $(PYTHON) scripts/dump_openapi.py
+
+frontend-generate-api:
+	cd $(CONSOLE_DIR) && npm run generate-api
 
 # Frontend (polytrader-console)
 CONSOLE_DIR = polytrader-console
