@@ -68,8 +68,8 @@ export function MarketsDataTable({ columns, data }: MarketsDataTableProps) {
   })
 
   return (
-    <div className="w-full">
-      <div className="flex items-center py-4">
+    <div className="relative flex w-full flex-col gap-4 overflow-auto px-4 lg:px-6">
+      <div className="flex items-center justify-between gap-2">
         <Input
           placeholder="Filter markets..."
           value={(table.getColumn('market_slug')?.getFilterValue() as string) ?? ''}
@@ -78,11 +78,11 @@ export function MarketsDataTable({ columns, data }: MarketsDataTableProps) {
         />
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="outline" className="ml-auto">
+            <Button variant="outline" size="sm">
               Columns <ChevronDown className="ml-2 size-4" />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
+          <DropdownMenuContent align="end" className="w-56">
             <DropdownMenuGroup>
               {table
                 .getAllColumns()
@@ -101,9 +101,9 @@ export function MarketsDataTable({ columns, data }: MarketsDataTableProps) {
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-      <div className="overflow-hidden rounded-md border">
+      <div className="overflow-hidden rounded-lg border">
         <Table>
-          <TableHeader>
+          <TableHeader className="bg-muted sticky top-0 z-10">
             {table.getHeaderGroups().map((headerGroup) => (
               <TableRow key={headerGroup.id}>
                 {headerGroup.headers.map((header) => (
@@ -137,28 +137,33 @@ export function MarketsDataTable({ columns, data }: MarketsDataTableProps) {
           </TableBody>
         </Table>
       </div>
-      <div className="flex items-center justify-end space-x-2 py-4">
-        <div className="text-muted-foreground flex-1 text-sm">
+      <div className="flex items-center justify-between">
+        <div className="text-muted-foreground hidden flex-1 text-sm lg:flex">
           {table.getFilteredSelectedRowModel().rows.length} of{' '}
           {table.getFilteredRowModel().rows.length} row(s) selected.
         </div>
-        <div className="space-x-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => table.previousPage()}
-            disabled={!table.getCanPreviousPage()}
-          >
-            Previous
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => table.nextPage()}
-            disabled={!table.getCanNextPage()}
-          >
-            Next
-          </Button>
+        <div className="flex w-full items-center gap-8 lg:w-fit">
+          <div className="flex w-fit items-center justify-center text-sm font-medium">
+            Page {table.getState().pagination.pageIndex + 1} of {table.getPageCount()}
+          </div>
+          <div className="ml-auto flex items-center gap-2 lg:ml-0">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => table.previousPage()}
+              disabled={!table.getCanPreviousPage()}
+            >
+              Previous
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => table.nextPage()}
+              disabled={!table.getCanNextPage()}
+            >
+              Next
+            </Button>
+          </div>
         </div>
       </div>
     </div>
