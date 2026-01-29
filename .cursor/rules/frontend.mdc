@@ -1,0 +1,252 @@
+---
+alwaysApply: true
+---
+# frontend.mdc — Polytrader Frontend Rule (Operator–Trader Console)
+
+**Scope:** Vite + TypeScript + React console UI for the Polytrader trading platform.  
+**Location:** `polytrader-console/` (see `polytrader-console/README.md` for commands).  
+**Goal:** Fast, deterministic, debuggable UI that mirrors the event-driven backend without harming production stability.
+
+**Authoritative backend context:** `architecture.mdc`, `flows.mdc` — UI contracts follow backend boundaries.  
+**Governing model:** `alpha_operating_model.mdc` — the console must support strategy populations, comparison, selection, and risk-first thinking (not single-strategy worship).
+
+---
+
+## Vision — What the Console Should Feel Like (Foundational)
+
+The Polytrader Console is an **Operator–Trader Console**:
+a cockpit where we both **operate** the platform and **trade indirectly** by creating, tuning, and observing strategy instances.
+
+The console must support two modes of work:
+1) **Iteration mode (today):** humans act as operator/trader — create instances, observe, compare, and promote.
+2) **Agentic mode (future):** the system selects and runs the best instances automatically, while humans supervise via policy, guardrails, and audits.
+
+Principles:
+- **Truth-first:** show what the system knows, when it knew it, and what it does not know.
+- **Calm under load:** streaming bursts must not freeze the UI.
+- **Status always visible:** environment + connectivity + lag + time.
+
+---
+
+## 0) Prime Directive
+
+- This UI is an operator/trader **console**, not a marketing site.
+- Optimize for: **time-to-clarity**, **determinism**, **diff-friendly changes**, **operational safety**.
+- Prefer correctness and observability over cleverness.
+
+---
+
+## 1) Architecture Rules
+
+### 1.1 Console = Projections of Events
+
+- Treat UI state as a **read model** derived from the backend:
+  - **REST** for snapshots and CRUD.
+  - **WebSocket/SSE** for streams (ticks/orders/strategy events) when the backend exposes them.
+- Never invent state in the UI if the backend can be the source-of-truth.
+- All domain objects must have stable IDs: `marketId`, `orderId`, `strategyInstanceId`, `eventId`, `ts`.
+
+### 1.2 Layering
+
+- **pages/**: Route-level screens only (compose features).
+- **features/**: Vertical slices (markets, blotter, strategies).
+- **components/**: Shared presentational components.
+- **lib/**: Pure utilities (formatting, time, validation).
+- **api/**: Transport and typed API clients.
+- Keep all app code under `src/`.
+- Avoid circular dependencies between features.
+
+### 1.3 Data Contracts & Types
+
+- Types come from: OpenAPI-generated types, shared event schemas, or manual mirror of backend response models.
+- No `any`. If uncertain, use `unknown` and narrow with type guards.
+- Preserve backend naming (IDs, timestamps, field names) unless there is a strong reason to alias.
+
+### 1.4 Route Design (minimum)
+
+- `/markets` (list)
+- `/markets/:marketId` (tape + stats)
+- `/blotter/orders` and `/blotter/executions`
+- `/strategies` (instances)
+- `/strategies/:id` (timeline)
+- `/health` (service status, links to dashboards)
+
+---
+
+## 2) UX Best Practices (Trading Console)
+
+### 2.1 Tables Win
+
+- Default representation: **tables** with sortable columns.
+- Must support:
+  - quick filter/search
+  - copy-friendly formatting
+- Optional later:
+  - column visibility, saved views
+
+### 2.2 Streaming UI
+
+- Use **windowing/virtualization** for ticks/orders (large lists).
+- Use a bounded buffer for high-frequency tape:
+  - keep last N items (e.g. 500–5000 depending on perf)
+- Batch updates (debounce/raf) to avoid re-render storms.
+
+### 2.3 Time Handling
+
+- Every event/tick must display:
+  - event timestamp (UTC)
+  - local time (optional)
+- Use ISO timestamps in payloads; parse at the boundary.
+- Never mix ms/seconds; enforce one standard consistently.
+
+### 2.4 Safety for Controls (when actions exist)
+
+- Any action buttons (activate, cancel, live toggle) require:
+  - explicit confirmation
+  - visible environment badge (paper vs live)
+  - audit trail link (eventId)
+- No optimistic updates for trading-critical actions.
+
+### 2.5 Population-first UX (Required)
+
+- The console must make it easy to compare **multiple strategy instances**:
+  - list views are first-class (not only single-instance dashboards)
+  - stable sorting and filtering by: performance, risk, health, recency
+  - drilldowns must preserve context (link back to the cohort/list state)
+- Avoid UI assumptions that imply:
+  - “one active strategy”
+  - “one best parameter set”
+  - “promotion is irreversible”
+
+---
+
+## 3) API / Networking Rules
+
+### 3.1 Read/Write Separation
+
+- **Reads:** cached query client (TanStack Query recommended).
+- **Streams (when available):** one connection manager per stream type:
+  - `TicksStream`, `OrdersStream`, `StrategyEventsStream`
+- **Writes:** explicit command endpoints; no implicit state mutation.
+
+### 3.2 Error Handling
+
+- Always surface:
+  - connection status (connected/reconnecting/disconnected)
+  - last message time
+  - last error with copy button
+- Streams must auto-reconnect with backoff and jitter.
+
+### 3.3 Performance Budget
+
+- Any screen must remain responsive with:
+  - 5–10k rows in a table via virtualization
+  - 10+ events/sec without UI freezing
+- No unbounded arrays in React state.
+
+---
+
+## 4) Repo & Tooling Rules (polytrader-console)
+
+- **Runtime:** Standard Vite (avoid experimental bundlers that break tests).
+- **Config:** TS project refs supported (`tsconfig.app.json` / `tsconfig.node.json`).
+- **Gates:** before commit/PR run:
+  - `make test`
+  - `make lint`
+  - `make format-check`
+  - `make type-check`
+  (or repo-root equivalents)
+
+---
+
+## 5) Code Style & Quality Gates
+
+### 5.1 Formatting / Linting
+
+- **Prettier** is the formatting authority (`.prettierrc`).
+- **ESLint** enforces correctness and type-aware rules.
+- `eslint-config-prettier` must be last to avoid rule conflicts.
+
+### 5.2 React Rules
+
+- Prefer function components and hooks.
+- Keep state local; lift only when necessary.
+- For global concerns (session, connectivity): use a small store (e.g. Zustand) or context; avoid deep prop drilling.
+
+### 5.3 Testing Strategy (pragmatic)
+
+- **Stack:** Vitest, jsdom, @testing-library/react, @testing-library/jest-dom.
+- **Unit:** pure utilities and reducers/read-model folding.
+- **Component:** critical tables and formatting.
+- **E2E (Playwright):** later; smoke tests for routes and “stream disconnected” banner.
+
+---
+
+## 6) Observability in the UI (Mandatory)
+
+### 6.1 UI Telemetry (minimal but useful)
+
+Log structured events for:
+- route changes
+- stream connect/disconnect
+- message rate
+- render performance hotspots (optional)
+
+Do not spam; sample if high-frequency.
+
+### 6.2 Debug Panel (recommended early)
+
+Add `/debug` (or dev-only panel) showing:
+- active streams
+- message rates
+- buffer sizes
+- last event IDs
+- feature flags
+
+---
+
+## 7) Troubleshooting Playbook (Frontend)
+
+### 7.1 “UI freezes / CPU spikes”
+Check:
+- virtualization enabled?
+- unbounded arrays in state?
+- stream events causing full-table rerenders?
+Fix:
+- memoize
+- batch updates (raf/debounce)
+- move heavy derivations into read-model layer
+
+### 7.2 “Data looks wrong / out of order”
+Check:
+- timestamp parsing (ms vs s)
+- stable sorting (tie-break with `eventId`)
+Fix:
+- enforce one time format at boundary
+- sort key: `(ts, eventId)`
+
+### 7.3 “HMR / refresh issues”
+Check:
+- React Refresh rule: only export components from modules
+Fix:
+- move constants to separate files
+- allow constant exports if configured
+
+### 7.4 “WS reconnect loop”
+Check:
+- auth refresh
+- server close codes
+- heartbeat strategy
+Fix:
+- exponential backoff + jitter
+- show status banner + last close reason
+
+---
+
+## 8) Deliverables Checklist (PR Requirements)
+
+- `make test`, `make lint`, `make format-check`, `make type-check` pass.
+- Typed API contracts used (no `any`).
+- DevTools: console errors = zero.
+- Streaming screens: bounded buffers + virtualization (when streams exist).
+- Connection status visible on relevant pages (when streams exist).
