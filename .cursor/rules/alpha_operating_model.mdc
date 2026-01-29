@@ -1,0 +1,150 @@
+---
+alwaysApply: true
+---
+# alpha_operating_model.mdc — Alpha Operating Model
+
+**Scope:** Platform-wide rule describing how Polytrader generates and preserves alpha.  
+**Status:** Foundational. This is not an implementation detail, but a governing model.
+
+---
+
+## 1) Core Assertion
+
+Alpha does **not** come from a single strategy.
+
+Alpha emerges from:
+- a **population of strategies**
+- continuous **selection and allocation**
+- strict **risk management**
+- fast **adaptation to regime change**
+
+The system must be designed around this reality.
+
+---
+
+## 2) Unit of Optimization
+
+The primary unit of optimization is **not**:
+- a strategy
+- a parameter set
+- a backtest result
+
+The primary unit of optimization is:
+> the **risk-adjusted performance of a strategy population** over time.
+
+All components (research, execution, UI, automation) must support this.
+
+---
+
+## 3) Strategy Instances Are Experiments
+
+- Strategy code is immutable and disposable.
+- Strategy instances are **experiments**, not beliefs.
+- Parameterization creates *many* instances, not one “best” version.
+- Instances are expected to be:
+  - promoted
+  - demoted
+  - paused
+  - retired
+
+Longevity is earned, not assumed.
+
+---
+
+## 4) Selection Beats Optimization
+
+The system must prioritize:
+- selecting *which* instances to run
+- allocating *how much* risk/capital to each
+- deciding *when* to reduce or remove exposure
+
+Over:
+- squeezing marginal improvements from a single model.
+
+Capital allocation and enable/disable decisions are first-class sources of alpha.
+
+---
+
+## 5) Risk Is the Primary Constraint
+
+Risk management precedes return maximization.
+
+Risk must be controlled across:
+- volatility
+- drawdown
+- tail loss
+- correlation
+- liquidity
+- operational failure
+
+A profitable strategy that degrades portfolio risk is invalid.
+
+---
+
+## 6) Regime Awareness (Non-stationarity)
+
+Markets are non-stationary.
+
+Implications:
+- No strategy is permanently valid.
+- Performance decay is expected.
+- Correlations change.
+- Stability matters more than peak metrics.
+
+The system must support rapid adaptation:
+- fast feedback
+- reversible decisions
+- continuous re-evaluation
+
+---
+
+## 7) Evidence Over Intuition
+
+All decisions (promotion, demotion, allocation) must be supported by:
+- measured performance
+- risk metrics
+- correlation context
+- event-level auditability
+
+The platform should make it easy to answer:
+> “Why is this instance running right now?”
+
+---
+
+## 8) Human → Agentic Continuum
+
+Early phase:
+- humans create, evaluate, and select instances
+
+Later phase:
+- the system performs selection and allocation automatically
+- humans define:
+  - objectives
+  - constraints
+  - risk budgets
+  - override rules
+
+Human override must always remain possible.
+
+---
+
+## 9) Design Consequences (Non-negotiable)
+
+The platform must not assume:
+- a single active strategy
+- static parameter sets
+- irreversible promotion decisions
+- always-on models
+
+Any component that encodes these assumptions violates the Alpha Operating Model.
+
+---
+
+## 10) Summary Rule
+
+> Alpha is produced by **managing uncertainty better than others**,  
+> through selection, risk control, and adaptation —  
+> not by predicting markets with a single strategy.
+
+Maximize long-term risk-adjusted returns subject to survival constraints,
+by continuously reallocating capital toward edges that currently exist.
