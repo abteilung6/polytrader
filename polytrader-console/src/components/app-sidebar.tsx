@@ -1,7 +1,8 @@
 'use client'
 
-import { Link, useMatchRoute } from '@tanstack/react-router'
-import { BarChart3 } from 'lucide-react'
+import { useState } from 'react'
+import { Link } from '@tanstack/react-router'
+import { BarChart3, ChevronDown, Workflow } from 'lucide-react'
 
 import {
   Sidebar,
@@ -12,31 +13,27 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
+  SidebarRail,
 } from '@/components/ui/sidebar'
-
-const navItems = [
-  {
-    title: 'Markets',
-    to: '/markets',
-    icon: BarChart3,
-  },
-]
+import { cn } from '@/lib/utils'
 
 interface AppSidebarProps {
   variant?: 'sidebar' | 'floating' | 'inset'
 }
 
 export function AppSidebar({ variant = 'inset' }: AppSidebarProps) {
-  const matchRoute = useMatchRoute()
-  const matchMarkets = matchRoute({ to: '/markets', fuzzy: true })
+  const [strategiesOpen, setStrategiesOpen] = useState(true)
 
   return (
-    <Sidebar collapsible="offcanvas" variant={variant}>
+    <Sidebar collapsible="icon" variant={variant}>
       <SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton asChild className="data-[slot=sidebar-menu-button]:!p-1.5">
-              <Link to="/markets">
+              <Link to="/">
                 <span className="text-base font-semibold">Polytrader</span>
               </Link>
             </SidebarMenuButton>
@@ -47,24 +44,54 @@ export function AppSidebar({ variant = 'inset' }: AppSidebarProps) {
         <SidebarGroup>
           <SidebarGroupContent className="flex flex-col gap-2">
             <SidebarMenu>
-              {navItems.map((item) => (
-                <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton
-                    asChild
-                    isActive={item.to === '/markets' ? !!matchMarkets : false}
-                    tooltip={item.title}
-                  >
-                    <Link to={item.to}>
-                      <item.icon />
-                      <span>{item.title}</span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
+              <SidebarMenuItem>
+                <SidebarMenuButton asChild tooltip="Markets">
+                  <Link to="/markets">
+                    <BarChart3 />
+                    <span>Markets</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  tooltip="Strategies"
+                  className="cursor-pointer"
+                  onClick={() => setStrategiesOpen((open) => !open)}
+                >
+                  <Workflow />
+                  <span>Strategies</span>
+                  <ChevronDown
+                    className={cn(
+                      'ml-auto size-4 shrink-0 transition-transform',
+                      !strategiesOpen && '-rotate-90',
+                    )}
+                    aria-hidden
+                  />
+                </SidebarMenuButton>
+                {strategiesOpen && (
+                  <SidebarMenuSub>
+                    <SidebarMenuSubItem>
+                      <SidebarMenuSubButton asChild>
+                        <Link to="/strategies/templates">
+                          <span>Templates</span>
+                        </Link>
+                      </SidebarMenuSubButton>
+                    </SidebarMenuSubItem>
+                    <SidebarMenuSubItem>
+                      <SidebarMenuSubButton asChild>
+                        <Link to="/strategies/instances">
+                          <span>Instances</span>
+                        </Link>
+                      </SidebarMenuSubButton>
+                    </SidebarMenuSubItem>
+                  </SidebarMenuSub>
+                )}
+              </SidebarMenuItem>
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
+      <SidebarRail />
     </Sidebar>
   )
 }

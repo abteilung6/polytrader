@@ -68,7 +68,7 @@ export function MarketsDataTable({ columns, data }: MarketsDataTableProps) {
   })
 
   return (
-    <div className="relative flex w-full flex-col gap-4 overflow-auto px-4 lg:px-6">
+    <div className="relative flex w-full flex-col gap-4 overflow-auto">
       <div className="flex items-center justify-between gap-2">
         <Input
           placeholder="Filter markets..."
