@@ -42,7 +42,7 @@ const marketDetailRoute = createRoute({
   component: MarketDetailPage,
 })
 
-const routeTree = rootRoute.addChildren([
+export const routeTree = rootRoute.addChildren([
   layoutRoute.addChildren([indexRoute, marketsRoute.addChildren([marketDetailRoute])]),
 ])
 

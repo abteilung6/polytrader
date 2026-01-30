@@ -1,6 +1,11 @@
 import type { AxiosResponse, InternalAxiosRequestConfig } from 'axios'
 
-export { createTestQueryClient, renderWithQuery } from './render'
+export {
+  createTestQueryClient,
+  renderWithQuery,
+  renderWithRouter,
+  type RenderWithRouterOptions,
+} from './render'
 
 export interface MockResponseOptions<T> {
   data: T
