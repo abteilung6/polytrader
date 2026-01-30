@@ -31,25 +31,24 @@ import {
   TableRow,
 } from '@/components/ui/table'
 
-import type { MarketInfoResponse } from '@/lib/api'
+import type { StrategyTypeResponse } from '@/lib/api'
 
-interface MarketsDataTableProps {
-  columns: ColumnDef<MarketInfoResponse>[]
-  data: MarketInfoResponse[]
+interface StrategyTemplatesDataTableProps {
+  columns: ColumnDef<StrategyTypeResponse>[]
+  data: StrategyTypeResponse[]
 }
 
-export function MarketsDataTable({ columns, data }: MarketsDataTableProps) {
+export function StrategyTemplatesDataTable({ columns, data }: StrategyTemplatesDataTableProps) {
   const [sorting, setSorting] = React.useState<SortingState>([])
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([])
   const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({})
-  const [rowSelection, setRowSelection] = React.useState({})
 
   // TanStack Table returns unstable function refs; React Compiler skips memoization (known limitation)
   // eslint-disable-next-line react-hooks/incompatible-library -- useReactTable API
   const table = useReactTable({
     data,
     columns,
-    getRowId: (row) => `${row.market_slug}-${row.outcome}`,
+    getRowId: (row) => row.type_id,
     initialState: { pagination: { pageSize: 15 } },
     onSortingChange: setSorting,
     onColumnFiltersChange: setColumnFilters,
@@ -58,12 +57,10 @@ export function MarketsDataTable({ columns, data }: MarketsDataTableProps) {
     getSortedRowModel: getSortedRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     onColumnVisibilityChange: setColumnVisibility,
-    onRowSelectionChange: setRowSelection,
     state: {
       sorting,
       columnFilters,
       columnVisibility,
-      rowSelection,
     },
   })
 
@@ -71,9 +68,9 @@ export function MarketsDataTable({ columns, data }: MarketsDataTableProps) {
     <div className="relative flex w-full flex-col gap-4 overflow-auto">
       <div className="flex items-center justify-between gap-2">
         <Input
-          placeholder="Filter markets..."
-          value={(table.getColumn('market_slug')?.getFilterValue() as string) ?? ''}
-          onChange={(event) => table.getColumn('market_slug')?.setFilterValue(event.target.value)}
+          placeholder="Filter templates..."
+          value={(table.getColumn('type_id')?.getFilterValue() as string) ?? ''}
+          onChange={(event) => table.getColumn('type_id')?.setFilterValue(event.target.value)}
           className="max-w-sm"
         />
         <DropdownMenu>
@@ -119,7 +116,7 @@ export function MarketsDataTable({ columns, data }: MarketsDataTableProps) {
           <TableBody>
             {table.getRowModel().rows?.length ? (
               table.getRowModel().rows.map((row) => (
-                <TableRow key={row.id} data-state={row.getIsSelected() && 'selected'}>
+                <TableRow key={row.id}>
                   {row.getVisibleCells().map((cell) => (
                     <TableCell key={cell.id}>
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}
@@ -139,8 +136,7 @@ export function MarketsDataTable({ columns, data }: MarketsDataTableProps) {
       </div>
       <div className="flex items-center justify-between">
         <div className="text-muted-foreground hidden flex-1 text-sm lg:flex">
-          {table.getFilteredSelectedRowModel().rows.length} of{' '}
-          {table.getFilteredRowModel().rows.length} row(s) selected.
+          {table.getFilteredRowModel().rows.length} row(s)
         </div>
         <div className="flex w-full items-center gap-8 lg:w-fit">
           <div className="flex w-fit items-center justify-center text-sm font-medium">

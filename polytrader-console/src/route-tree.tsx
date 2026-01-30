@@ -5,25 +5,17 @@ import {
   Outlet,
   redirect,
 } from '@tanstack/react-router'
-import { LayoutComponent, NotFound } from '@/route-components'
 import { MarketDetailPage } from '@/pages/market-detail'
 import { MarketsPage } from '@/pages/markets'
-import { StrategiesInstancesPage } from '@/pages/strategies-instances'
 import { StrategiesTemplatesPage } from '@/pages/strategies-templates'
+import { StrategiesInstancesPage } from '@/pages/strategies-instances'
 
 const rootRoute = createRootRoute({
   component: () => <Outlet />,
-  notFoundComponent: NotFound,
-})
-
-const layoutRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  id: 'layout',
-  component: LayoutComponent,
 })
 
 const indexRoute = createRoute({
-  getParentRoute: () => layoutRoute,
+  getParentRoute: () => rootRoute,
   path: '/',
   beforeLoad: () => {
     // TanStack Router redirect() is thrown for control flow; not an Error instance
@@ -33,48 +25,35 @@ const indexRoute = createRoute({
 })
 
 const marketsRoute = createRoute({
-  getParentRoute: () => layoutRoute,
-  path: 'markets',
-  component: () => <Outlet />,
-})
-
-const marketsIndexRoute = createRoute({
-  getParentRoute: () => marketsRoute,
-  path: '/',
+  getParentRoute: () => rootRoute,
+  path: '/markets',
   component: MarketsPage,
 })
 
 const marketDetailRoute = createRoute({
-  getParentRoute: () => marketsRoute,
-  path: '$marketSlug',
+  getParentRoute: () => rootRoute,
+  path: '/markets/$marketSlug',
   component: MarketDetailPage,
 })
 
 const strategiesTemplatesRoute = createRoute({
-  getParentRoute: () => layoutRoute,
-  path: 'strategies/templates',
+  getParentRoute: () => rootRoute,
+  path: '/strategies/templates',
   component: StrategiesTemplatesPage,
 })
 
 const strategiesInstancesRoute = createRoute({
-  getParentRoute: () => layoutRoute,
-  path: 'strategies/instances',
+  getParentRoute: () => rootRoute,
+  path: '/strategies/instances',
   component: StrategiesInstancesPage,
 })
 
 export const routeTree = rootRoute.addChildren([
-  layoutRoute.addChildren([
-    indexRoute,
-    marketsRoute.addChildren([marketsIndexRoute, marketDetailRoute]),
-    strategiesTemplatesRoute,
-    strategiesInstancesRoute,
-  ]),
+  indexRoute,
+  marketsRoute,
+  marketDetailRoute,
+  strategiesTemplatesRoute,
+  strategiesInstancesRoute,
 ])
 
 export const router = createRouter({ routeTree })
-
-declare module '@tanstack/react-router' {
-  interface Register {
-    router: typeof router
-  }
-}

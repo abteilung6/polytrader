@@ -1,6 +1,10 @@
 import type { MarketInfoResponse } from '../lib/api/models/market-info-response'
 import type { MarketsResponse } from '../lib/api/models/markets-response'
 import type { MarketTickResponse } from '../lib/api/models/market-tick-response'
+import type { StrategyResponse } from '../lib/api/models/strategy-response'
+import type { StrategiesResponse } from '../lib/api/models/strategies-response'
+import type { StrategyTypeResponse } from '../lib/api/models/strategy-type-response'
+import type { StrategyTypesResponse } from '../lib/api/models/strategy-types-response'
 
 const defaultMarket: MarketInfoResponse = {
   market_slug: 'btc-updown-15m-1767900600',
@@ -43,5 +47,54 @@ export const createMockMarketTick = (
   overrides: Partial<MarketTickResponse> = {},
 ): MarketTickResponse => ({
   ...defaultMarketTick,
+  ...overrides,
+})
+
+const defaultStrategyType: StrategyTypeResponse = {
+  type_id: 'simple_threshold',
+  name: 'Simple threshold',
+  description: 'Threshold-based strategy',
+  available_versions: ['1.0.0', '1.1.0'],
+  parameter_schema: {},
+}
+
+export const createMockStrategyType = (
+  overrides: Partial<StrategyTypeResponse> = {},
+): StrategyTypeResponse => ({
+  ...defaultStrategyType,
+  ...overrides,
+})
+
+export const createMockStrategyTypesResponse = (
+  overrides: Partial<StrategyTypesResponse> = {},
+): StrategyTypesResponse => ({
+  types: overrides.types ?? [],
+  ...overrides,
+})
+
+const defaultStrategy: StrategyResponse = {
+  strategy_id: 'strat-001',
+  name: 'My threshold strategy',
+  config: {},
+  template_type_id: 'simple_threshold',
+  template_version: '1.1.0',
+  desired_state: 'RUNNING',
+  actual_state: 'RUNNING',
+  created_at: '2025-01-27T12:00:00Z',
+  updated_at: '2025-01-27T12:00:00Z',
+  enabled: true,
+}
+
+export const createMockStrategyResponse = (
+  overrides: Partial<StrategyResponse> = {},
+): StrategyResponse => ({
+  ...defaultStrategy,
+  ...overrides,
+})
+
+export const createMockStrategiesResponse = (
+  overrides: Partial<StrategiesResponse> = {},
+): StrategiesResponse => ({
+  strategies: overrides.strategies ?? [],
   ...overrides,
 })

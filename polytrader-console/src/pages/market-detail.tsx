@@ -1,16 +1,17 @@
 import type { FC } from 'react'
 import { useParams } from '@tanstack/react-router'
 import { Line, LineChart, XAxis } from 'recharts'
-import { useHistoricalTicksQuery } from '../hooks/historical-ticks'
-import { useMarketsQuery } from '../hooks/markets'
+
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   ChartContainer,
   ChartTooltip,
   ChartTooltipContent,
   type ChartConfig,
-} from '../components/ui/chart'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card'
-import type { HistoricalTicksResponse } from '../lib/api'
+} from '@/components/ui/chart'
+import { useHistoricalTicksQuery } from '@/hooks/historical-ticks'
+import { useMarketsQuery } from '@/hooks/markets'
+import type { HistoricalTicksResponse } from '@/lib/api'
 
 const chartConfig = {
   up: {
@@ -85,11 +86,7 @@ export const MarketDetailPage: FC = () => {
   )
 
   if (!marketSlug) {
-    return (
-      <div className="flex min-h-svh flex-col bg-background p-4">
-        <p className="text-muted-foreground">Market: —</p>
-      </div>
-    )
+    return <p className="text-muted-foreground">Market: —</p>
   }
 
   const loading = upTicks.isLoading || downTicks.isLoading
@@ -97,38 +94,38 @@ export const MarketDetailPage: FC = () => {
 
   if (loading) {
     return (
-      <div className="flex min-h-svh flex-col bg-background p-4">
+      <>
         <p className="text-muted-foreground">Market: {marketSlug}</p>
         <p className="text-muted-foreground">Loading ticks…</p>
-      </div>
+      </>
     )
   }
 
   if (error) {
     return (
-      <div className="flex min-h-svh flex-col bg-background p-4">
+      <>
         <p className="text-muted-foreground">Market: {marketSlug}</p>
         <p className="text-destructive">Error loading ticks: {String(error)}</p>
-      </div>
+      </>
     )
   }
 
   const chartData = buildChartData(upTicks.data, downTicks.data)
 
   return (
-    <div className="flex min-h-svh flex-col gap-4 bg-background p-4">
-      <Card className="py-4 sm:py-0">
+    <div className="flex flex-col gap-2">
+      <Card className="py-2 sm:py-0">
         <CardHeader className="flex flex-col items-stretch border-b !p-0 sm:flex-row">
-          <div className="flex flex-1 flex-col justify-center gap-1 p-6">
+          <div className="flex flex-1 flex-col justify-center gap-1 p-4">
             <CardTitle className="text-lg font-semibold leading-none tracking-tight">
               {marketSlug}
             </CardTitle>
             <CardDescription>Historical ticks mid price over time (UTC)</CardDescription>
           </div>
         </CardHeader>
-        <CardContent className="px-2 sm:p-6">
+        <CardContent className="px-0 sm:px-2">
           <ChartContainer config={chartConfig} className="aspect-auto h-[250px] w-full">
-            <LineChart accessibilityLayer data={chartData} margin={{ left: 12, right: 12 }}>
+            <LineChart accessibilityLayer data={chartData} margin={{ left: 4, right: 4 }}>
               <XAxis
                 dataKey="tsMs"
                 type="number"
@@ -138,7 +135,7 @@ export const MarketDetailPage: FC = () => {
                 tickMargin={8}
                 minTickGap={20}
                 tickCount={12}
-                tickFormatter={(val) => formatTsShort(Number(val))}
+                tickFormatter={(val: number) => formatTsShort(val)}
                 tick={{ style: { fontSize: '0.65rem' } }}
               />
               <ChartTooltip
