@@ -1,6 +1,6 @@
 # MarketInfoResponse
 
-Market information response.  Represents a market/outcome pair with latest tick timestamp and active status.
+Market information response.  Represents a market/outcome pair with latest tick timestamp, active status, and optional market window start/end (derived from slug).
 
 ## Properties
 
@@ -10,6 +10,8 @@ Name | Type | Description | Notes
 **outcome** | **string** | Market outcome: UP or DOWN | [default to undefined]
 **latest_tick_ts** | **string** |  | [default to undefined]
 **active** | **boolean** | Whether market is currently active (current window) | [default to undefined]
+**start_date** | **string** |  | [optional] [default to undefined]
+**end_date** | **string** |  | [optional] [default to undefined]
 
 ## Example
 
@@ -21,6 +23,8 @@ const instance: MarketInfoResponse = {
     outcome,
     latest_tick_ts,
     active,
+    start_date,
+    end_date,
 };
 ```
 

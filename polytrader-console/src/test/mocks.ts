@@ -7,6 +7,8 @@ const defaultMarket: MarketInfoResponse = {
   outcome: 'UP',
   latest_tick_ts: '2025-01-27T12:00:00Z',
   active: false,
+  start_date: '2025-01-27T12:00:00Z',
+  end_date: '2025-01-27T12:15:00Z',
 }
 
 export const createMockMarket = (

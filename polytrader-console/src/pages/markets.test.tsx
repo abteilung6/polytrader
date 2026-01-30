@@ -27,6 +27,8 @@ describe('MarketsPage', () => {
     const headerRow = rows[0]
     expect(headerRow).toHaveTextContent('Market')
     expect(headerRow).toHaveTextContent('Outcome')
+    expect(headerRow).toHaveTextContent('Start date')
+    expect(headerRow).toHaveTextContent('End date')
     expect(headerRow).toHaveTextContent('Active')
 
     const dataRow = rows[1]
@@ -55,9 +57,7 @@ describe('MarketsPage', () => {
     renderWithRouter({
       initialEntries: [`/markets/${defaultedMarket.market_slug}`],
     })
-    expect(
-      await screen.findByText(new RegExp(`Market:\\s*${defaultedMarket.market_slug}`)),
-    ).toBeInTheDocument()
+    expect(await screen.findByText(defaultedMarket.market_slug)).toBeInTheDocument()
   })
 
   it('renders empty state when no markets', async () => {
