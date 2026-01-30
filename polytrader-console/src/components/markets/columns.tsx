@@ -71,10 +71,15 @@ export const marketColumns: ColumnDef<MarketInfoResponse>[] = [
     ),
     cell: ({ row }) => {
       const v = row.getValue('start_date')
-      if (v == null || v === '') return <span className="text-muted-foreground">—</span>
+      if (v == null || v === '' || (typeof v !== 'string' && typeof v !== 'number'))
+        return <span className="text-muted-foreground">—</span>
       try {
         const d = new Date(v)
-        return <span className="tabular-nums">{d.toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })}</span>
+        return (
+          <span className="tabular-nums">
+            {d.toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })}
+          </span>
+        )
       } catch {
         return <span className="text-muted-foreground">—</span>
       }
@@ -90,10 +95,15 @@ export const marketColumns: ColumnDef<MarketInfoResponse>[] = [
     ),
     cell: ({ row }) => {
       const v = row.getValue('end_date')
-      if (v == null || v === '') return <span className="text-muted-foreground">—</span>
+      if (v == null || v === '' || (typeof v !== 'string' && typeof v !== 'number'))
+        return <span className="text-muted-foreground">—</span>
       try {
         const d = new Date(v)
-        return <span className="tabular-nums">{d.toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })}</span>
+        return (
+          <span className="tabular-nums">
+            {d.toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })}
+          </span>
+        )
       } catch {
         return <span className="text-muted-foreground">—</span>
       }

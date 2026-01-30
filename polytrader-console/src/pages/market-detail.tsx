@@ -2,6 +2,7 @@ import type { FC } from 'react'
 import { useParams } from '@tanstack/react-router'
 import { Line, LineChart, XAxis } from 'recharts'
 import { useHistoricalTicksQuery } from '../hooks/historical-ticks'
+import { useMarketsQuery } from '../hooks/markets'
 import {
   ChartContainer,
   ChartTooltip,
@@ -22,7 +23,7 @@ const chartConfig = {
   },
 } satisfies ChartConfig
 
-type ChartDatum = { ts: string; up: number | undefined; down: number | undefined }
+type ChartDatum = { ts: string; tsMs: number; up: number | undefined; down: number | undefined }
 
 function buildChartData(
   upResponse: HistoricalTicksResponse | undefined,
@@ -34,15 +35,18 @@ function buildChartData(
   const allTs = [...new Set([...upByTs.keys(), ...downByTs.keys()])].sort()
   return allTs.map((ts) => ({
     ts,
+    tsMs: new Date(ts).getTime(),
     up: upByTs.get(ts),
     down: downByTs.get(ts),
   }))
 }
 
 /** Format as "05:18 PM" / "05:18 AM". */
-function formatTsShort(ts: string): string {
+function formatTsShort(ts: string): string
+function formatTsShort(tsMs: number): string
+function formatTsShort(tsOrMs: string | number): string {
   try {
-    const d = new Date(ts)
+    const d = typeof tsOrMs === 'number' ? new Date(tsOrMs) : new Date(tsOrMs)
     const h = d.getHours()
     const m = d.getMinutes()
     const hour12 = h % 12 || 12
@@ -50,12 +54,27 @@ function formatTsShort(ts: string): string {
     const period = h < 12 ? 'AM' : 'PM'
     return `${pad(hour12)}:${pad(m)} ${period}`
   } catch {
-    return ts.slice(0, 19)
+    return typeof tsOrMs === 'string' ? tsOrMs.slice(0, 19) : '—'
   }
+}
+
+/** Derive pattern from slug (e.g. "btc-updown-15m-1769789700" -> "btc-updown-15m"). */
+function patternFromSlug(slug: string): string {
+  const parts = slug.split('-')
+  if (parts.length < 2) return slug
+  return parts.slice(0, -1).join('-')
 }
 
 export const MarketDetailPage: FC = () => {
   const { marketSlug } = useParams({ strict: false })
+  const pattern = marketSlug ? patternFromSlug(marketSlug) : ''
+  const marketsQuery = useMarketsQuery({ pattern: pattern || undefined })
+  const market = marketSlug
+    ? marketsQuery.data?.markets?.find((m) => m.market_slug === marketSlug)
+    : undefined
+  const startMs = market?.start_date ? new Date(market.start_date).getTime() : undefined
+  const endMs = market?.end_date ? new Date(market.end_date).getTime() : undefined
+
   const upTicks = useHistoricalTicksQuery(
     { marketSlug: marketSlug ?? '', outcome: 'UP' },
     { enabled: !!marketSlug },
@@ -111,12 +130,15 @@ export const MarketDetailPage: FC = () => {
           <ChartContainer config={chartConfig} className="aspect-auto h-[250px] w-full">
             <LineChart accessibilityLayer data={chartData} margin={{ left: 12, right: 12 }}>
               <XAxis
-                dataKey="ts"
+                dataKey="tsMs"
+                type="number"
+                domain={startMs != null && endMs != null ? [startMs, endMs] : undefined}
                 tickLine={false}
                 axisLine={false}
                 tickMargin={8}
-                minTickGap={32}
-                tickFormatter={formatTsShort}
+                minTickGap={20}
+                tickCount={12}
+                tickFormatter={(val) => formatTsShort(Number(val))}
                 tick={{ style: { fontSize: '0.65rem' } }}
               />
               <ChartTooltip
@@ -129,7 +151,11 @@ export const MarketDetailPage: FC = () => {
                         | { name?: string; value?: number; dataKey?: string; color?: string }[]
                         | undefined
                     }
-                    label={label != null ? formatTsShort(String(label)) : undefined}
+                    label={
+                      label != null
+                        ? formatTsShort(typeof label === 'number' ? label : Number(label))
+                        : undefined
+                    }
                   />
                 )}
               />
