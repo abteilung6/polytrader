@@ -1,4 +1,5 @@
 import type { ColumnDef } from '@tanstack/react-table'
+import { Link } from '@tanstack/react-router'
 import { ArrowUpDown } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
@@ -37,7 +38,18 @@ export const marketColumns: ColumnDef<MarketInfoResponse>[] = [
         <ArrowUpDown className="ml-2 size-4" />
       </Button>
     ),
-    cell: ({ row }) => <div className="font-medium">{row.getValue('market_slug')}</div>,
+    cell: ({ row }) => {
+      const slug = String(row.getValue('market_slug'))
+      return (
+        <Link
+          to="/markets/$marketSlug"
+          params={{ marketSlug: slug }}
+          className="font-medium hover:underline"
+        >
+          {slug}
+        </Link>
+      )
+    },
   },
   {
     accessorKey: 'outcome',

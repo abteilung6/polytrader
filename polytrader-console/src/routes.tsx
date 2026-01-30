@@ -33,6 +33,12 @@ const indexRoute = createRoute({
 const marketsRoute = createRoute({
   getParentRoute: () => layoutRoute,
   path: 'markets',
+  component: () => <Outlet />,
+})
+
+const marketsIndexRoute = createRoute({
+  getParentRoute: () => marketsRoute,
+  path: '/',
   component: MarketsPage,
 })
 
@@ -43,7 +49,10 @@ const marketDetailRoute = createRoute({
 })
 
 export const routeTree = rootRoute.addChildren([
-  layoutRoute.addChildren([indexRoute, marketsRoute.addChildren([marketDetailRoute])]),
+  layoutRoute.addChildren([
+    indexRoute,
+    marketsRoute.addChildren([marketsIndexRoute, marketDetailRoute]),
+  ]),
 ])
 
 export const router = createRouter({ routeTree })
