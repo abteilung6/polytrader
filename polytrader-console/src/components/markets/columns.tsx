@@ -1,4 +1,5 @@
 import type { ColumnDef } from '@tanstack/react-table'
+import { Link } from '@tanstack/react-router'
 import { ArrowUpDown } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
@@ -37,7 +38,18 @@ export const marketColumns: ColumnDef<MarketInfoResponse>[] = [
         <ArrowUpDown className="ml-2 size-4" />
       </Button>
     ),
-    cell: ({ row }) => <div className="font-medium">{row.getValue('market_slug')}</div>,
+    cell: ({ row }) => {
+      const slug = String(row.getValue('market_slug'))
+      return (
+        <Link
+          to="/markets/$marketSlug"
+          params={{ marketSlug: slug }}
+          className="font-medium hover:underline"
+        >
+          {slug}
+        </Link>
+      )
+    },
   },
   {
     accessorKey: 'outcome',
@@ -50,16 +62,52 @@ export const marketColumns: ColumnDef<MarketInfoResponse>[] = [
     cell: ({ row }) => <div>{row.getValue('outcome')}</div>,
   },
   {
-    accessorKey: 'latest_tick_ts',
+    accessorKey: 'start_date',
     header: ({ column }) => (
       <Button variant="ghost" onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}>
-        Latest tick
+        Start date
         <ArrowUpDown className="ml-2 size-4" />
       </Button>
     ),
-    cell: ({ row }) => (
-      <div className="text-muted-foreground">{row.getValue('latest_tick_ts') ?? '—'}</div>
+    cell: ({ row }) => {
+      const v = row.getValue('start_date')
+      if (v == null || v === '' || (typeof v !== 'string' && typeof v !== 'number'))
+        return <span className="text-muted-foreground">—</span>
+      try {
+        const d = new Date(v)
+        return (
+          <span className="tabular-nums">
+            {d.toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })}
+          </span>
+        )
+      } catch {
+        return <span className="text-muted-foreground">—</span>
+      }
+    },
+  },
+  {
+    accessorKey: 'end_date',
+    header: ({ column }) => (
+      <Button variant="ghost" onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}>
+        End date
+        <ArrowUpDown className="ml-2 size-4" />
+      </Button>
     ),
+    cell: ({ row }) => {
+      const v = row.getValue('end_date')
+      if (v == null || v === '' || (typeof v !== 'string' && typeof v !== 'number'))
+        return <span className="text-muted-foreground">—</span>
+      try {
+        const d = new Date(v)
+        return (
+          <span className="tabular-nums">
+            {d.toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })}
+          </span>
+        )
+      } catch {
+        return <span className="text-muted-foreground">—</span>
+      }
+    },
   },
   {
     accessorKey: 'active',

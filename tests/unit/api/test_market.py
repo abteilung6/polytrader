@@ -546,11 +546,19 @@ class TestGetMarketsEndpoint:
         assert up_market["outcome"] == "UP"
         assert up_market["latest_tick_ts"] is not None
         assert "active" in up_market
+        assert "start_date" in up_market
+        assert "end_date" in up_market
+        assert up_market["start_date"] is not None
+        assert up_market["end_date"] is not None
+        assert up_market["start_date"] < up_market["end_date"]
 
         down_market = next(m for m in data["markets"] if m["outcome"] == "DOWN")
         assert down_market["market_slug"] == "btc-updown-15m-1767900600"
         assert down_market["outcome"] == "DOWN"
         assert down_market["latest_tick_ts"] is None
+        assert down_market["start_date"] is not None
+        assert down_market["end_date"] is not None
+        assert down_market["start_date"] < down_market["end_date"]
 
     def test_pattern_filter(self, client: TestClient, mock_repository: MagicMock) -> None:
         """Test that pattern filter works correctly."""
@@ -658,6 +666,25 @@ class TestGetMarketsEndpoint:
         # First market should have timestamp, second should be null
         assert data["markets"][0]["latest_tick_ts"] is not None
         assert data["markets"][1]["latest_tick_ts"] is None
+
+    def test_unparseable_slug_returns_null_start_end_dates(
+        self, client: TestClient, mock_repository: MagicMock
+    ) -> None:
+        """Test that unparseable market slug yields null start_date and end_date."""
+        mock_repository.get_markets = AsyncMock(
+            return_value=[("no-window-here", "UP")],
+        )
+        mock_repository.get_latest = AsyncMock(return_value=None)
+
+        response = client.get("/api/v1/market/markets")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["markets"]) == 1
+        market = data["markets"][0]
+        assert market["market_slug"] == "no-window-here"
+        assert market["start_date"] is None
+        assert market["end_date"] is None
 
     def test_database_error_returns_500(
         self, client: TestClient, mock_repository: MagicMock

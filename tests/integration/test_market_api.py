@@ -432,6 +432,11 @@ def test_get_markets_success(client: TestClient, sample_tick: tuple[str, str]) -
     assert market["outcome"] == outcome
     assert market["latest_tick_ts"] is not None
     assert "active" in market
+    assert "start_date" in market
+    assert "end_date" in market
+    assert market["start_date"] is not None
+    assert market["end_date"] is not None
+    assert market["start_date"] < market["end_date"]
 
     # Verify Pydantic model structure
     from polytrader.api.models import MarketsResponse
@@ -452,9 +457,13 @@ def test_get_markets_pattern_filter(client: TestClient, sample_tick: tuple[str, 
     assert response.status_code == 200
     data = response.json()
 
-    # All returned markets should match the pattern
+    # All returned markets should match the pattern and have window dates when parseable
     for market in data["markets"]:
         assert market["market_slug"].startswith(pattern + "-")
+        assert "start_date" in market
+        assert "end_date" in market
+        if market["start_date"] is not None and market["end_date"] is not None:
+            assert market["start_date"] < market["end_date"]
 
 
 @pytest.mark.integration

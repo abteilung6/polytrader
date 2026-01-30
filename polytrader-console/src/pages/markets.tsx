@@ -1,6 +1,5 @@
 import type { FC } from 'react'
 
-import { DashboardLayout } from '@/components/dashboard-layout'
 import { MarketsDataTable } from '@/components/markets/markets-data-table'
 import { marketColumns } from '@/components/markets/columns'
 import { useMarketsQuery } from '@/hooks/markets'
@@ -30,9 +29,5 @@ export const MarketsPage: FC = () => {
 
   const markets = data.markets ?? []
 
-  return (
-    <DashboardLayout>
-      <MarketsDataTable columns={marketColumns} data={markets} />
-    </DashboardLayout>
-  )
+  return <MarketsDataTable columns={marketColumns} data={markets} />
 }

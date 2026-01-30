@@ -420,6 +420,68 @@ class TestMarketInfoResponse:
 
         assert data["latest_tick_ts"] is None
 
+    def test_market_info_response_with_start_end_dates(self) -> None:
+        """Test MarketInfoResponse with start_date and end_date set."""
+        ts_wall = datetime(2025, 1, 27, 12, 0, 0, tzinfo=UTC)
+        start_date = datetime(2025, 1, 27, 12, 0, 0, tzinfo=UTC)
+        end_date = datetime(2025, 1, 27, 12, 15, 0, tzinfo=UTC)
+
+        response = MarketInfoResponse(
+            market_slug="btc-updown-15m-1767900600",
+            outcome="UP",
+            latest_tick_ts=ts_wall,
+            active=True,
+            start_date=start_date,
+            end_date=end_date,
+        )
+
+        assert response.start_date == start_date
+        assert response.end_date == end_date
+
+    def test_market_info_response_with_null_start_end_dates(self) -> None:
+        """Test MarketInfoResponse with null start_date and end_date (unparseable slug)."""
+        response = MarketInfoResponse(
+            market_slug="btc-updown-15m-1767900600",
+            outcome="UP",
+            latest_tick_ts=None,
+            active=False,
+        )
+
+        assert response.start_date is None
+        assert response.end_date is None
+
+    def test_market_info_response_start_end_serialization(self) -> None:
+        """Test MarketInfoResponse start_date/end_date serialize to ISO strings."""
+        start_date = datetime(2025, 1, 27, 12, 0, 0, tzinfo=UTC)
+        end_date = datetime(2025, 1, 27, 12, 15, 0, tzinfo=UTC)
+
+        response = MarketInfoResponse(
+            market_slug="btc-updown-15m-1767900600",
+            outcome="UP",
+            latest_tick_ts=None,
+            active=False,
+            start_date=start_date,
+            end_date=end_date,
+        )
+
+        json_data = response.model_dump(mode="json")
+        assert isinstance(json_data["start_date"], str)
+        assert isinstance(json_data["end_date"], str)
+        assert json_data["start_date"] < json_data["end_date"]
+
+    def test_market_info_response_start_end_null_serialization(self) -> None:
+        """Test MarketInfoResponse with null start_date/end_date serializes as null."""
+        response = MarketInfoResponse(
+            market_slug="btc-updown-15m-1767900600",
+            outcome="UP",
+            latest_tick_ts=None,
+            active=False,
+        )
+
+        json_data = response.model_dump(mode="json")
+        assert json_data["start_date"] is None
+        assert json_data["end_date"] is None
+
 
 class TestMarketsResponse:
     """Tests for MarketsResponse model."""

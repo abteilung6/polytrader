@@ -1593,6 +1593,32 @@
             "type": "boolean",
             "title": "Active",
             "description": "Whether market is currently active (current window)"
+          },
+          "start_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Date",
+            "description": "Start of the market window (UTC, ISO 8601). Null if slug cannot be parsed."
+          },
+          "end_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Date",
+            "description": "End of the market window (UTC, ISO 8601). Null if slug cannot be parsed."
           }
         },
         "type": "object",
@@ -1603,7 +1629,7 @@
           "active"
         ],
         "title": "MarketInfoResponse",
-        "description": "Market information response.\n\nRepresents a market/outcome pair with latest tick timestamp and active status."
+        "description": "Market information response.\n\nRepresents a market/outcome pair with latest tick timestamp, active status,\nand optional market window start/end (derived from slug)."
       },
       "MarketTickResponse": {
         "properties": {

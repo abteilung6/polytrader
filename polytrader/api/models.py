@@ -445,13 +445,22 @@ class HistoricalTicksResponse(BaseModel):
 class MarketInfoResponse(BaseModel):
     """Market information response.
 
-    Represents a market/outcome pair with latest tick timestamp and active status.
+    Represents a market/outcome pair with latest tick timestamp, active status,
+    and optional market window start/end (derived from slug).
     """
 
     market_slug: str = Field(description="Market identifier")
     outcome: str = Field(description="Market outcome: UP or DOWN")
     latest_tick_ts: datetime | None = Field(description="Latest tick timestamp (null if no data)")
     active: bool = Field(description="Whether market is currently active (current window)")
+    start_date: datetime | None = Field(
+        default=None,
+        description="Start of the market window (UTC, ISO 8601). Null if slug cannot be parsed.",
+    )
+    end_date: datetime | None = Field(
+        default=None,
+        description="End of the market window (UTC, ISO 8601). Null if slug cannot be parsed.",
+    )
 
 
 class MarketsResponse(BaseModel):

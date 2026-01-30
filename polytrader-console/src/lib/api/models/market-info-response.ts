@@ -15,7 +15,7 @@
 
 
 /**
- * Market information response.  Represents a market/outcome pair with latest tick timestamp and active status.
+ * Market information response.  Represents a market/outcome pair with latest tick timestamp, active status, and optional market window start/end (derived from slug).
  */
 export interface MarketInfoResponse {
     /**
@@ -31,5 +31,7 @@ export interface MarketInfoResponse {
      * Whether market is currently active (current window)
      */
     'active': boolean;
+    'start_date'?: string | null;
+    'end_date'?: string | null;
 }
 

@@ -398,12 +398,24 @@ async def get_markets(
             if active_only and not active:
                 continue
 
+            # Derive market window start/end from slug (null if slug unparseable)
+            window = MarketPattern.extract_window_from_slug(market_slug)
+            if window is not None:
+                start_ts, end_ts = window
+                start_date = datetime.fromtimestamp(start_ts, tz=UTC)
+                end_date = datetime.fromtimestamp(end_ts, tz=UTC)
+            else:
+                start_date = None
+                end_date = None
+
             market_infos.append(
                 MarketInfoResponse(
                     market_slug=market_slug,
                     outcome=outcome,
                     latest_tick_ts=latest_tick_ts,
                     active=active,
+                    start_date=start_date,
+                    end_date=end_date,
                 )
             )
 

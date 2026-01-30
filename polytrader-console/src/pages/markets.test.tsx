@@ -1,9 +1,8 @@
 import { screen, within } from '@testing-library/react'
 import { vi } from 'vitest'
-import { MarketsPage } from './markets'
 import { marketApi } from '@/lib/api-client'
 import { createMockMarket, createMockMarketsResponse } from '@/test/mocks'
-import { mockAxiosResponse, renderWithQuery } from '@/test/utils'
+import { mockAxiosResponse, renderWithRouter } from '@/test/utils'
 
 const defaultedMarket = createMockMarket()
 
@@ -17,8 +16,8 @@ describe('MarketsPage', () => {
         }),
       }),
     )
-    renderWithQuery(<MarketsPage />)
-    expect(screen.getByText('Loading…')).toBeInTheDocument()
+    renderWithRouter({ initialEntries: ['/markets'] })
+    await screen.findByText('Loading…')
 
     const table = await screen.findByRole('table')
     const rows = within(table).getAllByRole('row')
@@ -28,6 +27,8 @@ describe('MarketsPage', () => {
     const headerRow = rows[0]
     expect(headerRow).toHaveTextContent('Market')
     expect(headerRow).toHaveTextContent('Outcome')
+    expect(headerRow).toHaveTextContent('Start date')
+    expect(headerRow).toHaveTextContent('End date')
     expect(headerRow).toHaveTextContent('Active')
 
     const dataRow = rows[1]
@@ -36,13 +37,36 @@ describe('MarketsPage', () => {
     expect(dataRow).toHaveTextContent('Inactive') // active: false → Badge "Inactive"
   })
 
+  it('slug cell links to market detail and detail page shows slug', async () => {
+    vi.spyOn(marketApi, 'getMarketsApiV1MarketMarketsGet').mockResolvedValue(
+      mockAxiosResponse({
+        data: createMockMarketsResponse({
+          markets: [defaultedMarket],
+          count: 1,
+        }),
+      }),
+    )
+    renderWithRouter({ initialEntries: ['/markets'] })
+    await screen.findByText('Loading…')
+    const table = await screen.findByRole('table')
+    const slugLink = within(table).getByRole('link', { name: defaultedMarket.market_slug })
+    expect(slugLink).toHaveAttribute('href', `/markets/${defaultedMarket.market_slug}`)
+  })
+
+  it('market detail page shows slug when navigated to directly', async () => {
+    renderWithRouter({
+      initialEntries: [`/markets/${defaultedMarket.market_slug}`],
+    })
+    expect(await screen.findByText(defaultedMarket.market_slug)).toBeInTheDocument()
+  })
+
   it('renders empty state when no markets', async () => {
     vi.spyOn(marketApi, 'getMarketsApiV1MarketMarketsGet').mockResolvedValue(
       mockAxiosResponse({
         data: createMockMarketsResponse({ markets: [], count: 0 }),
       }),
     )
-    renderWithQuery(<MarketsPage />)
+    renderWithRouter({ initialEntries: ['/markets'] })
     await screen.findByRole('table')
     expect(screen.getByText('No results.')).toBeInTheDocument()
     const table = screen.getByRole('table')
