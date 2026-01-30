@@ -1,6 +1,8 @@
 import type { MarketInfoResponse } from '../lib/api/models/market-info-response'
 import type { MarketsResponse } from '../lib/api/models/markets-response'
 import type { MarketTickResponse } from '../lib/api/models/market-tick-response'
+import type { StrategyTypeResponse } from '../lib/api/models/strategy-type-response'
+import type { StrategyTypesResponse } from '../lib/api/models/strategy-types-response'
 
 const defaultMarket: MarketInfoResponse = {
   market_slug: 'btc-updown-15m-1767900600',
@@ -43,5 +45,27 @@ export const createMockMarketTick = (
   overrides: Partial<MarketTickResponse> = {},
 ): MarketTickResponse => ({
   ...defaultMarketTick,
+  ...overrides,
+})
+
+const defaultStrategyType: StrategyTypeResponse = {
+  type_id: 'simple_threshold',
+  name: 'Simple threshold',
+  description: 'Threshold-based strategy',
+  available_versions: ['1.0.0', '1.1.0'],
+  parameter_schema: {},
+}
+
+export const createMockStrategyType = (
+  overrides: Partial<StrategyTypeResponse> = {},
+): StrategyTypeResponse => ({
+  ...defaultStrategyType,
+  ...overrides,
+})
+
+export const createMockStrategyTypesResponse = (
+  overrides: Partial<StrategyTypesResponse> = {},
+): StrategyTypesResponse => ({
+  types: overrides.types ?? [],
   ...overrides,
 })
