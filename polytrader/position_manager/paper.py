@@ -15,13 +15,14 @@ This implementation is event-driven only, no external API sync.
 import asyncio
 from typing import TYPE_CHECKING
 
-from polytrader.events import FILLS, MARKET_CHANGE, MARKET_DATA, EventBus
+from polytrader.events import FILLS, MARKET_CHANGE, MARKET_DATA, STRATEGY_CLOSED_TRADES, EventBus
 from polytrader.events.types import (
     FillEvent,
     MarketChangeEvent,
     MarketDataEvent,
     PnLEvent,
     PositionUpdatedEvent,
+    StrategyClosedTradeEvent,
 )
 from polytrader.logging_config import logger
 from polytrader.oms.store import IOrderStore
@@ -269,13 +270,33 @@ class PaperPositionManager(IPositionManager):
                 order=order,
             )
         elif side == "SELL":
-            self._per_strategy_tracker.record_sell_fill(
+            closed = self._per_strategy_tracker.record_sell_fill(
                 strategy_id=strategy_id,
                 market_slug=market_slug,
                 outcome=outcome,
                 fill_event=fill_event,
                 order=order,
             )
+            if closed is not None:
+                strat_id, closed_position, order_id, fill_id = closed
+                strategy_closed_event = StrategyClosedTradeEvent(
+                    strategy_id=strat_id,
+                    market_slug=closed_position.market_slug,
+                    outcome=closed_position.outcome,
+                    entry_price=closed_position.entry_price,
+                    exit_price=closed_position.exit_price,
+                    size=closed_position.size,
+                    pnl=closed_position.pnl,
+                    pnl_pct=closed_position.pnl_pct,
+                    entry_time=closed_position.entry_time,
+                    exit_time=closed_position.exit_time,
+                    result=closed_position.result,
+                    execution_mode="paper",
+                    order_id=order_id,
+                    fill_id=fill_id,
+                    correlation_id=fill_event.correlation_id,
+                )
+                await self._bus.publish(STRATEGY_CLOSED_TRADES, strategy_closed_event)
 
         # Continue with existing position tracking (for backward compatibility)
         if side == "BUY":

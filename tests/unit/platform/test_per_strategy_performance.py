@@ -261,3 +261,56 @@ class TestPerStrategyPerformanceTracker:
         assert len(strategies) == 2
         assert strategy_1 in strategies
         assert strategy_2 in strategies
+
+    def test_record_sell_fill_returns_none_when_no_position(self) -> None:
+        """Test record_sell_fill returns None when no position to close."""
+        tracker = PerStrategyPerformanceTracker()
+        strategy = "strategy_1"
+        market = "test-market"
+        outcome: Outcome = "UP"
+        order = create_order(
+            market_slug=market,
+            outcome=outcome,
+            intent=create_order_intent_event(
+                market_slug=market,
+                outcome=outcome,
+                strategy_id=strategy,
+            ),
+        )
+        sell_fill = create_fill_event(order_id=order.order_id, size=10.0, price=0.5)
+        result = tracker.record_sell_fill(strategy, market, outcome, sell_fill, order)
+        assert result is None
+
+    def test_record_sell_fill_returns_closed_trade_data_when_position_closed(
+        self,
+    ) -> None:
+        """Test record_sell_fill returns closed-trade tuple for StrategyClosedTradeEvent."""
+        tracker = PerStrategyPerformanceTracker()
+        strategy = "strategy_1"
+        market = "test-market"
+        outcome: Outcome = "UP"
+        order = create_order(
+            market_slug=market,
+            outcome=outcome,
+            intent=create_order_intent_event(
+                market_slug=market,
+                outcome=outcome,
+                strategy_id=strategy,
+            ),
+        )
+        buy_fill = create_fill_event(order_id=order.order_id, size=10.0, price=0.4)
+        tracker.record_buy_fill(strategy, market, outcome, buy_fill, order)
+        sell_fill = create_fill_event(order_id=order.order_id, size=10.0, price=0.6)
+        result = tracker.record_sell_fill(strategy, market, outcome, sell_fill, order)
+        assert result is not None
+        strat_id, closed_position, order_id, fill_id = result
+        assert strat_id == strategy
+        assert order_id == order.order_id
+        assert fill_id == sell_fill.fill_id
+        assert closed_position.market_slug == market
+        assert closed_position.outcome == outcome
+        assert closed_position.entry_price == 0.4
+        assert closed_position.exit_price == 0.6
+        assert closed_position.size == 10.0
+        assert closed_position.pnl == pytest.approx(2.0, abs=0.01)
+        assert closed_position.result == "WIN"

@@ -310,3 +310,188 @@ class TestEventExists:
         non_existent_id = UUID(str(uuid.uuid4()))
         exists = await repo.event_exists(non_existent_id)
         assert exists is False
+
+
+def _closed_trade_event_data(
+    strategy_id: str,
+    ts_mono: float,
+    execution_mode: str = "paper",
+) -> dict:
+    """Minimal event_data for StrategyClosedTradeEvent (JSONB payload)."""
+    return {
+        "strategy_id": strategy_id,
+        "market_slug": "btc-updown-15m",
+        "outcome": "UP",
+        "entry_price": 0.45,
+        "exit_price": 0.55,
+        "size": 100.0,
+        "pnl": 10.0,
+        "pnl_pct": 22.2,
+        "entry_time": ts_mono - 100.0,
+        "exit_time": ts_mono,
+        "result": "WIN",
+        "execution_mode": execution_mode,
+        "order_id": str(uuid.uuid4()),
+        "fill_id": str(uuid.uuid4()),
+    }
+
+
+class TestReadClosedTradeEventsByStrategy:
+    """Test read_closed_trade_events_by_strategy (Past Performance read path)."""
+
+    @pytest.mark.asyncio
+    async def test_returns_closed_trades_for_strategy(self, db_session: AsyncSession) -> None:
+        """read_closed_trade_events_by_strategy returns StrategyClosedTradeEvent for strategy_id."""
+        repo = EventRepository(db_session)
+        strategy_id = "strat-closed-trades-1"
+        event_id = UUID(str(uuid.uuid4()))
+        event_data = _closed_trade_event_data(strategy_id, ts_mono=2000.0)
+
+        await repo.create_event(
+            event_id=event_id,
+            ts_wall=datetime.now(UTC),
+            ts_mono=2000.0,
+            correlation_id="corr-1",
+            run_id="run-1",
+            schema_version="1.0",
+            source="posttrade",
+            event_type="StrategyClosedTradeEvent",
+            event_data=event_data,
+        )
+
+        records, next_cursor = await repo.read_closed_trade_events_by_strategy(
+            strategy_id=strategy_id,
+            limit=10,
+        )
+        assert len(records) == 1
+        assert records[0].event_type == "StrategyClosedTradeEvent"
+        assert records[0].event_data["strategy_id"] == strategy_id
+        assert records[0].event_data["market_slug"] == "btc-updown-15m"
+        assert records[0].event_data["pnl"] == 10.0
+        assert next_cursor is None
+
+    @pytest.mark.asyncio
+    async def test_filters_by_execution_mode(self, db_session: AsyncSession) -> None:
+        """read_closed_trade_events_by_strategy filters by execution_mode when provided."""
+        repo = EventRepository(db_session)
+        strategy_id = "strat-exec-mode"
+        for i, mode in enumerate(["paper", "paper", "live"]):
+            await repo.create_event(
+                event_id=UUID(str(uuid.uuid4())),
+                ts_wall=datetime.now(UTC),
+                ts_mono=3000.0 + i,
+                correlation_id=None,
+                run_id="run-1",
+                schema_version="1.0",
+                source="posttrade",
+                event_type="StrategyClosedTradeEvent",
+                event_data=_closed_trade_event_data(strategy_id, 3000.0 + i, mode),
+            )
+
+        paper_only, _ = await repo.read_closed_trade_events_by_strategy(
+            strategy_id=strategy_id,
+            execution_mode="paper",
+            limit=10,
+        )
+        assert len(paper_only) == 2
+        assert all(r.event_data["execution_mode"] == "paper" for r in paper_only)
+
+        live_only, _ = await repo.read_closed_trade_events_by_strategy(
+            strategy_id=strategy_id,
+            execution_mode="live",
+            limit=10,
+        )
+        assert len(live_only) == 1
+        assert live_only[0].event_data["execution_mode"] == "live"
+
+    @pytest.mark.asyncio
+    async def test_filters_by_time_range(self, db_session: AsyncSession) -> None:
+        """read_closed_trade_events_by_strategy filters by from_ts and to_ts."""
+        repo = EventRepository(db_session)
+        strategy_id = "strat-ts-range"
+        for i in range(5):
+            ts = 4000.0 + i * 10
+            await repo.create_event(
+                event_id=UUID(str(uuid.uuid4())),
+                ts_wall=datetime.now(UTC),
+                ts_mono=ts,
+                correlation_id=None,
+                run_id="run-1",
+                schema_version="1.0",
+                source="posttrade",
+                event_type="StrategyClosedTradeEvent",
+                event_data=_closed_trade_event_data(strategy_id, ts),
+            )
+
+        records, _ = await repo.read_closed_trade_events_by_strategy(
+            strategy_id=strategy_id,
+            from_ts=4010.0,
+            to_ts=4030.0,
+            limit=10,
+        )
+        assert len(records) == 3  # ts 4010, 4020, 4030
+        assert all(4010.0 <= r.ts_mono <= 4030.0 for r in records)
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_for_other_strategy(self, db_session: AsyncSession) -> None:
+        """read_closed_trade_events_by_strategy returns no rows for wrong strategy_id."""
+        repo = EventRepository(db_session)
+        await repo.create_event(
+            event_id=UUID(str(uuid.uuid4())),
+            ts_wall=datetime.now(UTC),
+            ts_mono=5000.0,
+            correlation_id=None,
+            run_id="run-1",
+            schema_version="1.0",
+            source="posttrade",
+            event_type="StrategyClosedTradeEvent",
+            event_data=_closed_trade_event_data("strategy-A", 5000.0),
+        )
+
+        records, _ = await repo.read_closed_trade_events_by_strategy(
+            strategy_id="strategy-B",
+            limit=10,
+        )
+        assert len(records) == 0
+
+    @pytest.mark.asyncio
+    async def test_pagination_returns_next_cursor(self, db_session: AsyncSession) -> None:
+        """read_closed_trade_events_by_strategy returns next_cursor when more rows exist."""
+        repo = EventRepository(db_session)
+        strategy_id = "strat-pagination"
+        for i in range(5):
+            ts = 6000.0 + i
+            await repo.create_event(
+                event_id=UUID(str(uuid.uuid4())),
+                ts_wall=datetime.now(UTC),
+                ts_mono=ts,
+                correlation_id=None,
+                run_id="run-1",
+                schema_version="1.0",
+                source="posttrade",
+                event_type="StrategyClosedTradeEvent",
+                event_data=_closed_trade_event_data(strategy_id, ts),
+            )
+
+        page1, cursor = await repo.read_closed_trade_events_by_strategy(
+            strategy_id=strategy_id,
+            limit=2,
+        )
+        assert len(page1) == 2
+        assert cursor is not None
+
+        page2, cursor2 = await repo.read_closed_trade_events_by_strategy(
+            strategy_id=strategy_id,
+            limit=2,
+            cursor=cursor,
+        )
+        assert len(page2) == 2
+        assert cursor2 is not None
+
+        page3, cursor3 = await repo.read_closed_trade_events_by_strategy(
+            strategy_id=strategy_id,
+            limit=2,
+            cursor=cursor2,
+        )
+        assert len(page3) == 1
+        assert cursor3 is None

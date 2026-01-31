@@ -50,7 +50,11 @@ async def db_session(
 
         yield session
 
-        # Cleanup
+        # Cleanup: rollback any failed transaction so TRUNCATE can run
+        try:
+            await session.rollback()
+        except Exception:
+            pass
         await session.execute(text("TRUNCATE TABLE market_ticks CASCADE"))
         await session.commit()
 

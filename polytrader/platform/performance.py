@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 from polytrader.events.types import FillEvent, MarketDataEvent
 from polytrader.obs.metrics import get_metrics_collector
-from polytrader.position_manager.outcome_tracker import OutcomeTracker
+from polytrader.position_manager.outcome_tracker import ClosedPosition, OutcomeTracker
 from polytrader.position_manager.performance_metrics import PerformanceMetrics
 from polytrader.types import Outcome, Position
 
@@ -167,7 +167,7 @@ class PerStrategyPerformanceTracker:
         outcome: Outcome,
         fill_event: FillEvent,
         order: "Order",
-    ) -> None:
+    ) -> tuple[str, ClosedPosition, str, str] | None:
         """Record a SELL fill and close position.
 
         Args:
@@ -176,12 +176,16 @@ class PerStrategyPerformanceTracker:
             outcome: Market outcome
             fill_event: Fill event
             order: Order that was filled
+
+        Returns:
+            (strategy_id, closed_position, order_id, fill_id) when a position
+            was closed, else None. Caller may use this to emit StrategyClosedTradeEvent.
         """
         key = (strategy_id, market_slug, outcome)
 
         if key not in self._positions:
             # No position to close (shouldn't happen, but handle gracefully)
-            return
+            return None
 
         position = self._positions.pop(key)
         self._position_fills.pop(key, None)
@@ -192,7 +196,7 @@ class PerStrategyPerformanceTracker:
 
         # Record closed position in outcome tracker
         tracker = self.get_tracker(strategy_id)
-        tracker.record_closed_position(
+        closed_position = tracker.record_closed_position(
             market_slug=market_slug,
             outcome=outcome,
             entry_price=position.entry_price,
@@ -223,6 +227,8 @@ class PerStrategyPerformanceTracker:
             net_position=0.0,
             strategy_id=strategy_id,
         )
+
+        return (strategy_id, closed_position, order.order_id, fill_event.fill_id)
 
     def calculate_unrealized_pnl(self, strategy_id: str) -> float:
         """Calculate unrealized P&L for a strategy.
