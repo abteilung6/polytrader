@@ -16,6 +16,7 @@ All URIs are relative to *http://localhost*
 |[**getStrategiesApiV1StateStrategiesGet**](#getstrategiesapiv1statestrategiesget) | **GET** /api/v1/state/strategies | Get Strategies|
 |[**getStrategyByIdApiV1StateStrategiesStrategyIdGet**](#getstrategybyidapiv1statestrategiesstrategyidget) | **GET** /api/v1/state/strategies/{strategy_id} | Get Strategy By Id|
 |[**getStrategyOrdersApiV1StateStrategiesStrategyIdOrdersGet**](#getstrategyordersapiv1statestrategiesstrategyidordersget) | **GET** /api/v1/state/strategies/{strategy_id}/orders | Get Strategy Orders|
+|[**getStrategyPerformanceApiV1StateStrategiesStrategyIdPerformanceGet**](#getstrategyperformanceapiv1statestrategiesstrategyidperformanceget) | **GET** /api/v1/state/strategies/{strategy_id}/performance | Get Strategy Performance|
 |[**getStrategySignalsApiV1StateStrategiesStrategyIdSignalsGet**](#getstrategysignalsapiv1statestrategiesstrategyidsignalsget) | **GET** /api/v1/state/strategies/{strategy_id}/signals | Get Strategy Signals|
 |[**getStrategyTemplateApiV1StateStrategiesTemplatesTypeIdGet**](#getstrategytemplateapiv1statestrategiestemplatestypeidget) | **GET** /api/v1/state/strategies/templates/{type_id} | Get Strategy Template|
 |[**getStrategyTemplateVersionApiV1StateStrategiesTemplatesTypeIdVersionsVersionGet**](#getstrategytemplateversionapiv1statestrategiestemplatestypeidversionsversionget) | **GET** /api/v1/state/strategies/templates/{type_id}/versions/{version} | Get Strategy Template Version|
@@ -623,6 +624,73 @@ const { status, data } = await apiInstance.getStrategyOrdersApiV1StateStrategies
 ### Return type
 
 **StrategyOrdersResponse**
+
+### Authorization
+
+No authorization required
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+
+### HTTP response details
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+|**200** | Successful Response |  -  |
+|**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **getStrategyPerformanceApiV1StateStrategiesStrategyIdPerformanceGet**
+> PerformanceResponse getStrategyPerformanceApiV1StateStrategiesStrategyIdPerformanceGet()
+
+Get past performance for a strategy: summary + paginated closed trades.  Query params: from_ts, to_ts (optional ts_mono range), execution_mode (paper | live | omit for all), limit (default 100, max 500), cursor. Summary is computed from the returned page of items.
+
+### Example
+
+```typescript
+import {
+    ControlApi,
+    Configuration
+} from '@polytrader/api-client';
+
+const configuration = new Configuration();
+const apiInstance = new ControlApi(configuration);
+
+let strategyId: string; // (default to undefined)
+let fromTs: number; // (optional) (default to undefined)
+let toTs: number; // (optional) (default to undefined)
+let executionMode: 'paper' | 'live'; // (optional) (default to undefined)
+let limit: number; // (optional) (default to 100)
+let cursor: string; // (optional) (default to undefined)
+
+const { status, data } = await apiInstance.getStrategyPerformanceApiV1StateStrategiesStrategyIdPerformanceGet(
+    strategyId,
+    fromTs,
+    toTs,
+    executionMode,
+    limit,
+    cursor
+);
+```
+
+### Parameters
+
+|Name | Type | Description  | Notes|
+|------------- | ------------- | ------------- | -------------|
+| **strategyId** | [**string**] |  | defaults to undefined|
+| **fromTs** | [**number**] |  | (optional) defaults to undefined|
+| **toTs** | [**number**] |  | (optional) defaults to undefined|
+| **executionMode** | [**&#39;paper&#39; | &#39;live&#39;**]**Array<&#39;paper&#39; &#124; &#39;live&#39;>** |  | (optional) defaults to undefined|
+| **limit** | [**number**] |  | (optional) defaults to 100|
+| **cursor** | [**string**] |  | (optional) defaults to undefined|
+
+
+### Return type
+
+**PerformanceResponse**
 
 ### Authorization
 

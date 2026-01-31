@@ -6,6 +6,7 @@ base.ts
 common.ts
 configuration.ts
 docs/ActivateStrategyRequest.md
+docs/ClosedTradeItem.md
 docs/CommandEnvelopeResponse.md
 docs/CommandStatusResponse.md
 docs/ControlApi.md
@@ -26,6 +27,8 @@ docs/MarketApi.md
 docs/MarketInfoResponse.md
 docs/MarketTickResponse.md
 docs/MarketsResponse.md
+docs/PerformanceResponse.md
+docs/PerformanceSummary.md
 docs/RunIdentityResponse.md
 docs/StrategiesResponse.md
 docs/StrategyOrderItem.md
@@ -44,6 +47,7 @@ docs/VersionSelectorRequest.md
 git_push.sh
 index.ts
 models/activate-strategy-request.ts
+models/closed-trade-item.ts
 models/command-envelope-response.ts
 models/command-status-response.ts
 models/create-strategy-request.ts
@@ -63,6 +67,8 @@ models/location-inner.ts
 models/market-info-response.ts
 models/market-tick-response.ts
 models/markets-response.ts
+models/performance-response.ts
+models/performance-summary.ts
 models/run-identity-response.ts
 models/strategies-response.ts
 models/strategy-order-item.ts

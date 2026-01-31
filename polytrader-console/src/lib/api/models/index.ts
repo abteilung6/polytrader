@@ -1,4 +1,5 @@
 export * from './activate-strategy-request';
+export * from './closed-trade-item';
 export * from './command-envelope-response';
 export * from './command-status-response';
 export * from './create-strategy-request';
@@ -17,6 +18,8 @@ export * from './location-inner';
 export * from './market-info-response';
 export * from './market-tick-response';
 export * from './markets-response';
+export * from './performance-response';
+export * from './performance-summary';
 export * from './run-identity-response';
 export * from './strategies-response';
 export * from './strategy-order-item';

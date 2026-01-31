@@ -46,6 +46,8 @@ import type { HealthResponse } from '../models';
 // @ts-ignore
 import type { LiveStrategiesResponse } from '../models';
 // @ts-ignore
+import type { PerformanceResponse } from '../models';
+// @ts-ignore
 import type { StrategiesResponse } from '../models';
 // @ts-ignore
 import type { StrategyOrdersResponse } from '../models';
@@ -486,6 +488,65 @@ export const ControlApiAxiosParamCreator = function (configuration?: Configurati
             };
         },
         /**
+         * Get past performance for a strategy: summary + paginated closed trades.  Query params: from_ts, to_ts (optional ts_mono range), execution_mode (paper | live | omit for all), limit (default 100, max 500), cursor. Summary is computed from the returned page of items.
+         * @summary Get Strategy Performance
+         * @param {string} strategyId 
+         * @param {number | null} [fromTs] 
+         * @param {number | null} [toTs] 
+         * @param {GetStrategyPerformanceApiV1StateStrategiesStrategyIdPerformanceGetExecutionModeEnum} [executionMode] 
+         * @param {number} [limit] 
+         * @param {string | null} [cursor] 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getStrategyPerformanceApiV1StateStrategiesStrategyIdPerformanceGet: async (strategyId: string, fromTs?: number | null, toTs?: number | null, executionMode?: GetStrategyPerformanceApiV1StateStrategiesStrategyIdPerformanceGetExecutionModeEnum, limit?: number, cursor?: string | null, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'strategyId' is not null or undefined
+            assertParamExists('getStrategyPerformanceApiV1StateStrategiesStrategyIdPerformanceGet', 'strategyId', strategyId)
+            const localVarPath = `/api/v1/state/strategies/{strategy_id}/performance`
+                .replace(`{${"strategy_id"}}`, encodeURIComponent(String(strategyId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (fromTs !== undefined) {
+                localVarQueryParameter['from_ts'] = fromTs;
+            }
+
+            if (toTs !== undefined) {
+                localVarQueryParameter['to_ts'] = toTs;
+            }
+
+            if (executionMode !== undefined) {
+                localVarQueryParameter['execution_mode'] = executionMode;
+            }
+
+            if (limit !== undefined) {
+                localVarQueryParameter['limit'] = limit;
+            }
+
+            if (cursor !== undefined) {
+                localVarQueryParameter['cursor'] = cursor;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
          * Get paginated signals for a strategy (newest first).  Query params: limit (default 100, max 500), cursor (optional). Returns empty list when strategy has no signals.
          * @summary Get Strategy Signals
          * @param {string} strategyId 
@@ -871,6 +932,24 @@ export const ControlApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         * Get past performance for a strategy: summary + paginated closed trades.  Query params: from_ts, to_ts (optional ts_mono range), execution_mode (paper | live | omit for all), limit (default 100, max 500), cursor. Summary is computed from the returned page of items.
+         * @summary Get Strategy Performance
+         * @param {string} strategyId 
+         * @param {number | null} [fromTs] 
+         * @param {number | null} [toTs] 
+         * @param {GetStrategyPerformanceApiV1StateStrategiesStrategyIdPerformanceGetExecutionModeEnum} [executionMode] 
+         * @param {number} [limit] 
+         * @param {string | null} [cursor] 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async getStrategyPerformanceApiV1StateStrategiesStrategyIdPerformanceGet(strategyId: string, fromTs?: number | null, toTs?: number | null, executionMode?: GetStrategyPerformanceApiV1StateStrategiesStrategyIdPerformanceGetExecutionModeEnum, limit?: number, cursor?: string | null, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PerformanceResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.getStrategyPerformanceApiV1StateStrategiesStrategyIdPerformanceGet(strategyId, fromTs, toTs, executionMode, limit, cursor, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ControlApi.getStrategyPerformanceApiV1StateStrategiesStrategyIdPerformanceGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Get paginated signals for a strategy (newest first).  Query params: limit (default 100, max 500), cursor (optional). Returns empty list when strategy has no signals.
          * @summary Get Strategy Signals
          * @param {string} strategyId 
@@ -1077,6 +1156,16 @@ export const ControlApiFactory = function (configuration?: Configuration, basePa
             return localVarFp.getStrategyOrdersApiV1StateStrategiesStrategyIdOrdersGet(requestParameters.strategyId, requestParameters.limit, requestParameters.cursor, options).then((request) => request(axios, basePath));
         },
         /**
+         * Get past performance for a strategy: summary + paginated closed trades.  Query params: from_ts, to_ts (optional ts_mono range), execution_mode (paper | live | omit for all), limit (default 100, max 500), cursor. Summary is computed from the returned page of items.
+         * @summary Get Strategy Performance
+         * @param {ControlApiGetStrategyPerformanceApiV1StateStrategiesStrategyIdPerformanceGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getStrategyPerformanceApiV1StateStrategiesStrategyIdPerformanceGet(requestParameters: ControlApiGetStrategyPerformanceApiV1StateStrategiesStrategyIdPerformanceGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<PerformanceResponse> {
+            return localVarFp.getStrategyPerformanceApiV1StateStrategiesStrategyIdPerformanceGet(requestParameters.strategyId, requestParameters.fromTs, requestParameters.toTs, requestParameters.executionMode, requestParameters.limit, requestParameters.cursor, options).then((request) => request(axios, basePath));
+        },
+        /**
          * Get paginated signals for a strategy (newest first).  Query params: limit (default 100, max 500), cursor (optional). Returns empty list when strategy has no signals.
          * @summary Get Strategy Signals
          * @param {ControlApiGetStrategySignalsApiV1StateStrategiesStrategyIdSignalsGetRequest} requestParameters Request parameters.
@@ -1196,6 +1285,23 @@ export interface ControlApiGetStrategyByIdApiV1StateStrategiesStrategyIdGetReque
  */
 export interface ControlApiGetStrategyOrdersApiV1StateStrategiesStrategyIdOrdersGetRequest {
     readonly strategyId: string
+
+    readonly limit?: number
+
+    readonly cursor?: string | null
+}
+
+/**
+ * Request parameters for getStrategyPerformanceApiV1StateStrategiesStrategyIdPerformanceGet operation in ControlApi.
+ */
+export interface ControlApiGetStrategyPerformanceApiV1StateStrategiesStrategyIdPerformanceGetRequest {
+    readonly strategyId: string
+
+    readonly fromTs?: number | null
+
+    readonly toTs?: number | null
+
+    readonly executionMode?: GetStrategyPerformanceApiV1StateStrategiesStrategyIdPerformanceGetExecutionModeEnum
 
     readonly limit?: number
 
@@ -1378,6 +1484,17 @@ export class ControlApi extends BaseAPI {
     }
 
     /**
+     * Get past performance for a strategy: summary + paginated closed trades.  Query params: from_ts, to_ts (optional ts_mono range), execution_mode (paper | live | omit for all), limit (default 100, max 500), cursor. Summary is computed from the returned page of items.
+     * @summary Get Strategy Performance
+     * @param {ControlApiGetStrategyPerformanceApiV1StateStrategiesStrategyIdPerformanceGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public getStrategyPerformanceApiV1StateStrategiesStrategyIdPerformanceGet(requestParameters: ControlApiGetStrategyPerformanceApiV1StateStrategiesStrategyIdPerformanceGetRequest, options?: RawAxiosRequestConfig) {
+        return ControlApiFp(this.configuration).getStrategyPerformanceApiV1StateStrategiesStrategyIdPerformanceGet(requestParameters.strategyId, requestParameters.fromTs, requestParameters.toTs, requestParameters.executionMode, requestParameters.limit, requestParameters.cursor, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
      * Get paginated signals for a strategy (newest first).  Query params: limit (default 100, max 500), cursor (optional). Returns empty list when strategy has no signals.
      * @summary Get Strategy Signals
      * @param {ControlApiGetStrategySignalsApiV1StateStrategiesStrategyIdSignalsGetRequest} requestParameters Request parameters.
@@ -1443,3 +1560,8 @@ export class ControlApi extends BaseAPI {
     }
 }
 
+export const GetStrategyPerformanceApiV1StateStrategiesStrategyIdPerformanceGetExecutionModeEnum = {
+    Paper: 'paper',
+    Live: 'live'
+} as const;
+export type GetStrategyPerformanceApiV1StateStrategiesStrategyIdPerformanceGetExecutionModeEnum = typeof GetStrategyPerformanceApiV1StateStrategiesStrategyIdPerformanceGetExecutionModeEnum[keyof typeof GetStrategyPerformanceApiV1StateStrategiesStrategyIdPerformanceGetExecutionModeEnum];
