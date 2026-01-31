@@ -7,7 +7,9 @@ import asyncio
 from collections.abc import AsyncGenerator
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from polytrader.db.repository import EventRepository
 from polytrader.events.bus import EventBus
 from polytrader.events.sink import EventSink
 from polytrader.events.stores import PostgreSQLEventStore
@@ -310,3 +312,62 @@ async def test_event_sink_buffer_overflow_protection(event_sink: EventSink) -> N
     events = list(event_sink._store.read_stream())
     # At least some events should be persisted (buffer overflow drops oldest, not all)
     assert len(events) > 0
+
+
+@pytest.mark.asyncio
+async def test_event_sink_persists_signal_event_readable_by_repository(
+    event_sink: EventSink,
+    postgres_test_url: str,
+) -> None:
+    """EventSink-persisted SignalEvents are readable via repository.
+
+    Per docs/analysis-why-no-signals-in-api.md: Platform start now uses EventSink
+    to persist events to PostgreSQL so the Control API can return signals. This test
+    verifies the contract: events written by EventSink are queryable by
+    EventRepository.read_signal_events_by_strategy (used by the signals API).
+    """
+    from polytrader.events import SIGNALS
+    from tests.factories.events import create_signal_event
+
+    strategy_id = "test-strategy-signals-api"
+    signal = create_signal_event(
+        market_slug="btc-updown",
+        outcome="UP",
+        p_up=0.6,
+        p_down=0.4,
+        edge=0.1,
+        confidence=0.8,
+        model_id=strategy_id,
+        rationale="EventSink → repository contract test",
+    )
+    await event_sink._bus.publish(SIGNALS, signal)
+
+    # Wait for flush (flush_interval is 0.1s in fixture)
+    await asyncio.sleep(0.25)
+
+    sqlalchemy_url = postgres_test_url
+    if sqlalchemy_url.startswith("postgresql://"):
+        sqlalchemy_url = sqlalchemy_url.replace("postgresql://", "postgresql+psycopg://", 1)
+    engine = create_async_engine(sqlalchemy_url, echo=False)
+    Session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    async with Session() as session:
+        repo = EventRepository(session)
+        records, next_cursor = await repo.read_signal_events_by_strategy(
+            strategy_id=strategy_id,
+            limit=10,
+        )
+        await session.commit()
+
+    await engine.dispose()
+
+    assert len(records) >= 1, (
+        "EventRepository.read_signal_events_by_strategy should return "
+        "SignalEvents persisted by EventSink"
+    )
+    first = records[0]
+    assert first.event_type == "SignalEvent"
+    assert first.event_data.get("model_id") == strategy_id
+    assert first.event_data.get("market_slug") == "btc-updown"
+    assert first.event_data.get("p_up") == 0.6
+    assert next_cursor is None or isinstance(next_cursor, str)
