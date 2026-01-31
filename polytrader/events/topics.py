@@ -32,6 +32,7 @@ _reconcile_topic: Topic | None = None
 _circuit_breaker_topic: Topic | None = None
 _position_updates_topic: Topic | None = None
 _pnl_updates_topic: Topic | None = None
+_strategy_closed_trades_topic: Topic | None = None
 _cancel_requested_topic: Topic | None = None
 _venue_connected_topic: Topic | None = None
 _venue_disconnected_topic: Topic | None = None
@@ -476,6 +477,21 @@ def get_pnl_updates_topic() -> Topic:
     return _pnl_updates_topic
 
 
+def _create_strategy_closed_trades_topic() -> Topic:
+    """Create the STRATEGY_CLOSED_TRADES topic."""
+    from polytrader.events.types import StrategyClosedTradeEvent
+
+    return Topic[StrategyClosedTradeEvent]("strategy_closed_trades")
+
+
+def get_strategy_closed_trades_topic() -> Topic:
+    """Get the STRATEGY_CLOSED_TRADES topic (singleton)."""
+    global _strategy_closed_trades_topic
+    if _strategy_closed_trades_topic is None:
+        _strategy_closed_trades_topic = _create_strategy_closed_trades_topic()
+    return _strategy_closed_trades_topic
+
+
 def _create_cancel_requested_topic() -> Topic:
     """Create the CANCEL_REQUESTED topic."""
     from polytrader.events.types import CancelRequestedEvent
@@ -594,6 +610,8 @@ def __getattr__(name: str) -> Topic:
         return get_position_updates_topic()
     elif name == "PNL_UPDATES":
         return get_pnl_updates_topic()
+    elif name == "STRATEGY_CLOSED_TRADES":
+        return get_strategy_closed_trades_topic()
     elif name == "CANCEL_REQUESTED":
         return get_cancel_requested_topic()
     elif name == "VENUE_CONNECTED":

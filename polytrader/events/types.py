@@ -1060,6 +1060,50 @@ class PnLEvent(Event):
     )
 
 
+class StrategyClosedTradeEvent(Event):
+    """Event emitted when a strategy closes a position (realized trade).
+
+    Per proposal-past-performance-tab.md: Emitted by post-trade layer when a
+    position is closed so past-performance API can read closed trades by strategy_id.
+    Enables audit trail and equity curve derivation without replaying all fills.
+
+    Attributes:
+        strategy_id: Strategy instance identifier
+        market_slug: Polymarket market identifier
+        outcome: Market outcome ("UP" or "DOWN")
+        entry_price: Average entry price for the position
+        exit_price: Fill price when position was closed
+        size: Position size in USD
+        pnl: Realized P&L in USD
+        pnl_pct: Realized P&L as percentage
+        entry_time: Monotonic timestamp when position was opened
+        exit_time: Monotonic timestamp when position was closed
+        result: "WIN" if pnl > 0, "LOSS" if pnl < 0, "BREAKEVEN" if pnl == 0
+        execution_mode: "paper" or "live"
+        order_id: Internal order UUID that caused the close
+        fill_id: Internal fill UUID for the closing fill
+    """
+
+    source: EventSource = Field(default=EventSource.POSTTRADE)
+
+    strategy_id: str = Field(min_length=1, description="Strategy instance identifier")
+    market_slug: str = Field(description="Polymarket market identifier")
+    outcome: Outcome = Field(description="Market outcome: UP or DOWN")
+    entry_price: float = Field(gt=0, le=1, description="Average entry price for the position")
+    exit_price: float = Field(gt=0, le=1, description="Fill price when position was closed")
+    size: float = Field(gt=0, description="Position size in USD")
+    pnl: float = Field(description="Realized P&L in USD")
+    pnl_pct: float = Field(description="Realized P&L as percentage")
+    entry_time: float = Field(description="Monotonic timestamp when position was opened")
+    exit_time: float = Field(description="Monotonic timestamp when position was closed")
+    result: Literal["WIN", "LOSS", "BREAKEVEN"] = Field(
+        description="WIN if pnl > 0, LOSS if pnl < 0, BREAKEVEN if pnl == 0"
+    )
+    execution_mode: Literal["paper", "live"] = Field(description="Execution mode: paper or live")
+    order_id: str = Field(description="Internal order UUID that caused the close")
+    fill_id: str = Field(description="Internal fill UUID for the closing fill")
+
+
 class CancelRequestedEvent(Event):
     """Event emitted when a cancel request is made.
 
