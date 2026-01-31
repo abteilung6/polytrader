@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from polytrader.api.dependencies import (
     get_control_command_repo,
+    get_event_repository,
     get_execution_control_repo,
     get_in_memory_strategy_registry,
     get_live_strategy_repo,
@@ -30,6 +31,8 @@ from polytrader.api.models import (
     RunIdentityResponse,
     StrategiesResponse,
     StrategyResponse,
+    StrategySignalItem,
+    StrategySignalsResponse,
     StrategyTypeResponse,
     StrategyTypesResponse,
     UpdateStrategyRequest,
@@ -37,8 +40,9 @@ from polytrader.api.models import (
     ValidateStrategyConfigResponse,
     VersionConflictResponse,
 )
-from polytrader.db.models import ControlCommandRecord
+from polytrader.db.models import ControlCommandRecord, EventRecord
 from polytrader.db.models import StrategyRecord as StrategyRecordModel
+from polytrader.db.repository import EventRepository
 from polytrader.platform.control import (
     ControlCommandRepository,
     ExecutionControlRepository,
@@ -314,6 +318,49 @@ async def get_strategy_template_version(
         available_versions=[version],  # Single version
         parameter_schema=template.parameter_schema.to_openapi_schema(),
     )
+
+
+def _event_record_to_signal_item(record: EventRecord) -> StrategySignalItem:
+    """Map EventRecord (SignalEvent) to API StrategySignalItem."""
+    data = record.event_data
+    return StrategySignalItem(
+        event_id=str(record.event_id),
+        ts_wall=record.ts_wall,
+        market_slug=data["market_slug"],
+        outcome=data["outcome"],
+        p_up=float(data["p_up"]),
+        p_down=float(data["p_down"]),
+        edge=float(data["edge"]),
+        confidence=float(data["confidence"]),
+        model_id=data["model_id"],
+        model_version=data["model_version"],
+        snapshot_hash=data.get("snapshot_hash"),
+        rationale=data.get("rationale"),
+    )
+
+
+@router.get(
+    "/state/strategies/{strategy_id}/signals",
+    response_model=StrategySignalsResponse,
+)
+async def get_strategy_signals(
+    strategy_id: str,
+    event_repo: EventRepository = Depends(get_event_repository),  # noqa: B008
+    limit: int = 100,
+    cursor: str | None = None,
+) -> StrategySignalsResponse:
+    """Get paginated signals for a strategy (newest first).
+
+    Query params: limit (default 100, max 500), cursor (optional).
+    Returns empty list when strategy has no signals.
+    """
+    records, next_cursor = await event_repo.read_signal_events_by_strategy(
+        strategy_id=strategy_id,
+        limit=limit,
+        cursor=cursor,
+    )
+    items = [_event_record_to_signal_item(r) for r in records]
+    return StrategySignalsResponse(items=items, next_cursor=next_cursor)
 
 
 @router.get(

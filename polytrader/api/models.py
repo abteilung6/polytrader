@@ -224,6 +224,36 @@ class LiveStrategiesResponse(BaseModel):
     active_strategies: list[str] = Field(description="List of active strategy IDs")
 
 
+class StrategySignalItem(BaseModel):
+    """Single signal record for strategy-scoped signals API.
+
+    Mirrors SignalEvent fields (event_id, ts_wall, market, scores).
+    """
+
+    event_id: str = Field(description="Event identifier (UUID)")
+    ts_wall: datetime = Field(description="Wall-clock time (UTC, ISO 8601)")
+    market_slug: str = Field(description="Market identifier")
+    outcome: str = Field(description="Outcome: UP or DOWN")
+    p_up: float = Field(ge=0.0, le=1.0, description="Probability UP wins")
+    p_down: float = Field(ge=0.0, le=1.0, description="Probability DOWN wins")
+    edge: float = Field(description="Edge/confidence score")
+    confidence: float = Field(ge=0.0, le=1.0, description="Confidence level")
+    model_id: str = Field(description="Strategy/model identifier")
+    model_version: str = Field(description="Model version")
+    snapshot_hash: str | None = Field(default=None, description="Input snapshot hash")
+    rationale: str | None = Field(default=None, description="Human-readable rationale")
+
+
+class StrategySignalsResponse(BaseModel):
+    """Paginated list of signals for a strategy."""
+
+    items: list[StrategySignalItem] = Field(description="Signal records (newest first)")
+    next_cursor: str | None = Field(
+        default=None,
+        description="Opaque cursor for next page; absent if no more",
+    )
+
+
 # ============================================================================
 # Command Models
 # ============================================================================

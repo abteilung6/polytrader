@@ -6,6 +6,7 @@ Tests GET endpoints for reading system state:
 - GET /state/live-strategies
 - GET /state/strategies
 - GET /state/strategies/{strategy_id}
+- GET /state/strategies/{strategy_id}/signals
 - GET /state/commands/{command_id}
 """
 
@@ -182,3 +183,122 @@ def test_get_strategy_by_id_success(client: TestClient, test_strategy: str) -> N
     from polytrader.api.models import StrategyResponse
 
     StrategyResponse(**data)
+
+
+async def _insert_signal_events(
+    postgres_test_url: str,
+    strategy_id: str,
+    count: int,
+) -> None:
+    """Insert SignalEvent records for strategy_id into events table (same DB as client)."""
+    import uuid
+    from datetime import UTC, datetime
+
+    from polytrader.db.repository import EventRepository
+
+    if postgres_test_url.startswith("postgresql://"):
+        sqlalchemy_url = postgres_test_url.replace("postgresql://", "postgresql+psycopg://", 1)
+    else:
+        sqlalchemy_url = postgres_test_url
+
+    engine = create_async_engine(sqlalchemy_url, echo=False)
+    Session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    async with Session() as session:
+        repo = EventRepository(session)
+        for i in range(count):
+            await repo.create_event(
+                event_id=uuid.uuid4(),
+                ts_wall=datetime.now(UTC),
+                ts_mono=1000.0 + i,
+                correlation_id=f"corr-{i}",
+                run_id="test-run",
+                schema_version="1.0",
+                source="strategy",
+                event_type="SignalEvent",
+                event_data={
+                    "market_slug": "btc-updown",
+                    "outcome": "UP",
+                    "p_up": 0.6,
+                    "p_down": 0.4,
+                    "edge": 0.1,
+                    "confidence": 0.8,
+                    "model_id": strategy_id,
+                    "model_version": "1.0.0",
+                    "snapshot_hash": None,
+                    "rationale": f"signal-{i}",
+                },
+            )
+        await session.commit()
+    await engine.dispose()
+
+
+def test_get_strategy_signals_empty(client: TestClient, test_strategy: str) -> None:
+    """Test GET /state/strategies/{strategy_id}/signals returns 200 and empty list."""
+    response = client.get(f"/api/v1/state/strategies/{test_strategy}/signals")
+    assert response.status_code == 200
+    data = response.json()
+    assert "items" in data
+    assert data["items"] == []
+    assert data.get("next_cursor") is None
+
+    from polytrader.api.models import StrategySignalsResponse
+
+    StrategySignalsResponse(**data)
+
+
+def test_get_strategy_signals_success(
+    client: TestClient,
+    test_strategy: str,
+    postgres_test_url: str,
+    postgres_db: AsyncGenerator[None, None],
+) -> None:
+    """Test GET /state/strategies/{strategy_id}/signals returns 200 and signal DTOs."""
+    asyncio.run(_insert_signal_events(postgres_test_url, test_strategy, 2))
+
+    response = client.get(f"/api/v1/state/strategies/{test_strategy}/signals")
+    assert response.status_code == 200
+    data = response.json()
+    assert "items" in data
+    assert len(data["items"]) == 2
+    assert data.get("next_cursor") is None
+
+    for item in data["items"]:
+        assert item["model_id"] == test_strategy
+        assert "event_id" in item
+        assert "ts_wall" in item
+        assert item["market_slug"] == "btc-updown"
+        assert item["p_up"] == 0.6
+        assert item["p_down"] == 0.4
+
+    from polytrader.api.models import StrategySignalsResponse
+
+    StrategySignalsResponse(**data)
+
+
+def test_get_strategy_signals_pagination(
+    client: TestClient,
+    test_strategy: str,
+    postgres_test_url: str,
+    postgres_db: AsyncGenerator[None, None],
+) -> None:
+    """Test GET signals with limit returns next_cursor when more rows exist."""
+    asyncio.run(_insert_signal_events(postgres_test_url, test_strategy, 3))
+
+    response = client.get(
+        f"/api/v1/state/strategies/{test_strategy}/signals",
+        params={"limit": 2},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["items"]) == 2
+    assert data["next_cursor"] is not None
+
+    next_response = client.get(
+        f"/api/v1/state/strategies/{test_strategy}/signals",
+        params={"limit": 10, "cursor": data["next_cursor"]},
+    )
+    assert next_response.status_code == 200
+    next_data = next_response.json()
+    assert len(next_data["items"]) == 1
+    assert next_data.get("next_cursor") is None
