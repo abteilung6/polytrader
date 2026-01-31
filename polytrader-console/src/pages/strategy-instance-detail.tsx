@@ -1,8 +1,11 @@
 import type { FC } from 'react'
 import { Link, useParams } from '@tanstack/react-router'
 
+import { StrategySignalsDataTable } from '@/components/strategies/strategy-signals-data-table'
+import { strategySignalColumns } from '@/components/strategies/signal-columns'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useStrategyDetailQuery } from '@/hooks/strategy-detail'
+import { useStrategySignalsQuery } from '@/hooks/strategy-signals'
 
 export const StrategyInstanceDetailPage: FC = () => {
   const { strategyId } = useParams({ strict: false })
@@ -10,6 +13,12 @@ export const StrategyInstanceDetailPage: FC = () => {
     strategyId ?? '',
     { enabled: !!strategyId },
   )
+  const {
+    data: signalsData,
+    isPending: signalsPending,
+    error: signalsError,
+    isError: signalsIsError,
+  } = useStrategySignalsQuery(strategyId ?? '', { enabled: !!strategyId && !!data })
 
   if (!strategyId) {
     return (
@@ -63,7 +72,18 @@ export const StrategyInstanceDetailPage: FC = () => {
         <TabsTrigger value="orders">Orders</TabsTrigger>
       </TabsList>
       <TabsContent value="signals" className="flex flex-col gap-4">
-        <p className="text-muted-foreground">Signals table placeholder.</p>
+        {signalsPending ? (
+          <p className="text-muted-foreground">Loading signals…</p>
+        ) : signalsIsError && signalsError ? (
+          <p className="text-destructive">
+            Error: {signalsError instanceof Error ? signalsError.message : String(signalsError)}
+          </p>
+        ) : (
+          <StrategySignalsDataTable
+            columns={strategySignalColumns}
+            data={signalsData?.items ?? []}
+          />
+        )}
       </TabsContent>
       <TabsContent value="orders" className="flex flex-col gap-4">
         <p className="text-muted-foreground">Orders table placeholder.</p>
