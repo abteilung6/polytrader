@@ -1,8 +1,12 @@
 import type { MarketInfoResponse } from '../lib/api/models/market-info-response'
 import type { MarketsResponse } from '../lib/api/models/markets-response'
 import type { MarketTickResponse } from '../lib/api/models/market-tick-response'
+import type { StrategyOrderItem } from '../lib/api/models/strategy-order-item'
+import type { StrategyOrdersResponse } from '../lib/api/models/strategy-orders-response'
 import type { StrategyResponse } from '../lib/api/models/strategy-response'
 import type { StrategiesResponse } from '../lib/api/models/strategies-response'
+import type { StrategySignalItem } from '../lib/api/models/strategy-signal-item'
+import type { StrategySignalsResponse } from '../lib/api/models/strategy-signals-response'
 import type { StrategyTypeResponse } from '../lib/api/models/strategy-type-response'
 import type { StrategyTypesResponse } from '../lib/api/models/strategy-types-response'
 
@@ -96,5 +100,61 @@ export const createMockStrategiesResponse = (
   overrides: Partial<StrategiesResponse> = {},
 ): StrategiesResponse => ({
   strategies: overrides.strategies ?? [],
+  ...overrides,
+})
+
+const defaultStrategySignal: StrategySignalItem = {
+  event_id: '00000000-0000-0000-0000-000000000001',
+  ts_wall: '2025-01-27T12:00:00Z',
+  market_slug: 'btc-updown-15m',
+  outcome: 'UP',
+  p_up: 0.6,
+  p_down: 0.4,
+  edge: 0.1,
+  confidence: 0.8,
+  model_id: 'strat-001',
+  model_version: '1.0.0',
+  rationale: 'Test signal',
+}
+
+export const createMockStrategySignalItem = (
+  overrides: Partial<StrategySignalItem> = {},
+): StrategySignalItem => ({
+  ...defaultStrategySignal,
+  ...overrides,
+})
+
+export const createMockStrategySignalsResponse = (
+  overrides: Partial<StrategySignalsResponse> = {},
+): StrategySignalsResponse => ({
+  items: overrides.items ?? [],
+  next_cursor: overrides.next_cursor ?? null,
+  ...overrides,
+})
+
+const defaultStrategyOrder: StrategyOrderItem = {
+  order_id: '00000000-0000-0000-0000-000000000002',
+  client_order_id: 'client-001',
+  ts_wall: '2025-01-27T12:00:00Z',
+  market_slug: 'btc-updown-15m',
+  side: 'BUY',
+  size: 100,
+  limit_price: 0.45,
+  status: 'PENDING_SUBMIT',
+  execution_mode: 'paper',
+}
+
+export const createMockStrategyOrderItem = (
+  overrides: Partial<StrategyOrderItem> = {},
+): StrategyOrderItem => ({
+  ...defaultStrategyOrder,
+  ...overrides,
+})
+
+export const createMockStrategyOrdersResponse = (
+  overrides: Partial<StrategyOrdersResponse> = {},
+): StrategyOrdersResponse => ({
+  items: overrides.items ?? [],
+  next_cursor: overrides.next_cursor ?? null,
   ...overrides,
 })

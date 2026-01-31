@@ -1,14 +1,20 @@
 import type { FC } from 'react'
-import { Link, useParams } from '@tanstack/react-router'
+import { Link, useNavigate, useParams, useSearch } from '@tanstack/react-router'
 
+import { StrategyOrdersDataTable } from '@/components/strategies/strategy-orders-data-table'
+import { strategyOrderColumns } from '@/components/strategies/order-columns'
 import { StrategySignalsDataTable } from '@/components/strategies/strategy-signals-data-table'
 import { strategySignalColumns } from '@/components/strategies/signal-columns'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useStrategyDetailQuery } from '@/hooks/strategy-detail'
+import { useStrategyOrdersQuery } from '@/hooks/strategy-orders'
 import { useStrategySignalsQuery } from '@/hooks/strategy-signals'
 
 export const StrategyInstanceDetailPage: FC = () => {
   const { strategyId } = useParams({ strict: false })
+  const { tab: tabParam } = useSearch({ strict: false })
+  const navigate = useNavigate()
+  const activeTab = tabParam === 'orders' ? 'orders' : 'signals'
   const { data, isPending, error, isError, fetchStatus } = useStrategyDetailQuery(
     strategyId ?? '',
     { enabled: !!strategyId },
@@ -19,6 +25,12 @@ export const StrategyInstanceDetailPage: FC = () => {
     error: signalsError,
     isError: signalsIsError,
   } = useStrategySignalsQuery(strategyId ?? '', { enabled: !!strategyId && !!data })
+  const {
+    data: ordersData,
+    isPending: ordersPending,
+    error: ordersError,
+    isError: ordersIsError,
+  } = useStrategyOrdersQuery(strategyId ?? '', { enabled: !!strategyId && !!data })
 
   if (!strategyId) {
     return (
@@ -65,8 +77,16 @@ export const StrategyInstanceDetailPage: FC = () => {
 
   if (!data) return null
 
+  const setTab = (value: string) => {
+    void navigate({
+      to: '/strategies/instances/$strategyId',
+      params: { strategyId },
+      search: value === 'orders' ? { tab: 'orders' } : { tab: 'signals' },
+    })
+  }
+
   return (
-    <Tabs defaultValue="signals" className="w-full flex-col gap-4">
+    <Tabs value={activeTab} onValueChange={setTab} className="w-full flex-col gap-4">
       <TabsList>
         <TabsTrigger value="signals">Signals</TabsTrigger>
         <TabsTrigger value="orders">Orders</TabsTrigger>
@@ -86,7 +106,15 @@ export const StrategyInstanceDetailPage: FC = () => {
         )}
       </TabsContent>
       <TabsContent value="orders" className="flex flex-col gap-4">
-        <p className="text-muted-foreground">Orders table placeholder.</p>
+        {ordersPending ? (
+          <p className="text-muted-foreground">Loading orders…</p>
+        ) : ordersIsError && ordersError ? (
+          <p className="text-destructive">
+            Error: {ordersError instanceof Error ? ordersError.message : String(ordersError)}
+          </p>
+        ) : (
+          <StrategyOrdersDataTable columns={strategyOrderColumns} data={ordersData?.items ?? []} />
+        )}
       </TabsContent>
     </Tabs>
   )
