@@ -7,6 +7,7 @@ Tests GET endpoints for reading system state:
 - GET /state/strategies
 - GET /state/strategies/{strategy_id}
 - GET /state/strategies/{strategy_id}/signals
+- GET /state/strategies/{strategy_id}/orders
 - GET /state/commands/{command_id}
 """
 
@@ -296,6 +297,150 @@ def test_get_strategy_signals_pagination(
 
     next_response = client.get(
         f"/api/v1/state/strategies/{test_strategy}/signals",
+        params={"limit": 10, "cursor": data["next_cursor"]},
+    )
+    assert next_response.status_code == 200
+    next_data = next_response.json()
+    assert len(next_data["items"]) == 1
+    assert next_data.get("next_cursor") is None
+
+
+async def _insert_order_events(
+    postgres_test_url: str,
+    strategy_id: str,
+    count: int,
+    execution_mode: str = "paper",
+) -> None:
+    """Insert OrderCreatedEvent records for strategy_id into events table."""
+    import uuid
+    from datetime import UTC, datetime
+
+    from polytrader.db.repository import EventRepository
+
+    if postgres_test_url.startswith("postgresql://"):
+        sqlalchemy_url = postgres_test_url.replace("postgresql://", "postgresql+psycopg://", 1)
+    else:
+        sqlalchemy_url = postgres_test_url
+
+    engine = create_async_engine(sqlalchemy_url, echo=False)
+    Session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    async with Session() as session:
+        repo = EventRepository(session)
+        for i in range(count):
+            order_id = str(uuid.uuid4())
+            client_order_id = f"client-{strategy_id}-{i}"
+            await repo.create_event(
+                event_id=uuid.uuid4(),
+                ts_wall=datetime.now(UTC),
+                ts_mono=2000.0 + i,
+                correlation_id=f"corr-order-{i}",
+                run_id="test-run",
+                schema_version="1.0",
+                source="oms",
+                event_type="OrderCreatedEvent",
+                event_data={
+                    "order_id": order_id,
+                    "client_order_id": client_order_id,
+                    "execution_mode": execution_mode,
+                    "intent": {
+                        "market_slug": "btc-updown",
+                        "outcome": "UP",
+                        "side": "BUY",
+                        "limit_price": 0.5,
+                        "size": 10.0,
+                        "reason": f"order-{i}",
+                        "strategy_id": strategy_id,
+                        "ttl_s": 2.0,
+                    },
+                },
+            )
+        await session.commit()
+    await engine.dispose()
+
+
+def test_get_strategy_orders_empty(client: TestClient, test_strategy: str) -> None:
+    """Test GET /state/strategies/{strategy_id}/orders returns 200 and empty list."""
+    response = client.get(f"/api/v1/state/strategies/{test_strategy}/orders")
+    assert response.status_code == 200
+    data = response.json()
+    assert "items" in data
+    assert data["items"] == []
+    assert data.get("next_cursor") is None
+
+    from polytrader.api.models import StrategyOrdersResponse
+
+    StrategyOrdersResponse(**data)
+
+
+def test_get_strategy_orders_success(
+    client: TestClient,
+    test_strategy: str,
+    postgres_test_url: str,
+    postgres_db: AsyncGenerator[None, None],
+) -> None:
+    """Test GET orders returns 200 and order DTOs with execution_mode."""
+    asyncio.run(_insert_order_events(postgres_test_url, test_strategy, 2, "paper"))
+
+    response = client.get(f"/api/v1/state/strategies/{test_strategy}/orders")
+    assert response.status_code == 200
+    data = response.json()
+    assert "items" in data
+    assert len(data["items"]) == 2
+    assert data.get("next_cursor") is None
+
+    for item in data["items"]:
+        assert "order_id" in item
+        assert "client_order_id" in item
+        assert "ts_wall" in item
+        assert item["market_slug"] == "btc-updown"
+        assert item["side"] == "BUY"
+        assert item["size"] == 10.0
+        assert item["limit_price"] == 0.5
+        assert item["status"] == "PENDING_SUBMIT"
+        assert item["execution_mode"] == "paper"
+
+    from polytrader.api.models import StrategyOrdersResponse
+
+    StrategyOrdersResponse(**data)
+
+
+def test_get_strategy_orders_execution_mode_live(
+    client: TestClient,
+    test_strategy: str,
+    postgres_test_url: str,
+    postgres_db: AsyncGenerator[None, None],
+) -> None:
+    """Test GET orders returns execution_mode live when stored in event_data."""
+    asyncio.run(_insert_order_events(postgres_test_url, test_strategy, 1, "live"))
+
+    response = client.get(f"/api/v1/state/strategies/{test_strategy}/orders")
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["items"]) == 1
+    assert data["items"][0]["execution_mode"] == "live"
+
+
+def test_get_strategy_orders_pagination(
+    client: TestClient,
+    test_strategy: str,
+    postgres_test_url: str,
+    postgres_db: AsyncGenerator[None, None],
+) -> None:
+    """Test GET orders with limit returns next_cursor when more rows exist."""
+    asyncio.run(_insert_order_events(postgres_test_url, test_strategy, 3))
+
+    response = client.get(
+        f"/api/v1/state/strategies/{test_strategy}/orders",
+        params={"limit": 2},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["items"]) == 2
+    assert data["next_cursor"] is not None
+
+    next_response = client.get(
+        f"/api/v1/state/strategies/{test_strategy}/orders",
         params={"limit": 10, "cursor": data["next_cursor"]},
     )
     assert next_response.status_code == 200

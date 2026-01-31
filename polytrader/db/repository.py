@@ -218,6 +218,64 @@ class EventRepository:
             ).decode()
         return (rows, next_cursor)
 
+    async def read_order_events_by_strategy(
+        self,
+        strategy_id: str,
+        limit: int = 100,
+        cursor: str | None = None,
+    ) -> tuple[list[EventRecord], str | None]:
+        """Read OrderCreatedEvent records for a strategy, newest-first, with cursor pagination.
+
+        Filters by event_type=OrderCreatedEvent and intent.strategy_id in event_data.
+        Order: ts_mono DESC, event_id DESC. Returns at most `limit` items (capped at 500)
+        and an optional next_cursor for the following page.
+
+        Args:
+            strategy_id: Strategy identifier (intent.strategy_id in OrderCreatedEvent)
+            limit: Max items to return (default 100, max 500)
+            cursor: Opaque cursor from previous response (optional)
+
+        Returns:
+            (records, next_cursor). next_cursor is set if there are more rows.
+        """
+        cap = min(max(1, limit), 500)
+        conditions = [
+            EventRecord.event_type == "OrderCreatedEvent",
+            EventRecord.event_data["intent"]["strategy_id"].astext == strategy_id,
+        ]
+        if cursor:
+            try:
+                decoded = base64.urlsafe_b64decode(cursor.encode()).decode()
+                parts = decoded.split(":", 1)
+                if len(parts) == 2:
+                    cursor_ts = float(parts[0])
+                    cursor_id = UUID(parts[1])
+                    conditions.append(
+                        or_(
+                            EventRecord.ts_mono < cursor_ts,
+                            (EventRecord.ts_mono == cursor_ts) & (EventRecord.event_id < cursor_id),
+                        )
+                    )
+            except (ValueError, TypeError):
+                pass  # Invalid cursor: ignore and return first page
+
+        query = (
+            select(EventRecord)
+            .where(and_(*conditions))
+            .order_by(desc(EventRecord.ts_mono), desc(EventRecord.event_id))
+            .limit(cap + 1)
+        )
+        result = await self.session.execute(query)
+        rows = list(result.scalars().all())
+        next_cursor: str | None = None
+        if len(rows) > cap:
+            rows = rows[:cap]
+            last_returned = rows[-1]
+            next_cursor = base64.urlsafe_b64encode(
+                f"{last_returned.ts_mono}:{last_returned.event_id}".encode()
+            ).decode()
+        return (rows, next_cursor)
+
     async def event_exists(self, event_id: UUID) -> bool:
         """Check if event with given event_id exists.
 

@@ -4,6 +4,8 @@ Per Platform_Proposal.md: Elite-style API design with separation of
 state endpoints (/state/*) and command endpoints (/commands/*).
 """
 
+from typing import Literal
+
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from polytrader.api.dependencies import (
@@ -30,6 +32,8 @@ from polytrader.api.models import (
     LiveStrategiesResponse,
     RunIdentityResponse,
     StrategiesResponse,
+    StrategyOrderItem,
+    StrategyOrdersResponse,
     StrategyResponse,
     StrategySignalItem,
     StrategySignalsResponse,
@@ -361,6 +365,52 @@ async def get_strategy_signals(
     )
     items = [_event_record_to_signal_item(r) for r in records]
     return StrategySignalsResponse(items=items, next_cursor=next_cursor)
+
+
+def _event_record_to_order_item(record: EventRecord) -> StrategyOrderItem:
+    """Map EventRecord (OrderCreatedEvent) to API StrategyOrderItem."""
+    data = record.event_data
+    intent = data["intent"]
+    execution_mode_raw = data.get("execution_mode", "paper")
+    execution_mode: Literal["paper", "live"] = (
+        execution_mode_raw if execution_mode_raw in ("paper", "live") else "paper"
+    )
+    return StrategyOrderItem(
+        order_id=data["order_id"],
+        client_order_id=data["client_order_id"],
+        ts_wall=record.ts_wall,
+        market_slug=intent["market_slug"],
+        side=intent["side"],
+        size=float(intent["size"]),
+        limit_price=float(intent["limit_price"]),
+        status="PENDING_SUBMIT",
+        execution_mode=execution_mode,
+    )
+
+
+@router.get(
+    "/state/strategies/{strategy_id}/orders",
+    response_model=StrategyOrdersResponse,
+)
+async def get_strategy_orders(
+    strategy_id: str,
+    event_repo: EventRepository = Depends(get_event_repository),  # noqa: B008
+    limit: int = 100,
+    cursor: str | None = None,
+) -> StrategyOrdersResponse:
+    """Get paginated orders for a strategy (newest first).
+
+    Query params: limit (default 100, max 500), cursor (optional).
+    Returns empty list when strategy has no orders.
+    execution_mode (paper | live) is included per row for UI badge.
+    """
+    records, next_cursor = await event_repo.read_order_events_by_strategy(
+        strategy_id=strategy_id,
+        limit=limit,
+        cursor=cursor,
+    )
+    items = [_event_record_to_order_item(r) for r in records]
+    return StrategyOrdersResponse(items=items, next_cursor=next_cursor)
 
 
 @router.get(

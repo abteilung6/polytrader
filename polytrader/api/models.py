@@ -254,6 +254,36 @@ class StrategySignalsResponse(BaseModel):
     )
 
 
+class StrategyOrderItem(BaseModel):
+    """Single order record for strategy-scoped orders API.
+
+    Mirrors OrderCreatedEvent + intent (order_id, ts_wall, market, side, size, status).
+    execution_mode indicates paper vs live so UI can show Paper/Live badge.
+    """
+
+    order_id: str = Field(description="Internal order UUID")
+    client_order_id: str = Field(description="Idempotency key")
+    ts_wall: datetime = Field(description="Wall-clock time (UTC, ISO 8601)")
+    market_slug: str = Field(description="Market identifier")
+    side: str = Field(description="Trade side: BUY or SELL")
+    size: float = Field(gt=0, description="Order size in USD")
+    limit_price: float = Field(gt=0, le=1, description="Limit price (0-1 range)")
+    status: str = Field(description="Order status (e.g. PENDING_SUBMIT, LIVE, FILLED, REJECTED)")
+    execution_mode: Literal["paper", "live"] = Field(
+        description="Paper or live execution; UI shows Paper/Live badge"
+    )
+
+
+class StrategyOrdersResponse(BaseModel):
+    """Paginated list of orders for a strategy."""
+
+    items: list[StrategyOrderItem] = Field(description="Order records (newest first)")
+    next_cursor: str | None = Field(
+        default=None,
+        description="Opaque cursor for next page; absent if no more",
+    )
+
+
 # ============================================================================
 # Command Models
 # ============================================================================
