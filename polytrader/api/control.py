@@ -134,43 +134,43 @@ async def get_live_strategies(
     return LiveStrategiesResponse(active_strategies=list(active))
 
 
+def _strategy_record_to_response(s: StrategyRecordModel) -> StrategyResponse:
+    """Map DB StrategyRecord to API StrategyResponse (single source of truth)."""
+    return StrategyResponse(
+        strategy_id=s.strategy_id,
+        name=s.name,
+        description=s.description,
+        config=s.config,
+        template_type_id=s.template_type_id,
+        template_version=s.template_version,
+        desired_state=s.desired_state,
+        actual_state=s.actual_state,
+        last_transition_at=s.last_transition_at,
+        last_error=s.last_error,
+        run_identity=(
+            RunIdentityResponse(
+                template_code_ref=s.template_code_ref,
+                config_hash=s.config_hash,
+                dependency_set=s.dependency_set,
+                market_data_snapshot_ref=s.market_data_snapshot_ref,
+            )
+            if (s.template_code_ref or s.dependency_set or s.market_data_snapshot_ref)
+            else None
+        ),
+        deployment_id=str(s.deployment_id) if s.deployment_id else None,
+        run_id=s.run_id,
+        created_at=s.created_at,
+        updated_at=s.updated_at,
+    )
+
+
 @router.get("/state/strategies", response_model=StrategiesResponse)
 async def get_strategies(
     registry: StrategyRegistry = Depends(get_strategy_registry),  # noqa: B008
 ) -> StrategiesResponse:
     """Get all strategies in registry."""
     strategies = await registry.list_strategies()
-    return StrategiesResponse(
-        strategies=[
-            StrategyResponse(
-                strategy_id=s.strategy_id,
-                name=s.name,
-                description=s.description,
-                config=s.config,
-                template_type_id=s.template_type_id,
-                template_version=s.template_version,
-                desired_state=s.desired_state,
-                actual_state=s.actual_state,
-                last_transition_at=s.last_transition_at,
-                last_error=s.last_error,
-                run_identity=(
-                    RunIdentityResponse(
-                        template_code_ref=s.template_code_ref,
-                        config_hash=s.config_hash,
-                        dependency_set=s.dependency_set,
-                        market_data_snapshot_ref=s.market_data_snapshot_ref,
-                    )
-                    if (s.template_code_ref or s.dependency_set or s.market_data_snapshot_ref)
-                    else None
-                ),
-                deployment_id=str(s.deployment_id) if s.deployment_id else None,
-                run_id=s.run_id,
-                created_at=s.created_at,
-                updated_at=s.updated_at,
-            )
-            for s in strategies
-        ]
-    )
+    return StrategiesResponse(strategies=[_strategy_record_to_response(s) for s in strategies])
 
 
 @router.get("/state/strategies/templates", response_model=StrategyTypesResponse)
@@ -314,6 +314,30 @@ async def get_strategy_template_version(
         available_versions=[version],  # Single version
         parameter_schema=template.parameter_schema.to_openapi_schema(),
     )
+
+
+@router.get(
+    "/state/strategies/{strategy_id}",
+    response_model=StrategyResponse,
+    responses={
+        404: {"description": "Strategy not found"},
+    },
+)
+async def get_strategy_by_id(
+    strategy_id: str,
+    registry: StrategyRegistry = Depends(get_strategy_registry),  # noqa: B008
+) -> StrategyResponse:
+    """Get a single strategy by ID.
+
+    Returns 404 if the strategy is not in the registry.
+    """
+    strategy = await registry.get_strategy(strategy_id)
+    if strategy is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Strategy not found",
+        )
+    return _strategy_record_to_response(strategy)
 
 
 @router.post(
