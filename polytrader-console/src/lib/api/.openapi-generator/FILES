@@ -28,7 +28,11 @@ docs/MarketTickResponse.md
 docs/MarketsResponse.md
 docs/RunIdentityResponse.md
 docs/StrategiesResponse.md
+docs/StrategyOrderItem.md
+docs/StrategyOrdersResponse.md
 docs/StrategyResponse.md
+docs/StrategySignalItem.md
+docs/StrategySignalsResponse.md
 docs/StrategyTypeResponse.md
 docs/StrategyTypesResponse.md
 docs/UpdateStrategyRequest.md
@@ -61,7 +65,11 @@ models/market-tick-response.ts
 models/markets-response.ts
 models/run-identity-response.ts
 models/strategies-response.ts
+models/strategy-order-item.ts
+models/strategy-orders-response.ts
 models/strategy-response.ts
+models/strategy-signal-item.ts
+models/strategy-signals-response.ts
 models/strategy-type-response.ts
 models/strategy-types-response.ts
 models/update-strategy-request.ts

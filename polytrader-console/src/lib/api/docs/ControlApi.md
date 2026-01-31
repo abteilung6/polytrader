@@ -14,6 +14,9 @@ All URIs are relative to *http://localhost*
 |[**getHealthApiV1StateHealthGet**](#gethealthapiv1statehealthget) | **GET** /api/v1/state/health | Get Health|
 |[**getLiveStrategiesApiV1StateLiveStrategiesGet**](#getlivestrategiesapiv1statelivestrategiesget) | **GET** /api/v1/state/live-strategies | Get Live Strategies|
 |[**getStrategiesApiV1StateStrategiesGet**](#getstrategiesapiv1statestrategiesget) | **GET** /api/v1/state/strategies | Get Strategies|
+|[**getStrategyByIdApiV1StateStrategiesStrategyIdGet**](#getstrategybyidapiv1statestrategiesstrategyidget) | **GET** /api/v1/state/strategies/{strategy_id} | Get Strategy By Id|
+|[**getStrategyOrdersApiV1StateStrategiesStrategyIdOrdersGet**](#getstrategyordersapiv1statestrategiesstrategyidordersget) | **GET** /api/v1/state/strategies/{strategy_id}/orders | Get Strategy Orders|
+|[**getStrategySignalsApiV1StateStrategiesStrategyIdSignalsGet**](#getstrategysignalsapiv1statestrategiesstrategyidsignalsget) | **GET** /api/v1/state/strategies/{strategy_id}/signals | Get Strategy Signals|
 |[**getStrategyTemplateApiV1StateStrategiesTemplatesTypeIdGet**](#getstrategytemplateapiv1statestrategiestemplatestypeidget) | **GET** /api/v1/state/strategies/templates/{type_id} | Get Strategy Template|
 |[**getStrategyTemplateVersionApiV1StateStrategiesTemplatesTypeIdVersionsVersionGet**](#getstrategytemplateversionapiv1statestrategiestemplatestypeidversionsversionget) | **GET** /api/v1/state/strategies/templates/{type_id}/versions/{version} | Get Strategy Template Version|
 |[**listStrategyTemplatesApiV1StateStrategiesTemplatesGet**](#liststrategytemplatesapiv1statestrategiestemplatesget) | **GET** /api/v1/state/strategies/templates | List Strategy Templates|
@@ -525,6 +528,175 @@ No authorization required
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
 |**200** | Successful Response |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **getStrategyByIdApiV1StateStrategiesStrategyIdGet**
+> StrategyResponse getStrategyByIdApiV1StateStrategiesStrategyIdGet()
+
+Get a single strategy by ID.  Returns 404 if the strategy is not in the registry.
+
+### Example
+
+```typescript
+import {
+    ControlApi,
+    Configuration
+} from '@polytrader/api-client';
+
+const configuration = new Configuration();
+const apiInstance = new ControlApi(configuration);
+
+let strategyId: string; // (default to undefined)
+
+const { status, data } = await apiInstance.getStrategyByIdApiV1StateStrategiesStrategyIdGet(
+    strategyId
+);
+```
+
+### Parameters
+
+|Name | Type | Description  | Notes|
+|------------- | ------------- | ------------- | -------------|
+| **strategyId** | [**string**] |  | defaults to undefined|
+
+
+### Return type
+
+**StrategyResponse**
+
+### Authorization
+
+No authorization required
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+
+### HTTP response details
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+|**200** | Successful Response |  -  |
+|**404** | Strategy not found |  -  |
+|**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **getStrategyOrdersApiV1StateStrategiesStrategyIdOrdersGet**
+> StrategyOrdersResponse getStrategyOrdersApiV1StateStrategiesStrategyIdOrdersGet()
+
+Get paginated orders for a strategy (newest first).  Query params: limit (default 100, max 500), cursor (optional). Returns empty list when strategy has no orders. execution_mode (paper | live) is included per row for UI badge.
+
+### Example
+
+```typescript
+import {
+    ControlApi,
+    Configuration
+} from '@polytrader/api-client';
+
+const configuration = new Configuration();
+const apiInstance = new ControlApi(configuration);
+
+let strategyId: string; // (default to undefined)
+let limit: number; // (optional) (default to 100)
+let cursor: string; // (optional) (default to undefined)
+
+const { status, data } = await apiInstance.getStrategyOrdersApiV1StateStrategiesStrategyIdOrdersGet(
+    strategyId,
+    limit,
+    cursor
+);
+```
+
+### Parameters
+
+|Name | Type | Description  | Notes|
+|------------- | ------------- | ------------- | -------------|
+| **strategyId** | [**string**] |  | defaults to undefined|
+| **limit** | [**number**] |  | (optional) defaults to 100|
+| **cursor** | [**string**] |  | (optional) defaults to undefined|
+
+
+### Return type
+
+**StrategyOrdersResponse**
+
+### Authorization
+
+No authorization required
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+
+### HTTP response details
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+|**200** | Successful Response |  -  |
+|**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **getStrategySignalsApiV1StateStrategiesStrategyIdSignalsGet**
+> StrategySignalsResponse getStrategySignalsApiV1StateStrategiesStrategyIdSignalsGet()
+
+Get paginated signals for a strategy (newest first).  Query params: limit (default 100, max 500), cursor (optional). Returns empty list when strategy has no signals.
+
+### Example
+
+```typescript
+import {
+    ControlApi,
+    Configuration
+} from '@polytrader/api-client';
+
+const configuration = new Configuration();
+const apiInstance = new ControlApi(configuration);
+
+let strategyId: string; // (default to undefined)
+let limit: number; // (optional) (default to 100)
+let cursor: string; // (optional) (default to undefined)
+
+const { status, data } = await apiInstance.getStrategySignalsApiV1StateStrategiesStrategyIdSignalsGet(
+    strategyId,
+    limit,
+    cursor
+);
+```
+
+### Parameters
+
+|Name | Type | Description  | Notes|
+|------------- | ------------- | ------------- | -------------|
+| **strategyId** | [**string**] |  | defaults to undefined|
+| **limit** | [**number**] |  | (optional) defaults to 100|
+| **cursor** | [**string**] |  | (optional) defaults to undefined|
+
+
+### Return type
+
+**StrategySignalsResponse**
+
+### Authorization
+
+No authorization required
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+
+### HTTP response details
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+|**200** | Successful Response |  -  |
+|**422** | Validation Error |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
