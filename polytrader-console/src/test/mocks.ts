@@ -1,6 +1,9 @@
+import type { ClosedTradeItem } from '../lib/api/models/closed-trade-item'
 import type { MarketInfoResponse } from '../lib/api/models/market-info-response'
 import type { MarketsResponse } from '../lib/api/models/markets-response'
 import type { MarketTickResponse } from '../lib/api/models/market-tick-response'
+import type { PerformanceResponse } from '../lib/api/models/performance-response'
+import type { PerformanceSummary } from '../lib/api/models/performance-summary'
 import type { StrategyOrderItem } from '../lib/api/models/strategy-order-item'
 import type { StrategyOrdersResponse } from '../lib/api/models/strategy-orders-response'
 import type { StrategyResponse } from '../lib/api/models/strategy-response'
@@ -154,6 +157,53 @@ export const createMockStrategyOrderItem = (
 export const createMockStrategyOrdersResponse = (
   overrides: Partial<StrategyOrdersResponse> = {},
 ): StrategyOrdersResponse => ({
+  items: overrides.items ?? [],
+  next_cursor: overrides.next_cursor ?? null,
+  ...overrides,
+})
+
+const defaultClosedTradeItem: ClosedTradeItem = {
+  market_slug: 'btc-updown-15m',
+  outcome: 'UP',
+  entry_time: 1000,
+  exit_time: 1100,
+  exit_ts_wall: '2025-01-27T12:00:00Z',
+  entry_price: 0.45,
+  exit_price: 0.55,
+  size: 100,
+  pnl: 10,
+  pnl_pct: 22.2,
+  result: 'WIN',
+  execution_mode: 'paper',
+  duration_seconds: 100,
+}
+
+export const createMockClosedTradeItem = (
+  overrides: Partial<ClosedTradeItem> = {},
+): ClosedTradeItem => ({
+  ...defaultClosedTradeItem,
+  ...overrides,
+})
+
+const defaultPerformanceSummary: PerformanceSummary = {
+  total_realized_pnl: 10,
+  total_trades: 1,
+  win_rate_pct: 100,
+  current_drawdown: null,
+  max_drawdown: null,
+}
+
+export const createMockPerformanceSummary = (
+  overrides: Partial<PerformanceSummary> = {},
+): PerformanceSummary => ({
+  ...defaultPerformanceSummary,
+  ...overrides,
+})
+
+export const createMockPerformanceResponse = (
+  overrides: Partial<PerformanceResponse> = {},
+): PerformanceResponse => ({
+  summary: overrides.summary ?? defaultPerformanceSummary,
   items: overrides.items ?? [],
   next_cursor: overrides.next_cursor ?? null,
   ...overrides,

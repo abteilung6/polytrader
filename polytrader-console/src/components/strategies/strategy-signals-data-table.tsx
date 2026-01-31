@@ -49,7 +49,7 @@ export function StrategySignalsDataTable({ columns, data }: StrategySignalsDataT
     data,
     columns,
     getRowId: (row) => row.event_id,
-    initialState: { pagination: { pageSize: 15 } },
+    initialState: { pagination: { pageSize: 10 } },
     onSortingChange: setSorting,
     onColumnFiltersChange: setColumnFilters,
     getCoreRowModel: getCoreRowModel(),

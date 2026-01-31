@@ -72,9 +72,11 @@ const strategiesInstancesIndexRoute = createRoute({
 const strategyInstanceDetailRoute = createRoute({
   getParentRoute: () => strategiesInstancesRoute,
   path: '$strategyId',
-  validateSearch: (search: Record<string, unknown>): { tab?: 'signals' | 'orders' } => {
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { tab?: 'signals' | 'orders' | 'performance' } => {
     const tab = search.tab
-    if (tab === 'signals' || tab === 'orders') return { tab }
+    if (tab === 'signals' || tab === 'orders' || tab === 'performance') return { tab }
     return {}
   },
   component: StrategyInstanceDetailPage,

@@ -49,7 +49,7 @@ export function StrategyOrdersDataTable({ columns, data }: StrategyOrdersDataTab
     data,
     columns,
     getRowId: (row) => row.order_id,
-    initialState: { pagination: { pageSize: 15 } },
+    initialState: { pagination: { pageSize: 10 } },
     onSortingChange: setSorting,
     onColumnFiltersChange: setColumnFilters,
     getCoreRowModel: getCoreRowModel(),
