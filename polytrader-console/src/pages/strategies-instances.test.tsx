@@ -37,6 +37,9 @@ describe('StrategiesInstancesPage', () => {
     expect(dataRow).toHaveTextContent(defaultInstance.template_type_id)
     expect(dataRow).toHaveTextContent(defaultInstance.template_version)
     expect(dataRow).toHaveTextContent(defaultInstance.actual_state)
+
+    const nameLink = within(dataRow).getByRole('link', { name: defaultInstance.name })
+    expect(nameLink).toHaveAttribute('href', `/strategies/instances/${defaultInstance.strategy_id}`)
   })
 
   it('renders empty state when no instances', async () => {

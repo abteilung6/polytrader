@@ -1,4 +1,5 @@
 import type { ColumnDef } from '@tanstack/react-table'
+import { Link } from '@tanstack/react-router'
 import { ArrowUpDown } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
@@ -35,7 +36,18 @@ export const strategyInstanceColumns: ColumnDef<StrategyResponse>[] = [
         <ArrowUpDown className="ml-2 size-4" />
       </Button>
     ),
-    cell: ({ row }) => <span>{row.getValue('name')}</span>,
+    cell: ({ row }) => {
+      const strategy = row.original
+      return (
+        <Link
+          to="/strategies/instances/$strategyId"
+          params={{ strategyId: strategy.strategy_id }}
+          className="font-medium hover:underline"
+        >
+          {row.getValue('name')}
+        </Link>
+      )
+    },
   },
   {
     accessorKey: 'template_type_id',
