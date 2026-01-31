@@ -18,6 +18,7 @@ from polytrader.api.dependencies import (
 )
 from polytrader.api.models import (
     ActivateStrategyRequest,
+    ClosedTradeItem,
     CommandEnvelopeResponse,
     CommandStatusResponse,
     CreateStrategyRequest,
@@ -30,6 +31,8 @@ from polytrader.api.models import (
     HealthGateStatus,
     HealthResponse,
     LiveStrategiesResponse,
+    PerformanceResponse,
+    PerformanceSummary,
     RunIdentityResponse,
     StrategiesResponse,
     StrategyOrderItem,
@@ -411,6 +414,90 @@ async def get_strategy_orders(
     )
     items = [_event_record_to_order_item(r) for r in records]
     return StrategyOrdersResponse(items=items, next_cursor=next_cursor)
+
+
+def _event_record_to_closed_trade_item(record: EventRecord) -> ClosedTradeItem:
+    """Map EventRecord (StrategyClosedTradeEvent) to API ClosedTradeItem."""
+    data = record.event_data
+    entry_time = float(data["entry_time"])
+    exit_time = float(data["exit_time"])
+    execution_mode_raw = data.get("execution_mode", "paper")
+    execution_mode: Literal["paper", "live"] = (
+        execution_mode_raw if execution_mode_raw in ("paper", "live") else "paper"
+    )
+    outcome: Literal["UP", "DOWN"] = data["outcome"] if data["outcome"] in ("UP", "DOWN") else "UP"
+    return ClosedTradeItem(
+        market_slug=data["market_slug"],
+        outcome=outcome,
+        entry_time=entry_time,
+        exit_time=exit_time,
+        exit_ts_wall=record.ts_wall,
+        entry_price=float(data["entry_price"]),
+        exit_price=float(data["exit_price"]),
+        size=float(data["size"]),
+        pnl=float(data["pnl"]),
+        pnl_pct=float(data["pnl_pct"]),
+        result=data["result"],
+        execution_mode=execution_mode,
+        duration_seconds=max(0.0, exit_time - entry_time),
+    )
+
+
+def _closed_trade_items_to_summary(
+    items: list[ClosedTradeItem],
+) -> PerformanceSummary:
+    """Compute PerformanceSummary from a page of ClosedTradeItem."""
+    total_trades = len(items)
+    if total_trades == 0:
+        return PerformanceSummary(
+            total_realized_pnl=0.0,
+            total_trades=0,
+            win_rate_pct=None,
+            current_drawdown=None,
+            max_drawdown=None,
+        )
+    total_realized_pnl = sum(t.pnl for t in items)
+    wins = sum(1 for t in items if t.result == "WIN")
+    win_rate_pct = (wins / total_trades) * 100.0
+    return PerformanceSummary(
+        total_realized_pnl=total_realized_pnl,
+        total_trades=total_trades,
+        win_rate_pct=win_rate_pct,
+        current_drawdown=None,
+        max_drawdown=None,
+    )
+
+
+@router.get(
+    "/state/strategies/{strategy_id}/performance",
+    response_model=PerformanceResponse,
+)
+async def get_strategy_performance(
+    strategy_id: str,
+    event_repo: EventRepository = Depends(get_event_repository),  # noqa: B008
+    from_ts: float | None = None,
+    to_ts: float | None = None,
+    execution_mode: Literal["paper", "live"] | None = None,
+    limit: int = 100,
+    cursor: str | None = None,
+) -> PerformanceResponse:
+    """Get past performance for a strategy: summary + paginated closed trades.
+
+    Query params: from_ts, to_ts (optional ts_mono range), execution_mode
+    (paper | live | omit for all), limit (default 100, max 500), cursor.
+    Summary is computed from the returned page of items.
+    """
+    records, next_cursor = await event_repo.read_closed_trade_events_by_strategy(
+        strategy_id=strategy_id,
+        from_ts=from_ts,
+        to_ts=to_ts,
+        execution_mode=execution_mode,
+        limit=limit,
+        cursor=cursor,
+    )
+    items = [_event_record_to_closed_trade_item(r) for r in records]
+    summary = _closed_trade_items_to_summary(items)
+    return PerformanceResponse(summary=summary, items=items, next_cursor=next_cursor)
 
 
 @router.get(

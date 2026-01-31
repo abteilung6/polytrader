@@ -8,6 +8,7 @@ Tests GET endpoints for reading system state:
 - GET /state/strategies/{strategy_id}
 - GET /state/strategies/{strategy_id}/signals
 - GET /state/strategies/{strategy_id}/orders
+- GET /state/strategies/{strategy_id}/performance
 - GET /state/commands/{command_id}
 """
 
@@ -446,4 +447,164 @@ def test_get_strategy_orders_pagination(
     assert next_response.status_code == 200
     next_data = next_response.json()
     assert len(next_data["items"]) == 1
+    assert next_data.get("next_cursor") is None
+
+
+async def _insert_closed_trade_events(
+    postgres_test_url: str,
+    strategy_id: str,
+    count: int,
+    execution_mode: str = "paper",
+) -> None:
+    """Insert StrategyClosedTradeEvent records for performance API tests."""
+    import uuid
+    from datetime import UTC, datetime
+
+    from polytrader.db.repository import EventRepository
+
+    if postgres_test_url.startswith("postgresql://"):
+        sqlalchemy_url = postgres_test_url.replace("postgresql://", "postgresql+psycopg://", 1)
+    else:
+        sqlalchemy_url = postgres_test_url
+
+    engine = create_async_engine(sqlalchemy_url, echo=False)
+    Session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    async with Session() as session:
+        repo = EventRepository(session)
+        for i in range(count):
+            ts_mono = 5000.0 + i
+            event_data = {
+                "strategy_id": strategy_id,
+                "market_slug": "btc-updown-15m",
+                "outcome": "UP",
+                "entry_price": 0.45,
+                "exit_price": 0.55,
+                "size": 100.0,
+                "pnl": 10.0 + i,
+                "pnl_pct": 22.2,
+                "entry_time": ts_mono - 100.0,
+                "exit_time": ts_mono,
+                "result": "WIN" if i % 2 == 0 else "LOSS",
+                "execution_mode": execution_mode,
+                "order_id": str(uuid.uuid4()),
+                "fill_id": str(uuid.uuid4()),
+            }
+            await repo.create_event(
+                event_id=uuid.uuid4(),
+                ts_wall=datetime.now(UTC),
+                ts_mono=ts_mono,
+                correlation_id=f"corr-perf-{i}",
+                run_id="test-run",
+                schema_version="1.0",
+                source="posttrade",
+                event_type="StrategyClosedTradeEvent",
+                event_data=event_data,
+            )
+        await session.commit()
+    await engine.dispose()
+
+
+def test_get_strategy_performance_empty(client: TestClient, test_strategy: str) -> None:
+    """Test GET /state/strategies/{strategy_id}/performance returns 200 and empty items."""
+    response = client.get(f"/api/v1/state/strategies/{test_strategy}/performance")
+    assert response.status_code == 200
+    data = response.json()
+    assert "summary" in data
+    assert data["summary"]["total_trades"] == 0
+    assert data["summary"]["total_realized_pnl"] == 0.0
+    assert data["summary"]["win_rate_pct"] is None
+    assert "items" in data
+    assert data["items"] == []
+    assert data.get("next_cursor") is None
+
+    from polytrader.api.models import PerformanceResponse
+
+    PerformanceResponse(**data)
+
+
+def test_get_strategy_performance_success(
+    client: TestClient,
+    test_strategy: str,
+    postgres_test_url: str,
+    postgres_db: AsyncGenerator[None, None],
+) -> None:
+    """Test GET performance returns 200, summary and closed-trade DTOs."""
+    asyncio.run(_insert_closed_trade_events(postgres_test_url, test_strategy, 2))
+
+    response = client.get(f"/api/v1/state/strategies/{test_strategy}/performance")
+    assert response.status_code == 200
+    data = response.json()
+    assert "summary" in data
+    assert data["summary"]["total_trades"] == 2
+    assert data["summary"]["total_realized_pnl"] == 21.0  # 10 + 11
+    assert data["summary"]["win_rate_pct"] == 50.0  # 1 WIN, 1 LOSS
+    assert "items" in data
+    assert len(data["items"]) == 2
+    for item in data["items"]:
+        assert item["market_slug"] == "btc-updown-15m"
+        assert item["outcome"] == "UP"
+        assert item["entry_price"] == 0.45
+        assert item["exit_price"] == 0.55
+        assert item["size"] == 100.0
+        assert "pnl" in item
+        assert item["result"] in ("WIN", "LOSS")
+        assert item["execution_mode"] == "paper"
+        assert "exit_ts_wall" in item
+        assert item["duration_seconds"] >= 0
+    assert data.get("next_cursor") is None
+
+    from polytrader.api.models import PerformanceResponse
+
+    PerformanceResponse(**data)
+
+
+def test_get_strategy_performance_execution_mode_filter(
+    client: TestClient,
+    test_strategy: str,
+    postgres_test_url: str,
+    postgres_db: AsyncGenerator[None, None],
+) -> None:
+    """Test GET performance with execution_mode=paper returns only paper trades."""
+    asyncio.run(_insert_closed_trade_events(postgres_test_url, test_strategy, 1, "paper"))
+    asyncio.run(_insert_closed_trade_events(postgres_test_url, test_strategy, 1, "live"))
+
+    response = client.get(
+        f"/api/v1/state/strategies/{test_strategy}/performance",
+        params={"execution_mode": "paper"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["summary"]["total_trades"] == 1
+    assert len(data["items"]) == 1
+    assert data["items"][0]["execution_mode"] == "paper"
+
+
+def test_get_strategy_performance_pagination(
+    client: TestClient,
+    test_strategy: str,
+    postgres_test_url: str,
+    postgres_db: AsyncGenerator[None, None],
+) -> None:
+    """Test GET performance with limit returns next_cursor when more rows exist."""
+    asyncio.run(_insert_closed_trade_events(postgres_test_url, test_strategy, 3))
+
+    response = client.get(
+        f"/api/v1/state/strategies/{test_strategy}/performance",
+        params={"limit": 2},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["items"]) == 2
+    assert data["summary"]["total_trades"] == 2
+    assert data["next_cursor"] is not None
+
+    next_response = client.get(
+        f"/api/v1/state/strategies/{test_strategy}/performance",
+        params={"limit": 10, "cursor": data["next_cursor"]},
+    )
+    assert next_response.status_code == 200
+    next_data = next_response.json()
+    assert len(next_data["items"]) == 1
+    assert next_data["summary"]["total_trades"] == 1
     assert next_data.get("next_cursor") is None

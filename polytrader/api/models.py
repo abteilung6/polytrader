@@ -285,6 +285,75 @@ class StrategyOrdersResponse(BaseModel):
 
 
 # ============================================================================
+# Past Performance Models (StrategyClosedTradeEvent read path)
+# ============================================================================
+
+
+class ClosedTradeItem(BaseModel):
+    """Single closed trade for strategy performance API.
+
+    Per proposal-past-performance-tab: One row per StrategyClosedTradeEvent.
+    entry_time/exit_time are monotonic timestamps; exit_ts_wall is wall-clock for display.
+    """
+
+    market_slug: str = Field(description="Market identifier")
+    outcome: Literal["UP", "DOWN"] = Field(description="Outcome traded")
+    entry_time: float = Field(description="Entry time (monotonic)")
+    exit_time: float = Field(description="Exit time (monotonic)")
+    exit_ts_wall: datetime = Field(description="Exit wall-clock time (UTC)")
+    entry_price: float = Field(gt=0, le=1, description="Average entry price")
+    exit_price: float = Field(gt=0, le=1, description="Exit fill price")
+    size: float = Field(gt=0, description="Position size in USD")
+    pnl: float = Field(description="Realized P&L in USD")
+    pnl_pct: float = Field(description="Realized P&L as percentage")
+    result: Literal["WIN", "LOSS", "BREAKEVEN"] = Field(
+        description="WIN if pnl > 0, LOSS if pnl < 0, BREAKEVEN if pnl == 0"
+    )
+    execution_mode: Literal["paper", "live"] = Field(description="Paper or live execution")
+    duration_seconds: float = Field(
+        ge=0,
+        description="Trade duration (exit_time - entry_time) in seconds",
+    )
+
+
+class PerformanceSummary(BaseModel):
+    """Aggregate performance metrics for the returned closed trades.
+
+    Computed from the items in this response (page-scoped).
+    When items are empty, total_trades=0, total_realized_pnl=0, win_rate_pct=None.
+    """
+
+    total_realized_pnl: float = Field(description="Sum of P&L over returned trades (USD)")
+    total_trades: int = Field(ge=0, description="Number of trades in this page")
+    win_rate_pct: float | None = Field(
+        default=None,
+        description="Percentage of WIN results (0-100); None if no trades",
+    )
+    current_drawdown: float | None = Field(
+        default=None,
+        description="Current drawdown (Phase 2: from equity curve)",
+    )
+    max_drawdown: float | None = Field(
+        default=None,
+        description="Max drawdown (Phase 2: from equity curve)",
+    )
+
+
+class PerformanceResponse(BaseModel):
+    """Past performance for a strategy: summary + paginated closed trades."""
+
+    summary: PerformanceSummary = Field(description="Aggregates over returned items")
+    items: list[ClosedTradeItem] = Field(
+        description="Closed trades (newest first)",
+        default_factory=list,
+    )
+    next_cursor: str | None = Field(
+        default=None,
+        description="Opaque cursor for next page; absent if no more",
+    )
+
+
+# ============================================================================
 # Command Models
 # ============================================================================
 
