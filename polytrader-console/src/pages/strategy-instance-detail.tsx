@@ -1,6 +1,7 @@
 import type { FC } from 'react'
 import { Link, useParams } from '@tanstack/react-router'
 
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useStrategyDetailQuery } from '@/hooks/strategy-detail'
 
 export const StrategyInstanceDetailPage: FC = () => {
@@ -55,5 +56,18 @@ export const StrategyInstanceDetailPage: FC = () => {
 
   if (!data) return null
 
-  return null
+  return (
+    <Tabs defaultValue="signals" className="w-full flex-col gap-4">
+      <TabsList>
+        <TabsTrigger value="signals">Signals</TabsTrigger>
+        <TabsTrigger value="orders">Orders</TabsTrigger>
+      </TabsList>
+      <TabsContent value="signals" className="flex flex-col gap-4">
+        <p className="text-muted-foreground">Signals table placeholder.</p>
+      </TabsContent>
+      <TabsContent value="orders" className="flex flex-col gap-4">
+        <p className="text-muted-foreground">Orders table placeholder.</p>
+      </TabsContent>
+    </Tabs>
+  )
 }
