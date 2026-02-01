@@ -10,14 +10,31 @@ import {
 } from '@/components/ui/breadcrumb'
 import { Separator } from '@/components/ui/separator'
 import { SidebarTrigger } from '@/components/ui/sidebar'
+import { useStrategyDetailQuery } from '@/hooks/strategy-detail'
 
 function useHeaderTitle(): { segments: { label: string; href?: string }[] } {
   const pathname = useRouterState({ select: (s) => s.location.pathname }) ?? ''
-  const { marketSlug } = useParams({ strict: false })
+  const { marketSlug, strategyId } = useParams({ strict: false })
+
+  const isInstanceDetail =
+    pathname.startsWith('/strategies/instances/') &&
+    pathname !== '/strategies/instances' &&
+    !!strategyId
+  const { data: strategy } = useStrategyDetailQuery(strategyId ?? '', {
+    enabled: isInstanceDetail,
+  })
 
   if (marketSlug && pathname.startsWith('/markets/')) {
     return {
       segments: [{ label: 'Markets', href: '/markets' }, { label: marketSlug }],
+    }
+  }
+  if (isInstanceDetail) {
+    return {
+      segments: [
+        { label: 'Strategy instances', href: '/strategies/instances' },
+        { label: strategy?.name ?? strategyId ?? '' },
+      ],
     }
   }
   if (pathname === '/strategies/templates') {

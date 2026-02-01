@@ -5,9 +5,9 @@ import { ArrowUpDown } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 
-import type { StrategyResponse } from '@/lib/api'
+import type { StrategyOrderItem } from '@/lib/api'
 
-function formatCreatedAt(v: unknown): string {
+function formatTs(v: unknown): string {
   if (v == null || v === '' || (typeof v !== 'string' && typeof v !== 'number')) return '—'
   try {
     const d = new Date(v)
@@ -17,84 +17,106 @@ function formatCreatedAt(v: unknown): string {
   }
 }
 
-export const strategyInstanceColumns: ColumnDef<StrategyResponse>[] = [
+export const strategyOrderColumns: ColumnDef<StrategyOrderItem>[] = [
   {
-    accessorKey: 'strategy_id',
+    accessorKey: 'ts_wall',
+    meta: { className: 'w-[10rem]' },
     header: ({ column }) => (
       <Button variant="ghost" onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}>
-        Strategy ID
+        Time
         <ArrowUpDown className="ml-2 size-4" />
       </Button>
     ),
-    cell: ({ row }) => <span className="font-medium">{row.getValue('strategy_id')}</span>,
+    cell: ({ row }) => (
+      <span className="tabular-nums text-muted-foreground text-sm">
+        {formatTs(row.getValue('ts_wall'))}
+      </span>
+    ),
   },
   {
-    accessorKey: 'name',
+    accessorKey: 'market_slug',
     header: ({ column }) => (
       <Button variant="ghost" onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}>
-        Name
+        Market
         <ArrowUpDown className="ml-2 size-4" />
       </Button>
     ),
     cell: ({ row }) => {
-      const strategy = row.original
+      const slug = String(row.getValue('market_slug'))
       return (
         <Link
-          to="/strategies/instances/$strategyId"
-          params={{ strategyId: strategy.strategy_id }}
+          to="/markets/$marketSlug"
+          params={{ marketSlug: slug }}
           className="font-medium hover:underline"
         >
-          {row.getValue('name')}
+          {slug}
         </Link>
       )
     },
   },
   {
-    accessorKey: 'template_type_id',
+    accessorKey: 'side',
     header: ({ column }) => (
       <Button variant="ghost" onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}>
-        Template type ID
+        Side
         <ArrowUpDown className="ml-2 size-4" />
       </Button>
     ),
     cell: ({ row }) => (
-      <span className="text-muted-foreground">{row.getValue('template_type_id')}</span>
+      <span className="text-muted-foreground">{String(row.getValue('side'))}</span>
     ),
   },
   {
-    accessorKey: 'template_version',
+    accessorKey: 'size',
     header: ({ column }) => (
       <Button variant="ghost" onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}>
-        Template version
+        Size
         <ArrowUpDown className="ml-2 size-4" />
       </Button>
     ),
     cell: ({ row }) => (
-      <span className="text-muted-foreground">{row.getValue('template_version')}</span>
+      <span className="tabular-nums text-right">{Number(row.getValue('size')).toFixed(2)}</span>
     ),
   },
   {
-    accessorKey: 'actual_state',
+    accessorKey: 'limit_price',
     header: ({ column }) => (
       <Button variant="ghost" onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}>
-        Actual state
-        <ArrowUpDown className="ml-2 size-4" />
-      </Button>
-    ),
-    cell: ({ row }) => <Badge variant="secondary">{String(row.getValue('actual_state'))}</Badge>,
-  },
-  {
-    accessorKey: 'created_at',
-    header: ({ column }) => (
-      <Button variant="ghost" onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}>
-        Created at
+        Limit price
         <ArrowUpDown className="ml-2 size-4" />
       </Button>
     ),
     cell: ({ row }) => (
-      <span className="tabular-nums text-muted-foreground">
-        {formatCreatedAt(row.getValue('created_at'))}
+      <span className="tabular-nums text-right">
+        {Number(row.getValue('limit_price')).toFixed(4)}
       </span>
     ),
+  },
+  {
+    accessorKey: 'status',
+    header: ({ column }) => (
+      <Button variant="ghost" onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}>
+        Status
+        <ArrowUpDown className="ml-2 size-4" />
+      </Button>
+    ),
+    cell: ({ row }) => <Badge variant="secondary">{String(row.getValue('status'))}</Badge>,
+  },
+  {
+    accessorKey: 'execution_mode',
+    header: ({ column }) => (
+      <Button variant="ghost" onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}>
+        Mode
+        <ArrowUpDown className="ml-2 size-4" />
+      </Button>
+    ),
+    cell: ({ row }) => {
+      const mode = row.getValue('execution_mode')
+      return (
+        <Badge variant={mode === 'live' ? 'default' : 'outline'}>
+          {mode === 'live' ? 'Live' : 'Paper'}
+        </Badge>
+      )
+    },
   },
 ]

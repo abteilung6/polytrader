@@ -4,10 +4,13 @@ Per Platform_Proposal.md: Elite-style API design with separation of
 state endpoints (/state/*) and command endpoints (/commands/*).
 """
 
+from typing import Literal
+
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from polytrader.api.dependencies import (
     get_control_command_repo,
+    get_event_repository,
     get_execution_control_repo,
     get_in_memory_strategy_registry,
     get_live_strategy_repo,
@@ -15,6 +18,7 @@ from polytrader.api.dependencies import (
 )
 from polytrader.api.models import (
     ActivateStrategyRequest,
+    ClosedTradeItem,
     CommandEnvelopeResponse,
     CommandStatusResponse,
     CreateStrategyRequest,
@@ -27,9 +31,15 @@ from polytrader.api.models import (
     HealthGateStatus,
     HealthResponse,
     LiveStrategiesResponse,
+    PerformanceResponse,
+    PerformanceSummary,
     RunIdentityResponse,
     StrategiesResponse,
+    StrategyOrderItem,
+    StrategyOrdersResponse,
     StrategyResponse,
+    StrategySignalItem,
+    StrategySignalsResponse,
     StrategyTypeResponse,
     StrategyTypesResponse,
     UpdateStrategyRequest,
@@ -37,8 +47,9 @@ from polytrader.api.models import (
     ValidateStrategyConfigResponse,
     VersionConflictResponse,
 )
-from polytrader.db.models import ControlCommandRecord
+from polytrader.db.models import ControlCommandRecord, EventRecord
 from polytrader.db.models import StrategyRecord as StrategyRecordModel
+from polytrader.db.repository import EventRepository
 from polytrader.platform.control import (
     ControlCommandRepository,
     ExecutionControlRepository,
@@ -134,43 +145,43 @@ async def get_live_strategies(
     return LiveStrategiesResponse(active_strategies=list(active))
 
 
+def _strategy_record_to_response(s: StrategyRecordModel) -> StrategyResponse:
+    """Map DB StrategyRecord to API StrategyResponse (single source of truth)."""
+    return StrategyResponse(
+        strategy_id=s.strategy_id,
+        name=s.name,
+        description=s.description,
+        config=s.config,
+        template_type_id=s.template_type_id,
+        template_version=s.template_version,
+        desired_state=s.desired_state,
+        actual_state=s.actual_state,
+        last_transition_at=s.last_transition_at,
+        last_error=s.last_error,
+        run_identity=(
+            RunIdentityResponse(
+                template_code_ref=s.template_code_ref,
+                config_hash=s.config_hash,
+                dependency_set=s.dependency_set,
+                market_data_snapshot_ref=s.market_data_snapshot_ref,
+            )
+            if (s.template_code_ref or s.dependency_set or s.market_data_snapshot_ref)
+            else None
+        ),
+        deployment_id=str(s.deployment_id) if s.deployment_id else None,
+        run_id=s.run_id,
+        created_at=s.created_at,
+        updated_at=s.updated_at,
+    )
+
+
 @router.get("/state/strategies", response_model=StrategiesResponse)
 async def get_strategies(
     registry: StrategyRegistry = Depends(get_strategy_registry),  # noqa: B008
 ) -> StrategiesResponse:
     """Get all strategies in registry."""
     strategies = await registry.list_strategies()
-    return StrategiesResponse(
-        strategies=[
-            StrategyResponse(
-                strategy_id=s.strategy_id,
-                name=s.name,
-                description=s.description,
-                config=s.config,
-                template_type_id=s.template_type_id,
-                template_version=s.template_version,
-                desired_state=s.desired_state,
-                actual_state=s.actual_state,
-                last_transition_at=s.last_transition_at,
-                last_error=s.last_error,
-                run_identity=(
-                    RunIdentityResponse(
-                        template_code_ref=s.template_code_ref,
-                        config_hash=s.config_hash,
-                        dependency_set=s.dependency_set,
-                        market_data_snapshot_ref=s.market_data_snapshot_ref,
-                    )
-                    if (s.template_code_ref or s.dependency_set or s.market_data_snapshot_ref)
-                    else None
-                ),
-                deployment_id=str(s.deployment_id) if s.deployment_id else None,
-                run_id=s.run_id,
-                created_at=s.created_at,
-                updated_at=s.updated_at,
-            )
-            for s in strategies
-        ]
-    )
+    return StrategiesResponse(strategies=[_strategy_record_to_response(s) for s in strategies])
 
 
 @router.get("/state/strategies/templates", response_model=StrategyTypesResponse)
@@ -314,6 +325,203 @@ async def get_strategy_template_version(
         available_versions=[version],  # Single version
         parameter_schema=template.parameter_schema.to_openapi_schema(),
     )
+
+
+def _event_record_to_signal_item(record: EventRecord) -> StrategySignalItem:
+    """Map EventRecord (SignalEvent) to API StrategySignalItem."""
+    data = record.event_data
+    return StrategySignalItem(
+        event_id=str(record.event_id),
+        ts_wall=record.ts_wall,
+        market_slug=data["market_slug"],
+        outcome=data["outcome"],
+        p_up=float(data["p_up"]),
+        p_down=float(data["p_down"]),
+        edge=float(data["edge"]),
+        confidence=float(data["confidence"]),
+        model_id=data["model_id"],
+        model_version=data["model_version"],
+        snapshot_hash=data.get("snapshot_hash"),
+        rationale=data.get("rationale"),
+    )
+
+
+@router.get(
+    "/state/strategies/{strategy_id}/signals",
+    response_model=StrategySignalsResponse,
+)
+async def get_strategy_signals(
+    strategy_id: str,
+    event_repo: EventRepository = Depends(get_event_repository),  # noqa: B008
+    limit: int = 100,
+    cursor: str | None = None,
+) -> StrategySignalsResponse:
+    """Get paginated signals for a strategy (newest first).
+
+    Query params: limit (default 100, max 500), cursor (optional).
+    Returns empty list when strategy has no signals.
+    """
+    records, next_cursor = await event_repo.read_signal_events_by_strategy(
+        strategy_id=strategy_id,
+        limit=limit,
+        cursor=cursor,
+    )
+    items = [_event_record_to_signal_item(r) for r in records]
+    return StrategySignalsResponse(items=items, next_cursor=next_cursor)
+
+
+def _event_record_to_order_item(record: EventRecord) -> StrategyOrderItem:
+    """Map EventRecord (OrderCreatedEvent) to API StrategyOrderItem."""
+    data = record.event_data
+    intent = data["intent"]
+    execution_mode_raw = data.get("execution_mode", "paper")
+    execution_mode: Literal["paper", "live"] = (
+        execution_mode_raw if execution_mode_raw in ("paper", "live") else "paper"
+    )
+    return StrategyOrderItem(
+        order_id=data["order_id"],
+        client_order_id=data["client_order_id"],
+        ts_wall=record.ts_wall,
+        market_slug=intent["market_slug"],
+        side=intent["side"],
+        size=float(intent["size"]),
+        limit_price=float(intent["limit_price"]),
+        status="PENDING_SUBMIT",
+        execution_mode=execution_mode,
+    )
+
+
+@router.get(
+    "/state/strategies/{strategy_id}/orders",
+    response_model=StrategyOrdersResponse,
+)
+async def get_strategy_orders(
+    strategy_id: str,
+    event_repo: EventRepository = Depends(get_event_repository),  # noqa: B008
+    limit: int = 100,
+    cursor: str | None = None,
+) -> StrategyOrdersResponse:
+    """Get paginated orders for a strategy (newest first).
+
+    Query params: limit (default 100, max 500), cursor (optional).
+    Returns empty list when strategy has no orders.
+    execution_mode (paper | live) is included per row for UI badge.
+    """
+    records, next_cursor = await event_repo.read_order_events_by_strategy(
+        strategy_id=strategy_id,
+        limit=limit,
+        cursor=cursor,
+    )
+    items = [_event_record_to_order_item(r) for r in records]
+    return StrategyOrdersResponse(items=items, next_cursor=next_cursor)
+
+
+def _event_record_to_closed_trade_item(record: EventRecord) -> ClosedTradeItem:
+    """Map EventRecord (StrategyClosedTradeEvent) to API ClosedTradeItem."""
+    data = record.event_data
+    entry_time = float(data["entry_time"])
+    exit_time = float(data["exit_time"])
+    execution_mode_raw = data.get("execution_mode", "paper")
+    execution_mode: Literal["paper", "live"] = (
+        execution_mode_raw if execution_mode_raw in ("paper", "live") else "paper"
+    )
+    outcome: Literal["UP", "DOWN"] = data["outcome"] if data["outcome"] in ("UP", "DOWN") else "UP"
+    return ClosedTradeItem(
+        market_slug=data["market_slug"],
+        outcome=outcome,
+        entry_time=entry_time,
+        exit_time=exit_time,
+        exit_ts_wall=record.ts_wall,
+        entry_price=float(data["entry_price"]),
+        exit_price=float(data["exit_price"]),
+        size=float(data["size"]),
+        pnl=float(data["pnl"]),
+        pnl_pct=float(data["pnl_pct"]),
+        result=data["result"],
+        execution_mode=execution_mode,
+        duration_seconds=max(0.0, exit_time - entry_time),
+    )
+
+
+def _closed_trade_items_to_summary(
+    items: list[ClosedTradeItem],
+) -> PerformanceSummary:
+    """Compute PerformanceSummary from a page of ClosedTradeItem."""
+    total_trades = len(items)
+    if total_trades == 0:
+        return PerformanceSummary(
+            total_realized_pnl=0.0,
+            total_trades=0,
+            win_rate_pct=None,
+            current_drawdown=None,
+            max_drawdown=None,
+        )
+    total_realized_pnl = sum(t.pnl for t in items)
+    wins = sum(1 for t in items if t.result == "WIN")
+    win_rate_pct = (wins / total_trades) * 100.0
+    return PerformanceSummary(
+        total_realized_pnl=total_realized_pnl,
+        total_trades=total_trades,
+        win_rate_pct=win_rate_pct,
+        current_drawdown=None,
+        max_drawdown=None,
+    )
+
+
+@router.get(
+    "/state/strategies/{strategy_id}/performance",
+    response_model=PerformanceResponse,
+)
+async def get_strategy_performance(
+    strategy_id: str,
+    event_repo: EventRepository = Depends(get_event_repository),  # noqa: B008
+    from_ts: float | None = None,
+    to_ts: float | None = None,
+    execution_mode: Literal["paper", "live"] | None = None,
+    limit: int = 100,
+    cursor: str | None = None,
+) -> PerformanceResponse:
+    """Get past performance for a strategy: summary + paginated closed trades.
+
+    Query params: from_ts, to_ts (optional ts_mono range), execution_mode
+    (paper | live | omit for all), limit (default 100, max 500), cursor.
+    Summary is computed from the returned page of items.
+    """
+    records, next_cursor = await event_repo.read_closed_trade_events_by_strategy(
+        strategy_id=strategy_id,
+        from_ts=from_ts,
+        to_ts=to_ts,
+        execution_mode=execution_mode,
+        limit=limit,
+        cursor=cursor,
+    )
+    items = [_event_record_to_closed_trade_item(r) for r in records]
+    summary = _closed_trade_items_to_summary(items)
+    return PerformanceResponse(summary=summary, items=items, next_cursor=next_cursor)
+
+
+@router.get(
+    "/state/strategies/{strategy_id}",
+    response_model=StrategyResponse,
+    responses={
+        404: {"description": "Strategy not found"},
+    },
+)
+async def get_strategy_by_id(
+    strategy_id: str,
+    registry: StrategyRegistry = Depends(get_strategy_registry),  # noqa: B008
+) -> StrategyResponse:
+    """Get a single strategy by ID.
+
+    Returns 404 if the strategy is not in the registry.
+    """
+    strategy = await registry.get_strategy(strategy_id)
+    if strategy is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Strategy not found",
+        )
+    return _strategy_record_to_response(strategy)
 
 
 @router.post(

@@ -224,6 +224,138 @@ class LiveStrategiesResponse(BaseModel):
     active_strategies: list[str] = Field(description="List of active strategy IDs")
 
 
+class StrategySignalItem(BaseModel):
+    """Single signal record for strategy-scoped signals API.
+
+    Mirrors SignalEvent fields (event_id, ts_wall, market, scores).
+    """
+
+    event_id: str = Field(description="Event identifier (UUID)")
+    ts_wall: datetime = Field(description="Wall-clock time (UTC, ISO 8601)")
+    market_slug: str = Field(description="Market identifier")
+    outcome: str = Field(description="Outcome: UP or DOWN")
+    p_up: float = Field(ge=0.0, le=1.0, description="Probability UP wins")
+    p_down: float = Field(ge=0.0, le=1.0, description="Probability DOWN wins")
+    edge: float = Field(description="Edge/confidence score")
+    confidence: float = Field(ge=0.0, le=1.0, description="Confidence level")
+    model_id: str = Field(description="Strategy/model identifier")
+    model_version: str = Field(description="Model version")
+    snapshot_hash: str | None = Field(default=None, description="Input snapshot hash")
+    rationale: str | None = Field(default=None, description="Human-readable rationale")
+
+
+class StrategySignalsResponse(BaseModel):
+    """Paginated list of signals for a strategy."""
+
+    items: list[StrategySignalItem] = Field(description="Signal records (newest first)")
+    next_cursor: str | None = Field(
+        default=None,
+        description="Opaque cursor for next page; absent if no more",
+    )
+
+
+class StrategyOrderItem(BaseModel):
+    """Single order record for strategy-scoped orders API.
+
+    Mirrors OrderCreatedEvent + intent (order_id, ts_wall, market, side, size, status).
+    execution_mode indicates paper vs live so UI can show Paper/Live badge.
+    """
+
+    order_id: str = Field(description="Internal order UUID")
+    client_order_id: str = Field(description="Idempotency key")
+    ts_wall: datetime = Field(description="Wall-clock time (UTC, ISO 8601)")
+    market_slug: str = Field(description="Market identifier")
+    side: str = Field(description="Trade side: BUY or SELL")
+    size: float = Field(gt=0, description="Order size in USD")
+    limit_price: float = Field(gt=0, le=1, description="Limit price (0-1 range)")
+    status: str = Field(description="Order status (e.g. PENDING_SUBMIT, LIVE, FILLED, REJECTED)")
+    execution_mode: Literal["paper", "live"] = Field(
+        description="Paper or live execution; UI shows Paper/Live badge"
+    )
+
+
+class StrategyOrdersResponse(BaseModel):
+    """Paginated list of orders for a strategy."""
+
+    items: list[StrategyOrderItem] = Field(description="Order records (newest first)")
+    next_cursor: str | None = Field(
+        default=None,
+        description="Opaque cursor for next page; absent if no more",
+    )
+
+
+# ============================================================================
+# Past Performance Models (StrategyClosedTradeEvent read path)
+# ============================================================================
+
+
+class ClosedTradeItem(BaseModel):
+    """Single closed trade for strategy performance API.
+
+    Per proposal-past-performance-tab: One row per StrategyClosedTradeEvent.
+    entry_time/exit_time are monotonic timestamps; exit_ts_wall is wall-clock for display.
+    """
+
+    market_slug: str = Field(description="Market identifier")
+    outcome: Literal["UP", "DOWN"] = Field(description="Outcome traded")
+    entry_time: float = Field(description="Entry time (monotonic)")
+    exit_time: float = Field(description="Exit time (monotonic)")
+    exit_ts_wall: datetime = Field(description="Exit wall-clock time (UTC)")
+    entry_price: float = Field(gt=0, le=1, description="Average entry price")
+    exit_price: float = Field(
+        ge=0, le=1,
+        description="Exit fill/settlement price (0 allowed for binary settlement)",
+    )
+    size: float = Field(gt=0, description="Position size in USD")
+    pnl: float = Field(description="Realized P&L in USD")
+    pnl_pct: float = Field(description="Realized P&L as percentage")
+    result: Literal["WIN", "LOSS", "BREAKEVEN"] = Field(
+        description="WIN if pnl > 0, LOSS if pnl < 0, BREAKEVEN if pnl == 0"
+    )
+    execution_mode: Literal["paper", "live"] = Field(description="Paper or live execution")
+    duration_seconds: float = Field(
+        ge=0,
+        description="Trade duration (exit_time - entry_time) in seconds",
+    )
+
+
+class PerformanceSummary(BaseModel):
+    """Aggregate performance metrics for the returned closed trades.
+
+    Computed from the items in this response (page-scoped).
+    When items are empty, total_trades=0, total_realized_pnl=0, win_rate_pct=None.
+    """
+
+    total_realized_pnl: float = Field(description="Sum of P&L over returned trades (USD)")
+    total_trades: int = Field(ge=0, description="Number of trades in this page")
+    win_rate_pct: float | None = Field(
+        default=None,
+        description="Percentage of WIN results (0-100); None if no trades",
+    )
+    current_drawdown: float | None = Field(
+        default=None,
+        description="Current drawdown (Phase 2: from equity curve)",
+    )
+    max_drawdown: float | None = Field(
+        default=None,
+        description="Max drawdown (Phase 2: from equity curve)",
+    )
+
+
+class PerformanceResponse(BaseModel):
+    """Past performance for a strategy: summary + paginated closed trades."""
+
+    summary: PerformanceSummary = Field(description="Aggregates over returned items")
+    items: list[ClosedTradeItem] = Field(
+        description="Closed trades (newest first)",
+        default_factory=list,
+    )
+    next_cursor: str | None = Field(
+        default=None,
+        description="Opaque cursor for next page; absent if no more",
+    )
+
+
 # ============================================================================
 # Command Models
 # ============================================================================

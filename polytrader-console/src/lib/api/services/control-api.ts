@@ -46,9 +46,15 @@ import type { HealthResponse } from '../models';
 // @ts-ignore
 import type { LiveStrategiesResponse } from '../models';
 // @ts-ignore
+import type { PerformanceResponse } from '../models';
+// @ts-ignore
 import type { StrategiesResponse } from '../models';
 // @ts-ignore
+import type { StrategyOrdersResponse } from '../models';
+// @ts-ignore
 import type { StrategyResponse } from '../models';
+// @ts-ignore
+import type { StrategySignalsResponse } from '../models';
 // @ts-ignore
 import type { StrategyTypeResponse } from '../models';
 // @ts-ignore
@@ -404,6 +410,187 @@ export const ControlApiAxiosParamCreator = function (configuration?: Configurati
             };
         },
         /**
+         * Get a single strategy by ID.  Returns 404 if the strategy is not in the registry.
+         * @summary Get Strategy By Id
+         * @param {string} strategyId 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getStrategyByIdApiV1StateStrategiesStrategyIdGet: async (strategyId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'strategyId' is not null or undefined
+            assertParamExists('getStrategyByIdApiV1StateStrategiesStrategyIdGet', 'strategyId', strategyId)
+            const localVarPath = `/api/v1/state/strategies/{strategy_id}`
+                .replace(`{${"strategy_id"}}`, encodeURIComponent(String(strategyId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Get paginated orders for a strategy (newest first).  Query params: limit (default 100, max 500), cursor (optional). Returns empty list when strategy has no orders. execution_mode (paper | live) is included per row for UI badge.
+         * @summary Get Strategy Orders
+         * @param {string} strategyId 
+         * @param {number} [limit] 
+         * @param {string | null} [cursor] 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getStrategyOrdersApiV1StateStrategiesStrategyIdOrdersGet: async (strategyId: string, limit?: number, cursor?: string | null, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'strategyId' is not null or undefined
+            assertParamExists('getStrategyOrdersApiV1StateStrategiesStrategyIdOrdersGet', 'strategyId', strategyId)
+            const localVarPath = `/api/v1/state/strategies/{strategy_id}/orders`
+                .replace(`{${"strategy_id"}}`, encodeURIComponent(String(strategyId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (limit !== undefined) {
+                localVarQueryParameter['limit'] = limit;
+            }
+
+            if (cursor !== undefined) {
+                localVarQueryParameter['cursor'] = cursor;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Get past performance for a strategy: summary + paginated closed trades.  Query params: from_ts, to_ts (optional ts_mono range), execution_mode (paper | live | omit for all), limit (default 100, max 500), cursor. Summary is computed from the returned page of items.
+         * @summary Get Strategy Performance
+         * @param {string} strategyId 
+         * @param {number | null} [fromTs] 
+         * @param {number | null} [toTs] 
+         * @param {GetStrategyPerformanceApiV1StateStrategiesStrategyIdPerformanceGetExecutionModeEnum} [executionMode] 
+         * @param {number} [limit] 
+         * @param {string | null} [cursor] 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getStrategyPerformanceApiV1StateStrategiesStrategyIdPerformanceGet: async (strategyId: string, fromTs?: number | null, toTs?: number | null, executionMode?: GetStrategyPerformanceApiV1StateStrategiesStrategyIdPerformanceGetExecutionModeEnum, limit?: number, cursor?: string | null, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'strategyId' is not null or undefined
+            assertParamExists('getStrategyPerformanceApiV1StateStrategiesStrategyIdPerformanceGet', 'strategyId', strategyId)
+            const localVarPath = `/api/v1/state/strategies/{strategy_id}/performance`
+                .replace(`{${"strategy_id"}}`, encodeURIComponent(String(strategyId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (fromTs !== undefined) {
+                localVarQueryParameter['from_ts'] = fromTs;
+            }
+
+            if (toTs !== undefined) {
+                localVarQueryParameter['to_ts'] = toTs;
+            }
+
+            if (executionMode !== undefined) {
+                localVarQueryParameter['execution_mode'] = executionMode;
+            }
+
+            if (limit !== undefined) {
+                localVarQueryParameter['limit'] = limit;
+            }
+
+            if (cursor !== undefined) {
+                localVarQueryParameter['cursor'] = cursor;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Get paginated signals for a strategy (newest first).  Query params: limit (default 100, max 500), cursor (optional). Returns empty list when strategy has no signals.
+         * @summary Get Strategy Signals
+         * @param {string} strategyId 
+         * @param {number} [limit] 
+         * @param {string | null} [cursor] 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getStrategySignalsApiV1StateStrategiesStrategyIdSignalsGet: async (strategyId: string, limit?: number, cursor?: string | null, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'strategyId' is not null or undefined
+            assertParamExists('getStrategySignalsApiV1StateStrategiesStrategyIdSignalsGet', 'strategyId', strategyId)
+            const localVarPath = `/api/v1/state/strategies/{strategy_id}/signals`
+                .replace(`{${"strategy_id"}}`, encodeURIComponent(String(strategyId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (limit !== undefined) {
+                localVarQueryParameter['limit'] = limit;
+            }
+
+            if (cursor !== undefined) {
+                localVarQueryParameter['cursor'] = cursor;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
          * Get details for a specific strategy template type.  Per Commit 15: Returns template information including all available versions and parameter schema.  Args:     type_id: Template type identifier (e.g., \"simple_threshold\")  Returns:     StrategyTypeResponse with template details  Raises:     HTTPException: 404 if template type not found
          * @summary Get Strategy Template
          * @param {string} typeId 
@@ -717,6 +904,67 @@ export const ControlApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         * Get a single strategy by ID.  Returns 404 if the strategy is not in the registry.
+         * @summary Get Strategy By Id
+         * @param {string} strategyId 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async getStrategyByIdApiV1StateStrategiesStrategyIdGet(strategyId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<StrategyResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.getStrategyByIdApiV1StateStrategiesStrategyIdGet(strategyId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ControlApi.getStrategyByIdApiV1StateStrategiesStrategyIdGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Get paginated orders for a strategy (newest first).  Query params: limit (default 100, max 500), cursor (optional). Returns empty list when strategy has no orders. execution_mode (paper | live) is included per row for UI badge.
+         * @summary Get Strategy Orders
+         * @param {string} strategyId 
+         * @param {number} [limit] 
+         * @param {string | null} [cursor] 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async getStrategyOrdersApiV1StateStrategiesStrategyIdOrdersGet(strategyId: string, limit?: number, cursor?: string | null, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<StrategyOrdersResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.getStrategyOrdersApiV1StateStrategiesStrategyIdOrdersGet(strategyId, limit, cursor, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ControlApi.getStrategyOrdersApiV1StateStrategiesStrategyIdOrdersGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Get past performance for a strategy: summary + paginated closed trades.  Query params: from_ts, to_ts (optional ts_mono range), execution_mode (paper | live | omit for all), limit (default 100, max 500), cursor. Summary is computed from the returned page of items.
+         * @summary Get Strategy Performance
+         * @param {string} strategyId 
+         * @param {number | null} [fromTs] 
+         * @param {number | null} [toTs] 
+         * @param {GetStrategyPerformanceApiV1StateStrategiesStrategyIdPerformanceGetExecutionModeEnum} [executionMode] 
+         * @param {number} [limit] 
+         * @param {string | null} [cursor] 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async getStrategyPerformanceApiV1StateStrategiesStrategyIdPerformanceGet(strategyId: string, fromTs?: number | null, toTs?: number | null, executionMode?: GetStrategyPerformanceApiV1StateStrategiesStrategyIdPerformanceGetExecutionModeEnum, limit?: number, cursor?: string | null, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PerformanceResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.getStrategyPerformanceApiV1StateStrategiesStrategyIdPerformanceGet(strategyId, fromTs, toTs, executionMode, limit, cursor, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ControlApi.getStrategyPerformanceApiV1StateStrategiesStrategyIdPerformanceGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Get paginated signals for a strategy (newest first).  Query params: limit (default 100, max 500), cursor (optional). Returns empty list when strategy has no signals.
+         * @summary Get Strategy Signals
+         * @param {string} strategyId 
+         * @param {number} [limit] 
+         * @param {string | null} [cursor] 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async getStrategySignalsApiV1StateStrategiesStrategyIdSignalsGet(strategyId: string, limit?: number, cursor?: string | null, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<StrategySignalsResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.getStrategySignalsApiV1StateStrategiesStrategyIdSignalsGet(strategyId, limit, cursor, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ControlApi.getStrategySignalsApiV1StateStrategiesStrategyIdSignalsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Get details for a specific strategy template type.  Per Commit 15: Returns template information including all available versions and parameter schema.  Args:     type_id: Template type identifier (e.g., \"simple_threshold\")  Returns:     StrategyTypeResponse with template details  Raises:     HTTPException: 404 if template type not found
          * @summary Get Strategy Template
          * @param {string} typeId 
@@ -888,6 +1136,46 @@ export const ControlApiFactory = function (configuration?: Configuration, basePa
             return localVarFp.getStrategiesApiV1StateStrategiesGet(options).then((request) => request(axios, basePath));
         },
         /**
+         * Get a single strategy by ID.  Returns 404 if the strategy is not in the registry.
+         * @summary Get Strategy By Id
+         * @param {ControlApiGetStrategyByIdApiV1StateStrategiesStrategyIdGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getStrategyByIdApiV1StateStrategiesStrategyIdGet(requestParameters: ControlApiGetStrategyByIdApiV1StateStrategiesStrategyIdGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<StrategyResponse> {
+            return localVarFp.getStrategyByIdApiV1StateStrategiesStrategyIdGet(requestParameters.strategyId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Get paginated orders for a strategy (newest first).  Query params: limit (default 100, max 500), cursor (optional). Returns empty list when strategy has no orders. execution_mode (paper | live) is included per row for UI badge.
+         * @summary Get Strategy Orders
+         * @param {ControlApiGetStrategyOrdersApiV1StateStrategiesStrategyIdOrdersGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getStrategyOrdersApiV1StateStrategiesStrategyIdOrdersGet(requestParameters: ControlApiGetStrategyOrdersApiV1StateStrategiesStrategyIdOrdersGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<StrategyOrdersResponse> {
+            return localVarFp.getStrategyOrdersApiV1StateStrategiesStrategyIdOrdersGet(requestParameters.strategyId, requestParameters.limit, requestParameters.cursor, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Get past performance for a strategy: summary + paginated closed trades.  Query params: from_ts, to_ts (optional ts_mono range), execution_mode (paper | live | omit for all), limit (default 100, max 500), cursor. Summary is computed from the returned page of items.
+         * @summary Get Strategy Performance
+         * @param {ControlApiGetStrategyPerformanceApiV1StateStrategiesStrategyIdPerformanceGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getStrategyPerformanceApiV1StateStrategiesStrategyIdPerformanceGet(requestParameters: ControlApiGetStrategyPerformanceApiV1StateStrategiesStrategyIdPerformanceGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<PerformanceResponse> {
+            return localVarFp.getStrategyPerformanceApiV1StateStrategiesStrategyIdPerformanceGet(requestParameters.strategyId, requestParameters.fromTs, requestParameters.toTs, requestParameters.executionMode, requestParameters.limit, requestParameters.cursor, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Get paginated signals for a strategy (newest first).  Query params: limit (default 100, max 500), cursor (optional). Returns empty list when strategy has no signals.
+         * @summary Get Strategy Signals
+         * @param {ControlApiGetStrategySignalsApiV1StateStrategiesStrategyIdSignalsGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getStrategySignalsApiV1StateStrategiesStrategyIdSignalsGet(requestParameters: ControlApiGetStrategySignalsApiV1StateStrategiesStrategyIdSignalsGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<StrategySignalsResponse> {
+            return localVarFp.getStrategySignalsApiV1StateStrategiesStrategyIdSignalsGet(requestParameters.strategyId, requestParameters.limit, requestParameters.cursor, options).then((request) => request(axios, basePath));
+        },
+        /**
          * Get details for a specific strategy template type.  Per Commit 15: Returns template information including all available versions and parameter schema.  Args:     type_id: Template type identifier (e.g., \"simple_threshold\")  Returns:     StrategyTypeResponse with template details  Raises:     HTTPException: 404 if template type not found
          * @summary Get Strategy Template
          * @param {ControlApiGetStrategyTemplateApiV1StateStrategiesTemplatesTypeIdGetRequest} requestParameters Request parameters.
@@ -983,6 +1271,52 @@ export interface ControlApiEnableExecutionApiV1CommandsExecutionEnablePostReques
  */
 export interface ControlApiGetCommandStatusApiV1StateCommandsCommandIdGetRequest {
     readonly commandId: string
+}
+
+/**
+ * Request parameters for getStrategyByIdApiV1StateStrategiesStrategyIdGet operation in ControlApi.
+ */
+export interface ControlApiGetStrategyByIdApiV1StateStrategiesStrategyIdGetRequest {
+    readonly strategyId: string
+}
+
+/**
+ * Request parameters for getStrategyOrdersApiV1StateStrategiesStrategyIdOrdersGet operation in ControlApi.
+ */
+export interface ControlApiGetStrategyOrdersApiV1StateStrategiesStrategyIdOrdersGetRequest {
+    readonly strategyId: string
+
+    readonly limit?: number
+
+    readonly cursor?: string | null
+}
+
+/**
+ * Request parameters for getStrategyPerformanceApiV1StateStrategiesStrategyIdPerformanceGet operation in ControlApi.
+ */
+export interface ControlApiGetStrategyPerformanceApiV1StateStrategiesStrategyIdPerformanceGetRequest {
+    readonly strategyId: string
+
+    readonly fromTs?: number | null
+
+    readonly toTs?: number | null
+
+    readonly executionMode?: GetStrategyPerformanceApiV1StateStrategiesStrategyIdPerformanceGetExecutionModeEnum
+
+    readonly limit?: number
+
+    readonly cursor?: string | null
+}
+
+/**
+ * Request parameters for getStrategySignalsApiV1StateStrategiesStrategyIdSignalsGet operation in ControlApi.
+ */
+export interface ControlApiGetStrategySignalsApiV1StateStrategiesStrategyIdSignalsGetRequest {
+    readonly strategyId: string
+
+    readonly limit?: number
+
+    readonly cursor?: string | null
 }
 
 /**
@@ -1128,6 +1462,50 @@ export class ControlApi extends BaseAPI {
     }
 
     /**
+     * Get a single strategy by ID.  Returns 404 if the strategy is not in the registry.
+     * @summary Get Strategy By Id
+     * @param {ControlApiGetStrategyByIdApiV1StateStrategiesStrategyIdGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public getStrategyByIdApiV1StateStrategiesStrategyIdGet(requestParameters: ControlApiGetStrategyByIdApiV1StateStrategiesStrategyIdGetRequest, options?: RawAxiosRequestConfig) {
+        return ControlApiFp(this.configuration).getStrategyByIdApiV1StateStrategiesStrategyIdGet(requestParameters.strategyId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Get paginated orders for a strategy (newest first).  Query params: limit (default 100, max 500), cursor (optional). Returns empty list when strategy has no orders. execution_mode (paper | live) is included per row for UI badge.
+     * @summary Get Strategy Orders
+     * @param {ControlApiGetStrategyOrdersApiV1StateStrategiesStrategyIdOrdersGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public getStrategyOrdersApiV1StateStrategiesStrategyIdOrdersGet(requestParameters: ControlApiGetStrategyOrdersApiV1StateStrategiesStrategyIdOrdersGetRequest, options?: RawAxiosRequestConfig) {
+        return ControlApiFp(this.configuration).getStrategyOrdersApiV1StateStrategiesStrategyIdOrdersGet(requestParameters.strategyId, requestParameters.limit, requestParameters.cursor, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Get past performance for a strategy: summary + paginated closed trades.  Query params: from_ts, to_ts (optional ts_mono range), execution_mode (paper | live | omit for all), limit (default 100, max 500), cursor. Summary is computed from the returned page of items.
+     * @summary Get Strategy Performance
+     * @param {ControlApiGetStrategyPerformanceApiV1StateStrategiesStrategyIdPerformanceGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public getStrategyPerformanceApiV1StateStrategiesStrategyIdPerformanceGet(requestParameters: ControlApiGetStrategyPerformanceApiV1StateStrategiesStrategyIdPerformanceGetRequest, options?: RawAxiosRequestConfig) {
+        return ControlApiFp(this.configuration).getStrategyPerformanceApiV1StateStrategiesStrategyIdPerformanceGet(requestParameters.strategyId, requestParameters.fromTs, requestParameters.toTs, requestParameters.executionMode, requestParameters.limit, requestParameters.cursor, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Get paginated signals for a strategy (newest first).  Query params: limit (default 100, max 500), cursor (optional). Returns empty list when strategy has no signals.
+     * @summary Get Strategy Signals
+     * @param {ControlApiGetStrategySignalsApiV1StateStrategiesStrategyIdSignalsGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public getStrategySignalsApiV1StateStrategiesStrategyIdSignalsGet(requestParameters: ControlApiGetStrategySignalsApiV1StateStrategiesStrategyIdSignalsGetRequest, options?: RawAxiosRequestConfig) {
+        return ControlApiFp(this.configuration).getStrategySignalsApiV1StateStrategiesStrategyIdSignalsGet(requestParameters.strategyId, requestParameters.limit, requestParameters.cursor, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
      * Get details for a specific strategy template type.  Per Commit 15: Returns template information including all available versions and parameter schema.  Args:     type_id: Template type identifier (e.g., \"simple_threshold\")  Returns:     StrategyTypeResponse with template details  Raises:     HTTPException: 404 if template type not found
      * @summary Get Strategy Template
      * @param {ControlApiGetStrategyTemplateApiV1StateStrategiesTemplatesTypeIdGetRequest} requestParameters Request parameters.
@@ -1182,3 +1560,8 @@ export class ControlApi extends BaseAPI {
     }
 }
 
+export const GetStrategyPerformanceApiV1StateStrategiesStrategyIdPerformanceGetExecutionModeEnum = {
+    Paper: 'paper',
+    Live: 'live'
+} as const;
+export type GetStrategyPerformanceApiV1StateStrategiesStrategyIdPerformanceGetExecutionModeEnum = typeof GetStrategyPerformanceApiV1StateStrategiesStrategyIdPerformanceGetExecutionModeEnum[keyof typeof GetStrategyPerformanceApiV1StateStrategiesStrategyIdPerformanceGetExecutionModeEnum];

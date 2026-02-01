@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from polytrader.config import get_database_url
-from polytrader.db.repository import MarketTickRepository
+from polytrader.db.repository import EventRepository, MarketTickRepository
 from polytrader.platform.control import (
     ControlCommandRepository,
     ExecutionControlRepository,
@@ -139,6 +139,20 @@ def get_strategy_registry(
         StrategyRegistry instance
     """
     return StrategyRegistry(session)
+
+
+def get_event_repository(
+    session: AsyncSession = Depends(get_db_session),  # noqa: B008
+) -> EventRepository:
+    """Provide EventRepository.
+
+    Args:
+        session: Database session (injected via FastAPI)
+
+    Returns:
+        EventRepository instance
+    """
+    return EventRepository(session)
 
 
 # Global in-memory strategy template registry (singleton)

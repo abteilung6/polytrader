@@ -5,6 +5,12 @@ Per Platform_Proposal.md §4.1: Platform task starts:
 - ControlPlaneService (processes control commands)
 - FastAPI control API server
 - All strategies run in paper mode
+
+Per docs/analysis-why-no-signals-in-api.md: Events are persisted to PostgreSQL
+via EventSink so the Control API (which reads from the same DB) can return
+signals and other events. If database config is missing or EventSink init
+fails, the platform continues without event persistence (events only in-memory
+to subscribers).
 """
 
 import asyncio
@@ -17,7 +23,8 @@ from polytrader.adapters import create_adapter_factory
 from polytrader.api.app import create_app
 from polytrader.config import PolymarketSecrets, get_database_url
 from polytrader.events import SYSTEM_LIFECYCLE, EventBus
-from polytrader.events.store import MemoryEventStore
+from polytrader.events.sink import EventSink
+from polytrader.events.stores import PostgreSQLEventStore
 from polytrader.events.types import SystemStartedEvent
 from polytrader.logging_config import logger
 from polytrader.market_discovery import MarketDiscoveryService
@@ -62,13 +69,8 @@ async def platform_start_task(
 
     # Initialize core infrastructure
     store = create_market_data_store(enable_postgres=True)
-    event_store = MemoryEventStore()
-    bus = EventBus(store=event_store)
+    bus = EventBus()
     discovery = MarketDiscoveryService(bus=bus)
-
-    # Emit system started event
-    started_event = SystemStartedEvent()
-    await bus.publish(SYSTEM_LIFECYCLE, started_event)
 
     # Create database engine and session factory
     db_url = get_database_url()
@@ -77,6 +79,30 @@ async def platform_start_task(
 
     engine = create_async_engine(db_url, echo=False)
     Session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    # EventSink: persist events to PostgreSQL so Control API can read signals/orders
+    event_sink: EventSink | None = None
+    event_sink_task: asyncio.Task[None] | None = None
+    postgres_event_store: PostgreSQLEventStore | None = None
+    try:
+        postgres_event_store = PostgreSQLEventStore(connection_url=db_url, pool_size=10)
+        await postgres_event_store.initialize()
+        event_sink = EventSink(bus=bus, store=postgres_event_store)
+        event_sink_task = asyncio.create_task(event_sink.run())
+        logger.info("EventSink started (events persisted to PostgreSQL)")
+    except Exception as e:
+        logger.warning(
+            "EventSink not started (events in-memory only): {error}",
+            error=str(e),
+            error_type=type(e).__name__,
+        )
+        event_sink = None
+        event_sink_task = None
+        postgres_event_store = None
+
+    # Emit system started event (will be persisted if EventSink is running)
+    started_event = SystemStartedEvent()
+    await bus.publish(SYSTEM_LIFECYCLE, started_event)
 
     # Create factories for orchestrator
     adapter_factory = create_adapter_factory(secrets, polling_frequency_hz=frequency)
@@ -198,6 +224,26 @@ async def platform_start_task(
             # Stop orchestrator
             await orchestrator.stop()
 
+            # Stop EventSink and cleanup PostgreSQL event store
+            if event_sink_task is not None:
+                if event_sink is not None:
+                    await event_sink.stop()
+                event_sink_task.cancel()
+                try:
+                    await asyncio.wait_for(event_sink_task, timeout=5.0)
+                except (asyncio.CancelledError, TimeoutError):
+                    pass
+                event_sink_task = None
+            if postgres_event_store is not None:
+                try:
+                    await postgres_event_store.cleanup()
+                except Exception as e:
+                    logger.exception(
+                        "Error cleaning up event store: {error}",
+                        error=str(e),
+                    )
+                postgres_event_store = None
+
             # Close control plane session
             await control_session.close()
 
@@ -206,6 +252,22 @@ async def platform_start_task(
 
             logger.info("Platform stopped")
     except Exception:
+        # Stop EventSink and cleanup on error
+        if event_sink_task is not None and event_sink is not None:
+            try:
+                await event_sink.stop()
+            except Exception:
+                pass
+            event_sink_task.cancel()
+            try:
+                await event_sink_task
+            except asyncio.CancelledError:
+                pass
+        if postgres_event_store is not None:
+            try:
+                await postgres_event_store.cleanup()
+            except Exception:
+                pass
         # Close control plane session on error
         await control_session.close()
         # Close database engine on error

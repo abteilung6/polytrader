@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 from polytrader.events.types import FillEvent, MarketDataEvent
 from polytrader.obs.metrics import get_metrics_collector
-from polytrader.position_manager.outcome_tracker import OutcomeTracker
+from polytrader.position_manager.outcome_tracker import ClosedPosition, OutcomeTracker
 from polytrader.position_manager.performance_metrics import PerformanceMetrics
 from polytrader.types import Outcome, Position
 
@@ -167,7 +167,7 @@ class PerStrategyPerformanceTracker:
         outcome: Outcome,
         fill_event: FillEvent,
         order: "Order",
-    ) -> None:
+    ) -> tuple[str, ClosedPosition, str, str] | None:
         """Record a SELL fill and close position.
 
         Args:
@@ -176,12 +176,16 @@ class PerStrategyPerformanceTracker:
             outcome: Market outcome
             fill_event: Fill event
             order: Order that was filled
+
+        Returns:
+            (strategy_id, closed_position, order_id, fill_id) when a position
+            was closed, else None. Caller may use this to emit StrategyClosedTradeEvent.
         """
         key = (strategy_id, market_slug, outcome)
 
         if key not in self._positions:
             # No position to close (shouldn't happen, but handle gracefully)
-            return
+            return None
 
         position = self._positions.pop(key)
         self._position_fills.pop(key, None)
@@ -192,7 +196,7 @@ class PerStrategyPerformanceTracker:
 
         # Record closed position in outcome tracker
         tracker = self.get_tracker(strategy_id)
-        tracker.record_closed_position(
+        closed_position = tracker.record_closed_position(
             market_slug=market_slug,
             outcome=outcome,
             entry_price=position.entry_price,
@@ -217,6 +221,66 @@ class PerStrategyPerformanceTracker:
         # Emit position metric (position closed)
         from polytrader.obs.metrics import set_position_net
 
+        set_position_net(
+            market_slug=market_slug,
+            outcome=outcome,
+            net_position=0.0,
+            strategy_id=strategy_id,
+        )
+
+        return (strategy_id, closed_position, order.order_id, fill_event.fill_id)
+
+    def close_position_settlement(
+        self,
+        strategy_id: str,
+        market_slug: str,
+        outcome: Outcome,
+        entry_price: float,
+        exit_price: float,
+        size: float,
+        entry_time: float,
+        exit_time: float,
+    ) -> None:
+        """Close a position due to market expiry/settlement (no fill).
+
+        Keeps per-strategy state in sync when PaperPositionManager closes
+        positions on MarketChangeEvent. Caller emits StrategyClosedTradeEvent
+        using _outcome_tracker's closed_position.
+
+        Args:
+            strategy_id: Strategy identifier
+            market_slug: Market identifier
+            outcome: Market outcome
+            entry_price: Position entry price
+            exit_price: Settlement price (0 or 1 for binary)
+            size: Position size
+            entry_time: Monotonic entry timestamp
+            exit_time: Monotonic exit timestamp
+        """
+        key = (strategy_id, market_slug, outcome)
+        if key not in self._positions:
+            return
+        self._positions.pop(key)
+        self._position_fills.pop(key, None)
+
+        tracker = self.get_tracker(strategy_id)
+        tracker.record_closed_position(
+            market_slug=market_slug,
+            outcome=outcome,
+            entry_price=entry_price,
+            exit_price=exit_price,
+            size=size,
+            entry_time=entry_time,
+            exit_time=exit_time,
+        )
+
+        metrics = self.get_metrics(strategy_id)
+        metrics.update_metrics()
+
+        pnl = (exit_price - entry_price) * size
+        from polytrader.obs.metrics import record_pnl_realized, set_position_net
+
+        record_pnl_realized(pnl=pnl, strategy_id=strategy_id)
         set_position_net(
             market_slug=market_slug,
             outcome=outcome,

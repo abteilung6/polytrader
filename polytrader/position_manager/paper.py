@@ -15,13 +15,22 @@ This implementation is event-driven only, no external API sync.
 import asyncio
 from typing import TYPE_CHECKING
 
-from polytrader.events import FILLS, MARKET_CHANGE, MARKET_DATA, EventBus
+from polytrader.events import (
+    FILLS,
+    MARKET_CHANGE,
+    MARKET_DATA,
+    PROPOSALS,
+    STRATEGY_CLOSED_TRADES,
+    EventBus,
+)
 from polytrader.events.types import (
     FillEvent,
     MarketChangeEvent,
     MarketDataEvent,
+    OrderIntentEvent,
     PnLEvent,
     PositionUpdatedEvent,
+    StrategyClosedTradeEvent,
 )
 from polytrader.logging_config import logger
 from polytrader.oms.store import IOrderStore
@@ -77,6 +86,8 @@ class PaperPositionManager(IPositionManager):
         # Track latest market prices for unrealized P&L calculation
         # (market_slug, outcome) -> current_mid_price
         self._latest_prices: dict[tuple[str, Outcome], float] = {}
+        # Keys for which a SELL proposal was already published (avoid duplicate SELLs)
+        self._sell_pending: set[tuple[str, Outcome]] = set()
 
         # Track strategy_id per position for per-strategy tracking
         # (market_slug, outcome) -> strategy_id
@@ -195,10 +206,12 @@ class PaperPositionManager(IPositionManager):
             logger.info("PaperPositionManager stopped")
 
     async def _handle_market_data(self, market_event: MarketDataEvent) -> None:
-        """Handle a market data event and update latest prices.
+        """Handle a market data event: update prices, optionally publish SELL when target reached.
 
-        Args:
-            market_event: Market data event with current bid/ask prices
+        In platform mode only PaperPositionManager runs; it does not use the separate
+        PositionManager that publishes target-price SELLs. So we publish SELL here when
+        mid >= position.target_price so positions can close and StrategyClosedTradeEvent
+        is emitted for Past Performance.
         """
         key = (market_event.market_slug, market_event.outcome)
         # Store the mid price for unrealized P&L calculation
@@ -207,6 +220,54 @@ class PaperPositionManager(IPositionManager):
         # Emit PnLEvent if we have positions for this market per flows.mdc §11
         if key in self._positions:
             await self._emit_pnl_event(update_reason="price_update")
+
+        # Target-price SELL: publish SELL proposal when mid >= target (once per position)
+        if key in self._positions and key not in self._sell_pending:
+            position = self._positions[key]
+            if market_event.mid >= position.target_price:
+                self._sell_pending.add(key)
+                limit_price = (
+                    market_event.best_bid
+                    if market_event.best_bid > 0
+                    else max(market_event.mid, position.target_price, 0.01)
+                )
+                proposal = OrderIntentEvent(
+                    market_slug=market_event.market_slug,
+                    outcome=market_event.outcome,
+                    side="SELL",
+                    target_price=position.target_price,
+                    limit_price=limit_price,
+                    size=position.size,
+                    reason=(
+                        f"Target {market_event.mid:.4f} >= {position.target_price:.4f}, "
+                        f"entry {position.entry_price:.4f}"
+                    ),
+                    correlation_id=market_event.correlation_id,
+                    strategy_id="position_manager",
+                )
+                await self._bus.publish(PROPOSALS, proposal)
+                logger.bind(
+                    market_slug=market_event.market_slug,
+                    outcome=market_event.outcome,
+                    price=market_event.mid,
+                ).info(
+                    "Published SELL proposal: target reached at {price:.4f}",
+                    price=market_event.mid,
+                )
+            else:
+                logger.bind(
+                    market_slug=market_event.market_slug,
+                    outcome=market_event.outcome,
+                    mid=market_event.mid,
+                    target=position.target_price,
+                    need=position.target_price - market_event.mid,
+                ).debug(
+                    "Position open, waiting for target: mid={mid:.4f} < target={target:.4f} "
+                    "(need +{need:.4f})",
+                    mid=market_event.mid,
+                    target=position.target_price,
+                    need=position.target_price - market_event.mid,
+                )
 
         logger.bind(
             market_slug=market_event.market_slug,
@@ -255,11 +316,13 @@ class PaperPositionManager(IPositionManager):
         strategy_id = order.intent.strategy_id if order.intent.strategy_id else "unknown"
         key = (market_slug, outcome)
 
-        # Store strategy_id for this position
+        # Store strategy_id for this position (BUY opens; used on SELL to attribute close)
         if side == "BUY":
             self._position_strategy[key] = strategy_id
 
-        # Update per-strategy tracker
+        # Update per-strategy tracker. On SELL, use the strategy that opened the position:
+        # target-price SELLs come from PositionManager with strategy_id="position_manager",
+        # but the position was opened by the strategy instance; _position_strategy[key] has it.
         if side == "BUY":
             self._per_strategy_tracker.record_buy_fill(
                 strategy_id=strategy_id,
@@ -269,13 +332,34 @@ class PaperPositionManager(IPositionManager):
                 order=order,
             )
         elif side == "SELL":
-            self._per_strategy_tracker.record_sell_fill(
-                strategy_id=strategy_id,
+            strategy_id_for_close = self._position_strategy.get(key, strategy_id)
+            closed = self._per_strategy_tracker.record_sell_fill(
+                strategy_id=strategy_id_for_close,
                 market_slug=market_slug,
                 outcome=outcome,
                 fill_event=fill_event,
                 order=order,
             )
+            if closed is not None:
+                strat_id, closed_position, order_id, fill_id = closed
+                strategy_closed_event = StrategyClosedTradeEvent(
+                    strategy_id=strat_id,
+                    market_slug=closed_position.market_slug,
+                    outcome=closed_position.outcome,
+                    entry_price=closed_position.entry_price,
+                    exit_price=closed_position.exit_price,
+                    size=closed_position.size,
+                    pnl=closed_position.pnl,
+                    pnl_pct=closed_position.pnl_pct,
+                    entry_time=closed_position.entry_time,
+                    exit_time=closed_position.exit_time,
+                    result=closed_position.result,
+                    execution_mode="paper",
+                    order_id=order_id,
+                    fill_id=fill_id,
+                    correlation_id=fill_event.correlation_id,
+                )
+                await self._bus.publish(STRATEGY_CLOSED_TRADES, strategy_closed_event)
 
         # Continue with existing position tracking (for backward compatibility)
         if side == "BUY":
@@ -510,6 +594,8 @@ class PaperPositionManager(IPositionManager):
             # Remove position BEFORE emitting PnLEvent so position_count is correct
             del self._positions[key]
             self._position_fills.pop(key, None)
+            self._position_strategy.pop(key, None)
+            self._sell_pending.discard(key)
 
             # Emit position metric per observability.mdc §4 (position closed = 0)
             set_position_net(market_slug=market_slug, outcome=outcome, net_position=0.0)
@@ -689,10 +775,11 @@ class PaperPositionManager(IPositionManager):
         exit_time = time.monotonic()
 
         for (market_slug, outcome), position in positions_to_close:
+            key = (market_slug, outcome)
             # Determine settlement price
             exit_price = self._determine_settlement_price(market_slug, outcome)
 
-            # Record closed position
+            # Record closed position (global outcome tracker)
             closed_position = self._outcome_tracker.record_closed_position(
                 market_slug=market_slug,
                 outcome=outcome,
@@ -722,12 +809,51 @@ class PaperPositionManager(IPositionManager):
                 result=closed_position.result,
             )
 
+            # Attribute close to strategy that opened the position; emit for Past Performance
+            strategy_id = self._position_strategy.get(key, "unknown")
+            if strategy_id == "unknown":
+                logger.bind(market_slug=market_slug, outcome=outcome).warning(
+                    "Market-expiry close: no opening strategy for {market_slug}/{outcome}, "
+                    "using 'unknown' for StrategyClosedTradeEvent",
+                    market_slug=market_slug,
+                    outcome=outcome,
+                )
+            self._per_strategy_tracker.close_position_settlement(
+                strategy_id=strategy_id,
+                market_slug=market_slug,
+                outcome=outcome,
+                entry_price=position.entry_price,
+                exit_price=exit_price,
+                size=position.size,
+                entry_time=position.entry_time,
+                exit_time=exit_time,
+            )
+            strategy_closed_event = StrategyClosedTradeEvent(
+                strategy_id=strategy_id,
+                market_slug=closed_position.market_slug,
+                outcome=closed_position.outcome,
+                entry_price=closed_position.entry_price,
+                exit_price=closed_position.exit_price,
+                size=closed_position.size,
+                pnl=closed_position.pnl,
+                pnl_pct=closed_position.pnl_pct,
+                entry_time=closed_position.entry_time,
+                exit_time=closed_position.exit_time,
+                result=closed_position.result,
+                execution_mode="paper",
+                order_id="",
+                fill_id="",
+                correlation_id=event.correlation_id,
+            )
+            await self._bus.publish(STRATEGY_CLOSED_TRADES, strategy_closed_event)
+
             # Remove from open positions
-            del self._positions[(market_slug, outcome)]
-            if (market_slug, outcome) in self._position_fills:
-                del self._position_fills[(market_slug, outcome)]
-            if (market_slug, outcome) in self._latest_prices:
-                del self._latest_prices[(market_slug, outcome)]
+            del self._positions[key]
+            if key in self._position_fills:
+                del self._position_fills[key]
+            if key in self._latest_prices:
+                del self._latest_prices[key]
+            self._position_strategy.pop(key, None)
 
         # Update performance metrics after closing positions
         self._performance_metrics.update_metrics()

@@ -40,6 +40,7 @@ from polytrader.events.types import (
     ServiceStartedEvent,
     ServiceStoppedEvent,
     SignalEvent,
+    StrategyClosedTradeEvent,
     StrategyStateTransitionEvent,
     SystemStartedEvent,
     SystemStoppedEvent,
@@ -104,6 +105,8 @@ __all__ = [
     "ServiceStoppedEvent",
     "SIGNALS",
     "SignalEvent",
+    "StrategyClosedTradeEvent",
+    "STRATEGY_CLOSED_TRADES",
     "StrategyStateTransitionEvent",
     "SUBMIT_ORDER_COMMANDS",
     "SYSTEM_LIFECYCLE",
@@ -254,6 +257,10 @@ def __getattr__(name: str):
         from polytrader.events.topics import get_pnl_updates_topic
 
         return get_pnl_updates_topic()
+    elif name == "STRATEGY_CLOSED_TRADES":
+        from polytrader.events.topics import get_strategy_closed_trades_topic
+
+        return get_strategy_closed_trades_topic()
     elif name == "CANCEL_REQUESTED":
         from polytrader.events.topics import get_cancel_requested_topic
 

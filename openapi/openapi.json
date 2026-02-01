@@ -231,6 +231,311 @@
         }
       }
     },
+    "/api/v1/state/strategies/{strategy_id}/signals": {
+      "get": {
+        "tags": [
+          "control"
+        ],
+        "summary": "Get Strategy Signals",
+        "description": "Get paginated signals for a strategy (newest first).\n\nQuery params: limit (default 100, max 500), cursor (optional).\nReturns empty list when strategy has no signals.",
+        "operationId": "get_strategy_signals_api_v1_state_strategies__strategy_id__signals_get",
+        "parameters": [
+          {
+            "name": "strategy_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Strategy Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 100,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategySignalsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/state/strategies/{strategy_id}/orders": {
+      "get": {
+        "tags": [
+          "control"
+        ],
+        "summary": "Get Strategy Orders",
+        "description": "Get paginated orders for a strategy (newest first).\n\nQuery params: limit (default 100, max 500), cursor (optional).\nReturns empty list when strategy has no orders.\nexecution_mode (paper | live) is included per row for UI badge.",
+        "operationId": "get_strategy_orders_api_v1_state_strategies__strategy_id__orders_get",
+        "parameters": [
+          {
+            "name": "strategy_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Strategy Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 100,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyOrdersResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/state/strategies/{strategy_id}/performance": {
+      "get": {
+        "tags": [
+          "control"
+        ],
+        "summary": "Get Strategy Performance",
+        "description": "Get past performance for a strategy: summary + paginated closed trades.\n\nQuery params: from_ts, to_ts (optional ts_mono range), execution_mode\n(paper | live | omit for all), limit (default 100, max 500), cursor.\nSummary is computed from the returned page of items.",
+        "operationId": "get_strategy_performance_api_v1_state_strategies__strategy_id__performance_get",
+        "parameters": [
+          {
+            "name": "strategy_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Strategy Id"
+            }
+          },
+          {
+            "name": "from_ts",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "From Ts"
+            }
+          },
+          {
+            "name": "to_ts",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "To Ts"
+            }
+          },
+          {
+            "name": "execution_mode",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "paper",
+                    "live"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Execution Mode"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 100,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PerformanceResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/state/strategies/{strategy_id}": {
+      "get": {
+        "tags": [
+          "control"
+        ],
+        "summary": "Get Strategy By Id",
+        "description": "Get a single strategy by ID.\n\nReturns 404 if the strategy is not in the registry.",
+        "operationId": "get_strategy_by_id_api_v1_state_strategies__strategy_id__get",
+        "parameters": [
+          {
+            "name": "strategy_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Strategy Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Strategy not found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/state/strategies/validate": {
       "post": {
         "tags": [
@@ -1039,6 +1344,113 @@
         "title": "ActivateStrategyRequest",
         "description": "Request to activate strategy for live trading."
       },
+      "ClosedTradeItem": {
+        "properties": {
+          "market_slug": {
+            "type": "string",
+            "title": "Market Slug",
+            "description": "Market identifier"
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "UP",
+              "DOWN"
+            ],
+            "title": "Outcome",
+            "description": "Outcome traded"
+          },
+          "entry_time": {
+            "type": "number",
+            "title": "Entry Time",
+            "description": "Entry time (monotonic)"
+          },
+          "exit_time": {
+            "type": "number",
+            "title": "Exit Time",
+            "description": "Exit time (monotonic)"
+          },
+          "exit_ts_wall": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Exit Ts Wall",
+            "description": "Exit wall-clock time (UTC)"
+          },
+          "entry_price": {
+            "type": "number",
+            "maximum": 1.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Entry Price",
+            "description": "Average entry price"
+          },
+          "exit_price": {
+            "type": "number",
+            "minimum": 0.0,
+            "maximum": 1.0,
+            "title": "Exit Price",
+            "description": "Exit fill/settlement price (0 allowed for binary settlement)"
+          },
+          "size": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Size",
+            "description": "Position size in USD"
+          },
+          "pnl": {
+            "type": "number",
+            "title": "Pnl",
+            "description": "Realized P&L in USD"
+          },
+          "pnl_pct": {
+            "type": "number",
+            "title": "Pnl Pct",
+            "description": "Realized P&L as percentage"
+          },
+          "result": {
+            "type": "string",
+            "enum": [
+              "WIN",
+              "LOSS",
+              "BREAKEVEN"
+            ],
+            "title": "Result",
+            "description": "WIN if pnl > 0, LOSS if pnl < 0, BREAKEVEN if pnl == 0"
+          },
+          "execution_mode": {
+            "type": "string",
+            "enum": [
+              "paper",
+              "live"
+            ],
+            "title": "Execution Mode",
+            "description": "Paper or live execution"
+          },
+          "duration_seconds": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Duration Seconds",
+            "description": "Trade duration (exit_time - entry_time) in seconds"
+          }
+        },
+        "type": "object",
+        "required": [
+          "market_slug",
+          "outcome",
+          "entry_time",
+          "exit_time",
+          "exit_ts_wall",
+          "entry_price",
+          "exit_price",
+          "size",
+          "pnl",
+          "pnl_pct",
+          "result",
+          "execution_mode",
+          "duration_seconds"
+        ],
+        "title": "ClosedTradeItem",
+        "description": "Single closed trade for strategy performance API.\n\nPer proposal-past-performance-tab: One row per StrategyClosedTradeEvent.\nentry_time/exit_time are monotonic timestamps; exit_ts_wall is wall-clock for display."
+      },
       "CommandEnvelopeResponse": {
         "properties": {
           "command_id": {
@@ -1731,6 +2143,98 @@
         "title": "MarketsResponse",
         "description": "Markets list response.\n\nMarkets are ordered by latest_tick_ts descending (newest first).\nMarkets with null latest_tick_ts appear last."
       },
+      "PerformanceResponse": {
+        "properties": {
+          "summary": {
+            "$ref": "#/components/schemas/PerformanceSummary",
+            "description": "Aggregates over returned items"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ClosedTradeItem"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "Closed trades (newest first)"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor",
+            "description": "Opaque cursor for next page; absent if no more"
+          }
+        },
+        "type": "object",
+        "required": [
+          "summary"
+        ],
+        "title": "PerformanceResponse",
+        "description": "Past performance for a strategy: summary + paginated closed trades."
+      },
+      "PerformanceSummary": {
+        "properties": {
+          "total_realized_pnl": {
+            "type": "number",
+            "title": "Total Realized Pnl",
+            "description": "Sum of P&L over returned trades (USD)"
+          },
+          "total_trades": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Total Trades",
+            "description": "Number of trades in this page"
+          },
+          "win_rate_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Win Rate Pct",
+            "description": "Percentage of WIN results (0-100); None if no trades"
+          },
+          "current_drawdown": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Drawdown",
+            "description": "Current drawdown (Phase 2: from equity curve)"
+          },
+          "max_drawdown": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Drawdown",
+            "description": "Max drawdown (Phase 2: from equity curve)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total_realized_pnl",
+          "total_trades"
+        ],
+        "title": "PerformanceSummary",
+        "description": "Aggregate performance metrics for the returned closed trades.\n\nComputed from the items in this response (page-scoped).\nWhen items are empty, total_trades=0, total_realized_pnl=0, win_rate_pct=None."
+      },
       "RunIdentityResponse": {
         "properties": {
           "template_code_ref": {
@@ -1802,6 +2306,107 @@
         ],
         "title": "StrategiesResponse",
         "description": "List of strategies response."
+      },
+      "StrategyOrderItem": {
+        "properties": {
+          "order_id": {
+            "type": "string",
+            "title": "Order Id",
+            "description": "Internal order UUID"
+          },
+          "client_order_id": {
+            "type": "string",
+            "title": "Client Order Id",
+            "description": "Idempotency key"
+          },
+          "ts_wall": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Ts Wall",
+            "description": "Wall-clock time (UTC, ISO 8601)"
+          },
+          "market_slug": {
+            "type": "string",
+            "title": "Market Slug",
+            "description": "Market identifier"
+          },
+          "side": {
+            "type": "string",
+            "title": "Side",
+            "description": "Trade side: BUY or SELL"
+          },
+          "size": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Size",
+            "description": "Order size in USD"
+          },
+          "limit_price": {
+            "type": "number",
+            "maximum": 1.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Limit Price",
+            "description": "Limit price (0-1 range)"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "Order status (e.g. PENDING_SUBMIT, LIVE, FILLED, REJECTED)"
+          },
+          "execution_mode": {
+            "type": "string",
+            "enum": [
+              "paper",
+              "live"
+            ],
+            "title": "Execution Mode",
+            "description": "Paper or live execution; UI shows Paper/Live badge"
+          }
+        },
+        "type": "object",
+        "required": [
+          "order_id",
+          "client_order_id",
+          "ts_wall",
+          "market_slug",
+          "side",
+          "size",
+          "limit_price",
+          "status",
+          "execution_mode"
+        ],
+        "title": "StrategyOrderItem",
+        "description": "Single order record for strategy-scoped orders API.\n\nMirrors OrderCreatedEvent + intent (order_id, ts_wall, market, side, size, status).\nexecution_mode indicates paper vs live so UI can show Paper/Live badge."
+      },
+      "StrategyOrdersResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/StrategyOrderItem"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "Order records (newest first)"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor",
+            "description": "Opaque cursor for next page; absent if no more"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "StrategyOrdersResponse",
+        "description": "Paginated list of orders for a strategy."
       },
       "StrategyResponse": {
         "properties": {
@@ -1965,6 +2570,136 @@
         ],
         "title": "StrategyResponse",
         "description": "Strategy registry entry response.\n\nPer Commit 14: StrategyResponse includes all new fields for template\nreference, lifecycle state, and reproducibility metadata."
+      },
+      "StrategySignalItem": {
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "title": "Event Id",
+            "description": "Event identifier (UUID)"
+          },
+          "ts_wall": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Ts Wall",
+            "description": "Wall-clock time (UTC, ISO 8601)"
+          },
+          "market_slug": {
+            "type": "string",
+            "title": "Market Slug",
+            "description": "Market identifier"
+          },
+          "outcome": {
+            "type": "string",
+            "title": "Outcome",
+            "description": "Outcome: UP or DOWN"
+          },
+          "p_up": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "P Up",
+            "description": "Probability UP wins"
+          },
+          "p_down": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "P Down",
+            "description": "Probability DOWN wins"
+          },
+          "edge": {
+            "type": "number",
+            "title": "Edge",
+            "description": "Edge/confidence score"
+          },
+          "confidence": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "description": "Confidence level"
+          },
+          "model_id": {
+            "type": "string",
+            "title": "Model Id",
+            "description": "Strategy/model identifier"
+          },
+          "model_version": {
+            "type": "string",
+            "title": "Model Version",
+            "description": "Model version"
+          },
+          "snapshot_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot Hash",
+            "description": "Input snapshot hash"
+          },
+          "rationale": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rationale",
+            "description": "Human-readable rationale"
+          }
+        },
+        "type": "object",
+        "required": [
+          "event_id",
+          "ts_wall",
+          "market_slug",
+          "outcome",
+          "p_up",
+          "p_down",
+          "edge",
+          "confidence",
+          "model_id",
+          "model_version"
+        ],
+        "title": "StrategySignalItem",
+        "description": "Single signal record for strategy-scoped signals API.\n\nMirrors SignalEvent fields (event_id, ts_wall, market, scores)."
+      },
+      "StrategySignalsResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/StrategySignalItem"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "Signal records (newest first)"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor",
+            "description": "Opaque cursor for next page; absent if no more"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "StrategySignalsResponse",
+        "description": "Paginated list of signals for a strategy."
       },
       "StrategyTypeResponse": {
         "properties": {

@@ -4,12 +4,13 @@ This module provides type-safe database operations using SQLAlchemy ORM.
 Per architecture.mdc: Database operations are separated from business logic.
 """
 
+import base64
 from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Protocol
 from uuid import UUID
 
-from sqlalchemy import and_, desc, select
+from sqlalchemy import and_, desc, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -158,6 +159,193 @@ class EventRepository:
 
         result = await self.session.execute(query)
         return list(result.scalars().all())
+
+    async def read_signal_events_by_strategy(
+        self,
+        strategy_id: str,
+        limit: int = 100,
+        cursor: str | None = None,
+    ) -> tuple[list[EventRecord], str | None]:
+        """Read SignalEvent records for a strategy, newest-first, with cursor pagination.
+
+        Filters by event_type=SignalEvent and event_data->>'model_id' = strategy_id.
+        Order: ts_mono DESC, event_id DESC. Returns at most `limit` items (capped at 500)
+        and an optional next_cursor for the following page.
+
+        Args:
+            strategy_id: Strategy/model identifier (model_id in SignalEvent)
+            limit: Max items to return (default 100, max 500)
+            cursor: Opaque cursor from previous response (optional)
+
+        Returns:
+            (records, next_cursor). next_cursor is set if there are more rows.
+        """
+        cap = min(max(1, limit), 500)
+        conditions = [
+            EventRecord.event_type == "SignalEvent",
+            EventRecord.event_data["model_id"].astext == strategy_id,
+        ]
+        if cursor:
+            try:
+                decoded = base64.urlsafe_b64decode(cursor.encode()).decode()
+                parts = decoded.split(":", 1)
+                if len(parts) == 2:
+                    cursor_ts = float(parts[0])
+                    cursor_id = UUID(parts[1])
+                    conditions.append(
+                        or_(
+                            EventRecord.ts_mono < cursor_ts,
+                            (EventRecord.ts_mono == cursor_ts) & (EventRecord.event_id < cursor_id),
+                        )
+                    )
+            except (ValueError, TypeError):
+                pass  # Invalid cursor: ignore and return first page
+
+        query = (
+            select(EventRecord)
+            .where(and_(*conditions))
+            .order_by(desc(EventRecord.ts_mono), desc(EventRecord.event_id))
+            .limit(cap + 1)
+        )
+        result = await self.session.execute(query)
+        rows = list(result.scalars().all())
+        next_cursor: str | None = None
+        if len(rows) > cap:
+            rows = rows[:cap]
+            last_returned = rows[-1]
+            next_cursor = base64.urlsafe_b64encode(
+                f"{last_returned.ts_mono}:{last_returned.event_id}".encode()
+            ).decode()
+        return (rows, next_cursor)
+
+    async def read_order_events_by_strategy(
+        self,
+        strategy_id: str,
+        limit: int = 100,
+        cursor: str | None = None,
+    ) -> tuple[list[EventRecord], str | None]:
+        """Read OrderCreatedEvent records for a strategy, newest-first, with cursor pagination.
+
+        Filters by event_type=OrderCreatedEvent and intent.strategy_id in event_data.
+        Order: ts_mono DESC, event_id DESC. Returns at most `limit` items (capped at 500)
+        and an optional next_cursor for the following page.
+
+        Args:
+            strategy_id: Strategy identifier (intent.strategy_id in OrderCreatedEvent)
+            limit: Max items to return (default 100, max 500)
+            cursor: Opaque cursor from previous response (optional)
+
+        Returns:
+            (records, next_cursor). next_cursor is set if there are more rows.
+        """
+        cap = min(max(1, limit), 500)
+        conditions = [
+            EventRecord.event_type == "OrderCreatedEvent",
+            EventRecord.event_data["intent"]["strategy_id"].astext == strategy_id,
+        ]
+        if cursor:
+            try:
+                decoded = base64.urlsafe_b64decode(cursor.encode()).decode()
+                parts = decoded.split(":", 1)
+                if len(parts) == 2:
+                    cursor_ts = float(parts[0])
+                    cursor_id = UUID(parts[1])
+                    conditions.append(
+                        or_(
+                            EventRecord.ts_mono < cursor_ts,
+                            (EventRecord.ts_mono == cursor_ts) & (EventRecord.event_id < cursor_id),
+                        )
+                    )
+            except (ValueError, TypeError):
+                pass  # Invalid cursor: ignore and return first page
+
+        query = (
+            select(EventRecord)
+            .where(and_(*conditions))
+            .order_by(desc(EventRecord.ts_mono), desc(EventRecord.event_id))
+            .limit(cap + 1)
+        )
+        result = await self.session.execute(query)
+        rows = list(result.scalars().all())
+        next_cursor: str | None = None
+        if len(rows) > cap:
+            rows = rows[:cap]
+            last_returned = rows[-1]
+            next_cursor = base64.urlsafe_b64encode(
+                f"{last_returned.ts_mono}:{last_returned.event_id}".encode()
+            ).decode()
+        return (rows, next_cursor)
+
+    async def read_closed_trade_events_by_strategy(
+        self,
+        strategy_id: str,
+        from_ts: float | None = None,
+        to_ts: float | None = None,
+        execution_mode: str | None = None,
+        limit: int = 100,
+        cursor: str | None = None,
+    ) -> tuple[list[EventRecord], str | None]:
+        """Read StrategyClosedTradeEvent for a strategy, newest-first, cursor paginated.
+
+        Filters by event_type=StrategyClosedTradeEvent and event_data->>'strategy_id'.
+        Optional: from_ts/to_ts (ts_mono range), execution_mode (paper/live).
+        Order: ts_mono DESC, event_id DESC. Returns at most `limit` items (capped at 500)
+        and an optional next_cursor for the following page.
+
+        Args:
+            strategy_id: Strategy instance identifier
+            from_ts: Optional ts_mono >= from_ts
+            to_ts: Optional ts_mono <= to_ts
+            execution_mode: Optional filter "paper" or "live" (None = all)
+            limit: Max items to return (default 100, max 500)
+            cursor: Opaque cursor from previous response (optional)
+
+        Returns:
+            (records, next_cursor). next_cursor is set if there are more rows.
+        """
+        cap = min(max(1, limit), 500)
+        conditions: list[Any] = [
+            EventRecord.event_type == "StrategyClosedTradeEvent",
+            EventRecord.event_data["strategy_id"].astext == strategy_id,
+        ]
+        if from_ts is not None:
+            conditions.append(EventRecord.ts_mono >= from_ts)
+        if to_ts is not None:
+            conditions.append(EventRecord.ts_mono <= to_ts)
+        if execution_mode is not None:
+            conditions.append(EventRecord.event_data["execution_mode"].astext == execution_mode)
+        if cursor:
+            try:
+                decoded = base64.urlsafe_b64decode(cursor.encode()).decode()
+                parts = decoded.split(":", 1)
+                if len(parts) == 2:
+                    cursor_ts = float(parts[0])
+                    cursor_id = UUID(parts[1])
+                    conditions.append(
+                        or_(
+                            EventRecord.ts_mono < cursor_ts,
+                            (EventRecord.ts_mono == cursor_ts) & (EventRecord.event_id < cursor_id),
+                        )
+                    )
+            except (ValueError, TypeError):
+                pass  # Invalid cursor: ignore and return first page
+
+        query = (
+            select(EventRecord)
+            .where(and_(*conditions))
+            .order_by(desc(EventRecord.ts_mono), desc(EventRecord.event_id))
+            .limit(cap + 1)
+        )
+        result = await self.session.execute(query)
+        rows = list(result.scalars().all())
+        next_cursor = None
+        if len(rows) > cap:
+            rows = rows[:cap]
+            last_returned = rows[-1]
+            next_cursor = base64.urlsafe_b64encode(
+                f"{last_returned.ts_mono}:{last_returned.event_id}".encode()
+            ).decode()
+        return (rows, next_cursor)
 
     async def event_exists(self, event_id: UUID) -> bool:
         """Check if event with given event_id exists.

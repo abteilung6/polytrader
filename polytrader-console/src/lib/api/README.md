@@ -61,6 +61,10 @@ Class | Method | HTTP request | Description
 *ControlApi* | [**getHealthApiV1StateHealthGet**](docs/ControlApi.md#gethealthapiv1statehealthget) | **GET** /api/v1/state/health | Get Health
 *ControlApi* | [**getLiveStrategiesApiV1StateLiveStrategiesGet**](docs/ControlApi.md#getlivestrategiesapiv1statelivestrategiesget) | **GET** /api/v1/state/live-strategies | Get Live Strategies
 *ControlApi* | [**getStrategiesApiV1StateStrategiesGet**](docs/ControlApi.md#getstrategiesapiv1statestrategiesget) | **GET** /api/v1/state/strategies | Get Strategies
+*ControlApi* | [**getStrategyByIdApiV1StateStrategiesStrategyIdGet**](docs/ControlApi.md#getstrategybyidapiv1statestrategiesstrategyidget) | **GET** /api/v1/state/strategies/{strategy_id} | Get Strategy By Id
+*ControlApi* | [**getStrategyOrdersApiV1StateStrategiesStrategyIdOrdersGet**](docs/ControlApi.md#getstrategyordersapiv1statestrategiesstrategyidordersget) | **GET** /api/v1/state/strategies/{strategy_id}/orders | Get Strategy Orders
+*ControlApi* | [**getStrategyPerformanceApiV1StateStrategiesStrategyIdPerformanceGet**](docs/ControlApi.md#getstrategyperformanceapiv1statestrategiesstrategyidperformanceget) | **GET** /api/v1/state/strategies/{strategy_id}/performance | Get Strategy Performance
+*ControlApi* | [**getStrategySignalsApiV1StateStrategiesStrategyIdSignalsGet**](docs/ControlApi.md#getstrategysignalsapiv1statestrategiesstrategyidsignalsget) | **GET** /api/v1/state/strategies/{strategy_id}/signals | Get Strategy Signals
 *ControlApi* | [**getStrategyTemplateApiV1StateStrategiesTemplatesTypeIdGet**](docs/ControlApi.md#getstrategytemplateapiv1statestrategiestemplatestypeidget) | **GET** /api/v1/state/strategies/templates/{type_id} | Get Strategy Template
 *ControlApi* | [**getStrategyTemplateVersionApiV1StateStrategiesTemplatesTypeIdVersionsVersionGet**](docs/ControlApi.md#getstrategytemplateversionapiv1statestrategiestemplatestypeidversionsversionget) | **GET** /api/v1/state/strategies/templates/{type_id}/versions/{version} | Get Strategy Template Version
 *ControlApi* | [**listStrategyTemplatesApiV1StateStrategiesTemplatesGet**](docs/ControlApi.md#liststrategytemplatesapiv1statestrategiestemplatesget) | **GET** /api/v1/state/strategies/templates | List Strategy Templates
@@ -74,6 +78,7 @@ Class | Method | HTTP request | Description
 ### Documentation For Models
 
  - [ActivateStrategyRequest](docs/ActivateStrategyRequest.md)
+ - [ClosedTradeItem](docs/ClosedTradeItem.md)
  - [CommandEnvelopeResponse](docs/CommandEnvelopeResponse.md)
  - [CommandStatusResponse](docs/CommandStatusResponse.md)
  - [CreateStrategyRequest](docs/CreateStrategyRequest.md)
@@ -92,9 +97,15 @@ Class | Method | HTTP request | Description
  - [MarketInfoResponse](docs/MarketInfoResponse.md)
  - [MarketTickResponse](docs/MarketTickResponse.md)
  - [MarketsResponse](docs/MarketsResponse.md)
+ - [PerformanceResponse](docs/PerformanceResponse.md)
+ - [PerformanceSummary](docs/PerformanceSummary.md)
  - [RunIdentityResponse](docs/RunIdentityResponse.md)
  - [StrategiesResponse](docs/StrategiesResponse.md)
+ - [StrategyOrderItem](docs/StrategyOrderItem.md)
+ - [StrategyOrdersResponse](docs/StrategyOrdersResponse.md)
  - [StrategyResponse](docs/StrategyResponse.md)
+ - [StrategySignalItem](docs/StrategySignalItem.md)
+ - [StrategySignalsResponse](docs/StrategySignalsResponse.md)
  - [StrategyTypeResponse](docs/StrategyTypeResponse.md)
  - [StrategyTypesResponse](docs/StrategyTypesResponse.md)
  - [UpdateStrategyRequest](docs/UpdateStrategyRequest.md)
