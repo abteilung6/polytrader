@@ -1,9 +1,10 @@
 import asyncio
 import concurrent.futures
+import re
 import threading
 import time
 from collections import deque
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from polytrader.events.types import MarketDataEvent
 from polytrader.obs.metrics import (
@@ -40,6 +41,41 @@ class IMarketDataStore(Protocol):
             List of (market_slug, outcome) tuples
         """
         ...
+
+
+@runtime_checkable
+class IDualViewMarketDataStore(IMarketDataStore, Protocol):
+    """Protocol for stores that expose slug and pattern views.
+
+    Used by the orchestrator to pass the correct view per strategy template:
+    slug_store for current-market-only strategies, pattern_store for warm-start.
+    """
+
+    @property
+    def slug_store(self) -> "MemoryMarketDataStore":
+        """Store keyed by full slug (current market only)."""
+        ...
+
+    @property
+    def pattern_store(self) -> "PatternKeyedMarketDataStore":
+        """Store keyed by pattern (warm start across slug rolls)."""
+        ...
+
+
+def slug_to_pattern(slug: str) -> str:
+    """Derive pattern from slug for warm start across slug rolls.
+
+    Slugs like btc-updown-15m-1769980500 (pattern + timestamp) map to
+    pattern btc-updown-15m so all 15m contracts share one history.
+
+    Args:
+        slug: Market slug (e.g. btc-updown-15m-1769980500)
+
+    Returns:
+        Pattern (e.g. btc-updown-15m), or slug unchanged if no trailing -digits.
+    """
+    match = re.match(r"^(.+)-\d+$", slug)
+    return match.group(1) if match else slug
 
 
 class MemoryMarketDataStore(IMarketDataStore):
@@ -101,6 +137,98 @@ class MemoryMarketDataStore(IMarketDataStore):
             List of (market_slug, outcome) tuples
         """
         return list(self._events.keys())
+
+
+class PatternKeyedMarketDataStore(IMarketDataStore):
+    """In-memory store keyed by pattern (slug minus trailing -timestamp).
+
+    All slugs under the same pattern (e.g. btc-updown-15m-1769981400,
+    btc-updown-15m-1769980500) share one history so strategies get warm start
+    when the slug rolls every 15 minutes instead of cold start per slug.
+    """
+
+    def __init__(self, window: int = 3000) -> None:
+        self.window = window
+        self._events: dict[tuple[str, Outcome], deque[MarketDataEvent]] = {}
+
+    def add(self, event: MarketDataEvent) -> None:
+        key = (slug_to_pattern(event.market_slug), event.outcome)
+        self._events.setdefault(key, deque(maxlen=self.window)).append(event)
+
+    def latest(self, market_slug: str, outcome: Outcome) -> MarketDataEvent | None:
+        key = (slug_to_pattern(market_slug), outcome)
+        d = self._events.get(key)
+        return d[-1] if d else None
+
+    def history(self, market_slug: str, outcome: Outcome) -> list[MarketDataEvent]:
+        key = (slug_to_pattern(market_slug), outcome)
+        return list(self._events.get(key, []))
+
+    def get_all_markets(self) -> list[tuple[str, Outcome]]:
+        return list(self._events.keys())
+
+
+class DualViewMarketDataStore(IMarketDataStore):
+    """Writes to both slug-keyed and pattern-keyed stores; default read is slug (current market).
+
+    Per architecture: Strategies that need only the current market (e.g. simple_threshold)
+    get slug_store; strategies that need warm start across slug rolls (e.g. VFMR) get
+    pattern_store. Observer and composite call add() on this store, so both views
+    stay in sync.
+
+    - slug_store: current market only (one slug per key)
+    - pattern_store: same pattern shares history (warm start on 15m roll)
+    """
+
+    def __init__(self, window: int = 3000) -> None:
+        self._slug_store = MemoryMarketDataStore(window=window)
+        self._pattern_store = PatternKeyedMarketDataStore(window=window)
+
+    @property
+    def slug_store(self) -> MemoryMarketDataStore:
+        """Store keyed by full slug (current market only)."""
+        return self._slug_store
+
+    @property
+    def pattern_store(self) -> PatternKeyedMarketDataStore:
+        """Store keyed by pattern (warm start across slug rolls)."""
+        return self._pattern_store
+
+    def add(self, event: MarketDataEvent) -> None:
+        self._slug_store.add(event)
+        self._pattern_store.add(event)
+
+    def latest(self, market_slug: str, outcome: Outcome) -> MarketDataEvent | None:
+        return self._slug_store.latest(market_slug, outcome)
+
+    def history(self, market_slug: str, outcome: Outcome) -> list[MarketDataEvent]:
+        return self._slug_store.history(market_slug, outcome)
+
+    def get_all_markets(self) -> list[tuple[str, Outcome]]:
+        return self._slug_store.get_all_markets()
+
+
+def resolve_store_view(
+    store: IMarketDataStore,
+    use_pattern_history: bool,
+) -> IMarketDataStore:
+    """Return the store view appropriate for a strategy template.
+
+    Per alpha_operating_model: only strategies that need warm start get
+    pattern_store; others get slug_store (current market only). If the
+    store is not a dual-view store, returns the store unchanged.
+
+    Args:
+        store: Platform market data store (may be dual-view or single-view).
+        use_pattern_history: True if strategy needs warm start across slug rolls.
+
+    Returns:
+        slug_store or pattern_store when store is IDualViewMarketDataStore;
+        otherwise the same store.
+    """
+    if isinstance(store, IDualViewMarketDataStore):
+        return store.pattern_store if use_pattern_history else store.slug_store
+    return store
 
 
 class CompositeMarketDataStore(IMarketDataStore):

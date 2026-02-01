@@ -34,6 +34,8 @@ class StrategyTemplate:
         description: Human-readable description
         parameter_schema: Parameter schema for validation
         factory: Factory function that creates strategy factories
+        use_pattern_history: If True, strategy gets pattern-keyed store (warm start
+            across slug rolls). If False, strategy gets slug-keyed store (current market only).
     """
 
     type_id: str
@@ -45,6 +47,7 @@ class StrategyTemplate:
         [dict[str, object], IMarketDataStore],
         Callable[[str], IStrategy],
     ]
+    use_pattern_history: bool = False
 
     def __post_init__(self) -> None:
         """Validate StrategyTemplate itself."""
@@ -83,6 +86,7 @@ class StrategyRegistry:
             [dict[str, object], IMarketDataStore],
             Callable[[str], IStrategy],
         ],
+        use_pattern_history: bool = False,
     ) -> None:
         """Register a strategy template.
 
@@ -93,6 +97,7 @@ class StrategyRegistry:
             description: Human-readable description
             parameter_schema: Parameter schema for validation
             factory: Factory function that creates strategy factories
+            use_pattern_history: If True, strategy receives pattern-keyed store (warm start).
 
         Raises:
             ValueError: If template is already registered
@@ -108,6 +113,7 @@ class StrategyRegistry:
             description=description,
             parameter_schema=parameter_schema,
             factory=factory,
+            use_pattern_history=use_pattern_history,
         )
 
         self._registry[key] = template

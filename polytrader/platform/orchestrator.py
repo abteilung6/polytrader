@@ -22,7 +22,7 @@ from polytrader.platform.supervisor_registry import MarketSupervisorRegistry
 from polytrader.portfolio.service import PortfolioService
 from polytrader.risk.engine import RiskChecker, RiskEngine
 from polytrader.risk.limits_store import get_default_limits
-from polytrader.store import IMarketDataStore
+from polytrader.store import IMarketDataStore, resolve_store_view
 from polytrader.strategies.lifecycle_models import StrategyLifecycleState
 from polytrader.strategies.registration import register_all_strategies
 from polytrader.strategies.registry import StrategyRegistry as InMemoryStrategyRegistry
@@ -89,9 +89,12 @@ def create_strategy_factory_from_config(
     # Apply defaults to config (schema handles this)
     config_with_defaults = template.parameter_schema.apply_defaults(strategy_config)
 
+    # Resolve store view per template: pattern (warm start) or slug (current market only).
+    store_view = resolve_store_view(store, template.use_pattern_history)
+
     # Call template's factory function
     try:
-        strategy_factory = template.factory(config_with_defaults, store)
+        strategy_factory = template.factory(config_with_defaults, store_view)
         return strategy_factory
     except Exception as e:
         raise ValueError(f"Factory creation failed for strategy {strategy.strategy_id}: {e}") from e

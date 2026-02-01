@@ -44,11 +44,11 @@ def create_market_data_store(
     # Lazy import to avoid circular dependency
     from polytrader.store import (
         CompositeMarketDataStore,
-        MemoryMarketDataStore,
+        DualViewMarketDataStore,
     )
 
-    # Always create memory store (primary, fast reads)
-    memory_store = MemoryMarketDataStore()
+    # Dual-view: writes to slug and pattern; strategies get slug_store or pattern_store per template
+    memory_store = DualViewMarketDataStore()
 
     # Attempt to create PostgreSQL store if enabled
     if not enable_postgres:

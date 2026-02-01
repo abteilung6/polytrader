@@ -52,7 +52,7 @@ def register_all_strategies(registry: StrategyRegistry) -> None:
         factory=create_simple_threshold_factory,
     )
 
-    # Register volatility_filtered_mean_reversion strategy
+    # Register volatility_filtered_mean_reversion strategy (warm start across slug rolls)
     registry.register(
         type_id="volatility_filtered_mean_reversion",
         version="1.0.0",
@@ -63,4 +63,5 @@ def register_all_strategies(registry: StrategyRegistry) -> None:
         ),
         parameter_schema=VFMR_SCHEMA,
         factory=create_vfmr_factory,
+        use_pattern_history=True,
     )

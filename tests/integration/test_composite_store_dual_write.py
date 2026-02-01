@@ -252,8 +252,8 @@ class TestFactory:
     def test_factory_creates_memory_only_when_database_unavailable(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Test that factory creates memory-only store when database is not configured."""
-        from polytrader.store import MemoryMarketDataStore
+        """Test that factory creates memory-only dual-view store when database is not configured."""
+        from polytrader.store import DualViewMarketDataStore
         from polytrader.store_factory import create_market_data_store
 
         # Mock get_database_url to raise ValueError (simulating missing config)
@@ -262,11 +262,11 @@ class TestFactory:
 
         monkeypatch.setattr("polytrader.store_factory.get_database_url", mock_get_database_url)
 
-        # Create store (should create memory-only)
+        # Create store (should create dual-view memory store, not composite)
         store = create_market_data_store(enable_postgres=True)
 
-        # Verify it's a memory store (not composite)
-        assert isinstance(store, MemoryMarketDataStore)
+        # Verify it's dual-view memory store (slug + pattern views), not composite
+        assert isinstance(store, DualViewMarketDataStore)
         assert not isinstance(store, CompositeMarketDataStore)
 
     def test_factory_respects_enable_postgres_flag(
@@ -276,7 +276,7 @@ class TestFactory:
         # Set up database config
         from urllib.parse import urlparse
 
-        from polytrader.store import MemoryMarketDataStore
+        from polytrader.store import DualViewMarketDataStore
         from polytrader.store_factory import create_market_data_store
 
         parsed = urlparse(postgres_test_url)
@@ -288,8 +288,8 @@ class TestFactory:
         # Create store with enable_postgres=False
         store = create_market_data_store(enable_postgres=False)
 
-        # Verify it's memory-only (not composite)
-        assert isinstance(store, MemoryMarketDataStore)
+        # Verify it's dual-view memory store (slug + pattern views), not composite
+        assert isinstance(store, DualViewMarketDataStore)
         assert not isinstance(store, CompositeMarketDataStore)
 
 
