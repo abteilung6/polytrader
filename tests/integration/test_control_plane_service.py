@@ -20,6 +20,7 @@ from polytrader.platform.control import (
     LiveStrategyRepository,
 )
 from polytrader.platform.control_plane import ControlPlaneService
+from polytrader.platform.registry import StrategyRegistry
 
 
 @pytest.fixture
@@ -57,28 +58,38 @@ async def execution_control(event_bus: EventBus) -> ExecutionControl:
 @pytest.fixture
 async def repositories(
     db_session: AsyncSession,
-) -> tuple[ControlCommandRepository, ExecutionControlRepository, LiveStrategyRepository]:
+) -> tuple[
+    ControlCommandRepository,
+    ExecutionControlRepository,
+    LiveStrategyRepository,
+    StrategyRegistry,
+]:
     """Create repositories for tests."""
     command_repo = ControlCommandRepository(db_session)
     execution_repo = ExecutionControlRepository(db_session)
     live_repo = LiveStrategyRepository(db_session)
-    return command_repo, execution_repo, live_repo
+    strategy_registry = StrategyRegistry(db_session)
+    return command_repo, execution_repo, live_repo, strategy_registry
 
 
 @pytest.fixture
 async def service(
     repositories: tuple[
-        ControlCommandRepository, ExecutionControlRepository, LiveStrategyRepository
+        ControlCommandRepository,
+        ExecutionControlRepository,
+        LiveStrategyRepository,
+        StrategyRegistry,
     ],
     execution_control: ExecutionControl,
     event_bus: EventBus,
 ) -> ControlPlaneService:
     """Create ControlPlaneService for tests."""
-    command_repo, execution_repo, live_repo = repositories
+    command_repo, execution_repo, live_repo, strategy_registry = repositories
     return ControlPlaneService(
         command_repo=command_repo,
         execution_repo=execution_repo,
         live_repo=live_repo,
+        strategy_registry=strategy_registry,
         execution_control=execution_control,
         bus=event_bus,
         poll_interval_s=0.1,  # Fast polling for tests
@@ -113,12 +124,15 @@ class TestEnableExecution:
         self,
         service: ControlPlaneService,
         repositories: tuple[
-            ControlCommandRepository, ExecutionControlRepository, LiveStrategyRepository
+            ControlCommandRepository,
+            ExecutionControlRepository,
+            LiveStrategyRepository,
+            StrategyRegistry,
         ],
         execution_control: ExecutionControl,
     ) -> None:
         """Test that enable_execution command is processed correctly."""
-        command_repo, execution_repo, _ = repositories
+        command_repo, execution_repo, _, _ = repositories
 
         # Create command
         cmd = ControlCommandRecord(
@@ -155,11 +169,14 @@ class TestEnableExecution:
         self,
         service: ControlPlaneService,
         repositories: tuple[
-            ControlCommandRepository, ExecutionControlRepository, LiveStrategyRepository
+            ControlCommandRepository,
+            ExecutionControlRepository,
+            LiveStrategyRepository,
+            StrategyRegistry,
         ],
     ) -> None:
         """Test that enable_execution with version check works correctly."""
-        command_repo, execution_repo, _ = repositories
+        command_repo, execution_repo, _, _ = repositories
 
         # Get current version
         current = await execution_repo.get_control()
@@ -190,11 +207,14 @@ class TestEnableExecution:
         self,
         service: ControlPlaneService,
         repositories: tuple[
-            ControlCommandRepository, ExecutionControlRepository, LiveStrategyRepository
+            ControlCommandRepository,
+            ExecutionControlRepository,
+            LiveStrategyRepository,
+            StrategyRegistry,
         ],
     ) -> None:
         """Test that enable_execution with wrong version fails."""
-        command_repo, execution_repo, _ = repositories
+        command_repo, execution_repo, _, _ = repositories
 
         # Get current version
         current = await execution_repo.get_control()
@@ -230,12 +250,15 @@ class TestDisableExecution:
         self,
         service: ControlPlaneService,
         repositories: tuple[
-            ControlCommandRepository, ExecutionControlRepository, LiveStrategyRepository
+            ControlCommandRepository,
+            ExecutionControlRepository,
+            LiveStrategyRepository,
+            StrategyRegistry,
         ],
         execution_control: ExecutionControl,
     ) -> None:
         """Test that disable_execution command is processed correctly."""
-        command_repo, execution_repo, _ = repositories
+        command_repo, execution_repo, _, _ = repositories
 
         # First enable execution
         enable_cmd = ControlCommandRecord(
@@ -283,12 +306,15 @@ class TestAddActiveStrategy:
         self,
         service: ControlPlaneService,
         repositories: tuple[
-            ControlCommandRepository, ExecutionControlRepository, LiveStrategyRepository
+            ControlCommandRepository,
+            ExecutionControlRepository,
+            LiveStrategyRepository,
+            StrategyRegistry,
         ],
         test_strategy: str,
     ) -> None:
         """Test that add_active_strategy command is processed correctly."""
-        command_repo, _, live_repo = repositories
+        command_repo, _, live_repo, strategy_registry = repositories
 
         # Create command
         cmd = ControlCommandRecord(
@@ -303,9 +329,15 @@ class TestAddActiveStrategy:
         # Process command
         await service._process_command(cmd)
 
-        # Verify strategy is active
+        # Verify strategy is active in live_strategy_activation
         active = await live_repo.list_active()
         assert test_strategy in active
+
+        # Verify strategy_instances.desired_state is RUNNING (sync for orchestrator)
+        strategy = await strategy_registry.get_strategy(test_strategy)
+        assert strategy is not None
+        assert strategy.desired_state == "RUNNING"
+        assert strategy.actual_state == "RUNNING"
 
         # Verify command is marked as applied
         found = await command_repo.find_by_client_request_id(
@@ -315,15 +347,64 @@ class TestAddActiveStrategy:
         assert found.status == "applied"
 
     @pytest.mark.asyncio
+    async def test_add_active_strategy_syncs_desired_state_from_stopped(
+        self,
+        service: ControlPlaneService,
+        repositories: tuple[
+            ControlCommandRepository,
+            ExecutionControlRepository,
+            LiveStrategyRepository,
+            StrategyRegistry,
+        ],
+        db_session: AsyncSession,
+    ) -> None:
+        """Test that add_active_strategy sets strategy_instances.desired_state to RUNNING."""
+        from polytrader.strategies.lifecycle_models import StrategyLifecycleState
+
+        command_repo, _, _, strategy_registry = repositories
+
+        # Create strategy with STOPPED (e.g. created via API with desired_state=STOPPED)
+        strategy = StrategyRecord(
+            strategy_id="vfmr-stopped-test",
+            name="VFMR Stopped Test",
+            config={"anchor_window": 96},
+            template_type_id="volatility_filtered_mean_reversion",
+            template_version="1.0.0",
+            config_hash="hash_stopped",
+            desired_state=StrategyLifecycleState.STOPPED.value,
+            actual_state=StrategyLifecycleState.STOPPED.value,
+        )
+        db_session.add(strategy)
+        await db_session.commit()
+
+        cmd = ControlCommandRecord(
+            command_type="add_active_strategy",
+            strategy_id="vfmr-stopped-test",
+            reason="Activate for test",
+            issued_by="operator",
+            client_request_id="req-sync-desired-1",
+        )
+        await command_repo.create_command(cmd)
+        await service._process_command(cmd)
+
+        loaded = await strategy_registry.get_strategy("vfmr-stopped-test")
+        assert loaded is not None
+        assert loaded.desired_state == "RUNNING"
+        assert loaded.actual_state == "RUNNING"
+
+    @pytest.mark.asyncio
     async def test_add_active_strategy_without_strategy_id_fails(
         self,
         service: ControlPlaneService,
         repositories: tuple[
-            ControlCommandRepository, ExecutionControlRepository, LiveStrategyRepository
+            ControlCommandRepository,
+            ExecutionControlRepository,
+            LiveStrategyRepository,
+            StrategyRegistry,
         ],
     ) -> None:
         """Test that add_active_strategy without strategy_id fails."""
-        command_repo, _, _ = repositories
+        command_repo, _, _, _ = repositories
 
         # Create command without strategy_id
         cmd = ControlCommandRecord(
@@ -355,12 +436,15 @@ class TestRemoveActiveStrategy:
         self,
         service: ControlPlaneService,
         repositories: tuple[
-            ControlCommandRepository, ExecutionControlRepository, LiveStrategyRepository
+            ControlCommandRepository,
+            ExecutionControlRepository,
+            LiveStrategyRepository,
+            StrategyRegistry,
         ],
         test_strategy: str,
     ) -> None:
         """Test that remove_active_strategy command is processed correctly."""
-        command_repo, _, live_repo = repositories
+        command_repo, _, live_repo, strategy_registry = repositories
 
         # First activate strategy
         activate_cmd = ControlCommandRecord(
@@ -384,9 +468,15 @@ class TestRemoveActiveStrategy:
         await command_repo.create_command(deactivate_cmd)
         await service._process_command(deactivate_cmd)
 
-        # Verify strategy is not active
+        # Verify strategy is not active in live_strategy_activation
         active = await live_repo.list_active()
         assert test_strategy not in active
+
+        # Verify strategy_instances.desired_state is STOPPED (sync for orchestrator)
+        strategy = await strategy_registry.get_strategy(test_strategy)
+        assert strategy is not None
+        assert strategy.desired_state == "STOPPED"
+        assert strategy.actual_state == "STOPPED"
 
         # Verify command is marked as applied
         found = await command_repo.find_by_client_request_id(
@@ -404,12 +494,15 @@ class TestControlCommandEvent:
         self,
         service: ControlPlaneService,
         repositories: tuple[
-            ControlCommandRepository, ExecutionControlRepository, LiveStrategyRepository
+            ControlCommandRepository,
+            ExecutionControlRepository,
+            LiveStrategyRepository,
+            StrategyRegistry,
         ],
         event_bus: EventBus,
     ) -> None:
         """Test that ControlCommandEvent is emitted when command is applied."""
-        command_repo, _, _ = repositories
+        command_repo, _, _, _ = repositories
 
         # Subscribe to SYSTEM_LIFECYCLE events
         from polytrader.events import SYSTEM_LIFECYCLE
