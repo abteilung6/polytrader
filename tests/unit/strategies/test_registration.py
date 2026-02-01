@@ -24,14 +24,21 @@ class TestRegisterAllStrategies:
         # Register all strategies
         register_all_strategies(registry)
 
-        # Should have registered simple_threshold
+        # Should have registered simple_threshold and volatility_filtered_mean_reversion
         templates = registry.list_templates()
-        assert len(templates) == 1
+        assert len(templates) == 2
 
-        template = templates[0]
-        assert template.type_id == "simple_threshold"
-        assert template.version == "1.0.0"
-        assert template.name == "Simple Threshold Strategy"
+        type_ids = {t.type_id for t in templates}
+        assert "simple_threshold" in type_ids
+        assert "volatility_filtered_mean_reversion" in type_ids
+
+        simple = next(t for t in templates if t.type_id == "simple_threshold")
+        assert simple.version == "1.0.0"
+        assert simple.name == "Simple Threshold Strategy"
+
+        vfmr = next(t for t in templates if t.type_id == "volatility_filtered_mean_reversion")
+        assert vfmr.version == "1.0.0"
+        assert vfmr.name == "Volatility-Filtered Mean Reversion"
 
     def test_register_all_strategies_can_get_template(self) -> None:
         """Test that registered template can be retrieved."""
@@ -43,6 +50,17 @@ class TestRegisterAllStrategies:
         assert template.version == "1.0.0"
         assert template.name == "Simple Threshold Strategy"
         assert "BUY signals" in template.description
+
+    def test_register_all_strategies_can_get_vfmr_template(self) -> None:
+        """Test that volatility_filtered_mean_reversion template can be retrieved."""
+        registry = StrategyRegistry()
+        register_all_strategies(registry)
+
+        template = registry.get("volatility_filtered_mean_reversion", "1.0.0")
+        assert template.type_id == "volatility_filtered_mean_reversion"
+        assert template.version == "1.0.0"
+        assert template.name == "Volatility-Filtered Mean Reversion"
+        assert "Mean reversion" in template.description or "trend" in template.description
 
     def test_register_all_strategies_has_parameter_schema(self) -> None:
         """Test that registered template has parameter schema."""
@@ -70,7 +88,7 @@ class TestRegisterAllStrategies:
         # Register once
         register_all_strategies(registry)
         templates1 = registry.list_templates()
-        assert len(templates1) == 1
+        assert len(templates1) == 2
 
         # Register again (should raise error for duplicate)
         # This is expected behavior - registration should only happen once
@@ -93,4 +111,4 @@ class TestRegisterAllStrategies:
         # Only after explicit call should strategies be registered
         polytrader.strategies.registration.register_all_strategies(registry)
         templates = registry.list_templates()
-        assert len(templates) == 1
+        assert len(templates) == 2
