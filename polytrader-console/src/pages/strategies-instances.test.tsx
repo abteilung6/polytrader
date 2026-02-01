@@ -30,6 +30,7 @@ describe('StrategiesInstancesPage', () => {
     expect(headerRow).toHaveTextContent('Template version')
     expect(headerRow).toHaveTextContent('Actual state')
     expect(headerRow).toHaveTextContent('Created at')
+    expect(headerRow).toHaveTextContent('Actions')
 
     const dataRow = rows[1]
     expect(dataRow).toHaveTextContent(defaultInstance.strategy_id)
@@ -54,5 +55,43 @@ describe('StrategiesInstancesPage', () => {
     const table = screen.getByRole('table')
     const rows = within(table).getAllByRole('row')
     expect(rows).toHaveLength(2)
+  })
+
+  it('Actions column always shows actions dropdown', async () => {
+    const disabledStrategy = createMockStrategyResponse({
+      strategy_id: 'vfmr-conservative',
+      name: 'VFMR Conservative',
+      enabled: false,
+      desired_state: 'STOPPED',
+      actual_state: 'STOPPED',
+    })
+    vi.spyOn(controlApi, 'getStrategiesApiV1StateStrategiesGet').mockResolvedValue(
+      mockAxiosResponse({
+        data: createMockStrategiesResponse({ strategies: [disabledStrategy] }),
+      }),
+    )
+
+    renderWithRouter({ initialEntries: ['/strategies/instances'] })
+    const table = await screen.findByRole('table')
+    expect(table).toHaveTextContent('Actions')
+
+    const actionsButton = screen.getByRole('button', { name: 'Open actions menu' })
+    expect(actionsButton).toBeInTheDocument()
+  })
+
+  it('Actions column shows dropdown when strategy is enabled (Enable item disabled)', async () => {
+    vi.spyOn(controlApi, 'getStrategiesApiV1StateStrategiesGet').mockResolvedValue(
+      mockAxiosResponse({
+        data: createMockStrategiesResponse({
+          strategies: [createMockStrategyResponse({ enabled: true })],
+        }),
+      }),
+    )
+
+    renderWithRouter({ initialEntries: ['/strategies/instances'] })
+    await screen.findByRole('table')
+
+    const actionsButton = screen.getByRole('button', { name: 'Open actions menu' })
+    expect(actionsButton).toBeInTheDocument()
   })
 })
