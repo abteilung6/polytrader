@@ -241,12 +241,12 @@ class StrategyRunner:
                         logger.bind(
                             strategy_id=self.strategy.strategy_id,
                             market=event.market_slug,
+                        ).info(
+                            "Generated signal: {outcome} "
+                            "(edge={edge:.4f}, confidence={confidence:.4f})",
                             outcome=signal.outcome,
                             edge=signal.edge,
                             confidence=signal.confidence,
-                        ).info(
-                            "Generated signal: {outcome} "
-                            "(edge={edge:.4f}, confidence={confidence:.4f})"
                         )
                         # Ensure signal has correct model_id (strategy_id from registry)
                         # Note: strategy.evaluate() may return SignalEvent with different model_id
