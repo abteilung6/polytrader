@@ -5,7 +5,7 @@ Per unit_testing_technical.mdc: deterministic, fast, isolated, no I/O.
 
 import pytest
 
-from polytrader.strategies.indicators.atr import atr
+from polytrader.indicators.atr import atr
 
 
 class TestAtr:

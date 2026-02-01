@@ -10,10 +10,10 @@ from collections import defaultdict
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+from polytrader.indicators.candles.models import Candle
+
 if TYPE_CHECKING:
     from polytrader.events.types import MarketDataEvent
-
-from polytrader.strategies.candles.models import Candle
 
 
 def _parse_ts_wall(ts_wall: str) -> datetime:

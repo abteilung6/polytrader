@@ -5,7 +5,7 @@ Per unit_testing_technical.mdc: deterministic, fast, isolated, no I/O.
 
 import pytest
 
-from polytrader.strategies.indicators.rolling import ema, rolling_mean
+from polytrader.indicators.rolling import ema, rolling_mean
 
 
 class TestRollingMean:

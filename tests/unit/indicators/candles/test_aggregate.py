@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 import pytest
 
 from polytrader.events.types import MarketDataEvent
-from polytrader.strategies.candles import aggregate_ticks_to_candles
+from polytrader.indicators.candles import aggregate_ticks_to_candles
 
 
 def _event(

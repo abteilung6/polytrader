@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from polytrader.strategies.candles.models import Candle
+from polytrader.indicators.candles.models import Candle
 
 
 class TestCandle:

@@ -2,11 +2,12 @@
 
 Per flow.mdc §4: Alpha/Signal layer uses deterministic, testable logic.
 All functions in this package are pure: no I/O, no randomness, no system clock.
+Indicators live below strategy code (top-level module).
 """
 
-from polytrader.strategies.indicators.atr import atr
-from polytrader.strategies.indicators.rolling import ema, rolling_mean
-from polytrader.strategies.indicators.typical_price import typical_price
+from polytrader.indicators.atr import atr
+from polytrader.indicators.rolling import ema, rolling_mean
+from polytrader.indicators.typical_price import typical_price
 
 __all__ = [
     "atr",

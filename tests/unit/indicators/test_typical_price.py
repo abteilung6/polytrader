@@ -5,7 +5,7 @@ Per unit_testing_technical.mdc: deterministic, fast, isolated, no I/O.
 
 import pytest
 
-from polytrader.strategies.indicators.typical_price import typical_price
+from polytrader.indicators.typical_price import typical_price
 
 
 class TestTypicalPrice:
