@@ -1,0 +1,122 @@
+"""Parameter schema for Volatility-Filtered Mean Reversion strategy.
+
+Per VFMR_STRATEGY_ROADMAP §3.5: Flat schema (no nested config).
+Per model_proposal §3: All params instance-configurable with validation bounds.
+"""
+
+from polytrader.strategies.schema import ParameterDefinition, ParameterSchema
+
+VFMR_SCHEMA = ParameterSchema(
+    parameters={
+        "anchor_window": ParameterDefinition(
+            name="anchor_window",
+            type=int,
+            required=False,
+            default=96,
+            description="Rolling window for fair-price anchor (~24h of 15m candles)",
+            validation=None,
+            min_value=24,
+            max_value=500,
+        ),
+        "atr_window": ParameterDefinition(
+            name="atr_window",
+            type=int,
+            required=False,
+            default=14,
+            description="ATR period for volatility scale",
+            validation=None,
+            min_value=5,
+            max_value=100,
+        ),
+        "ema_fast": ParameterDefinition(
+            name="ema_fast",
+            type=int,
+            required=False,
+            default=20,
+            description="EMA fast period for trend filter",
+            validation=None,
+            min_value=5,
+            max_value=200,
+        ),
+        "ema_slow": ParameterDefinition(
+            name="ema_slow",
+            type=int,
+            required=False,
+            default=80,
+            description="EMA slow period for trend filter; must be > ema_fast",
+            validation=None,
+            min_value=6,
+            max_value=500,
+        ),
+        "trend_threshold": ParameterDefinition(
+            name="trend_threshold",
+            type=float,
+            required=False,
+            default=0.5,
+            description="Max trend_strength to allow trading; regime gate",
+            validation=None,
+            min_value=0.01,
+            max_value=5.0,
+        ),
+        "entry_z": ParameterDefinition(
+            name="entry_z",
+            type=float,
+            required=False,
+            default=1.5,
+            description="|z| >= entry_z to trigger entry (mean reversion threshold)",
+            validation=None,
+            min_value=0.5,
+            max_value=5.0,
+        ),
+        "exit_z": ParameterDefinition(
+            name="exit_z",
+            type=float,
+            required=False,
+            default=0.3,
+            description="|z| <= exit_z to consider exit; must be < entry_z (enforced in strategy)",
+            validation=None,
+            min_value=0.0,
+            max_value=2.0,
+        ),
+        "risk_per_trade_pct": ParameterDefinition(
+            name="risk_per_trade_pct",
+            type=float,
+            required=False,
+            default=0.25,
+            description="Risk per trade as percent of equity (0.05 to 1.0)",
+            validation=None,
+            min_value=0.05,
+            max_value=1.0,
+        ),
+        "max_position_notional_pct": ParameterDefinition(
+            name="max_position_notional_pct",
+            type=float,
+            required=False,
+            default=100.0,
+            description="Cap position size as percent of equity",
+            validation=None,
+            min_value=1.0,
+            max_value=100.0,
+        ),
+        "max_trades_per_hour": ParameterDefinition(
+            name="max_trades_per_hour",
+            type=int,
+            required=False,
+            default=4,
+            description="Throttle: max trades per hour",
+            validation=None,
+            min_value=1,
+            max_value=60,
+        ),
+        "cooldown_candles_after_loss": ParameterDefinition(
+            name="cooldown_candles_after_loss",
+            type=int,
+            required=False,
+            default=1,
+            description="Candles to wait after a loss before next trade (0 = no cooldown)",
+            validation=None,
+            min_value=0,
+            max_value=100,
+        ),
+    }
+)
