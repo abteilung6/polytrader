@@ -31,7 +31,7 @@ def create_vfmr_factory(
         Factory function that takes market_slug and returns IStrategy
 
     Note:
-        Config keys: anchor_window, atr_window, ema_fast, ema_slow,
+        Config keys: interval_minutes, anchor_window, atr_window, ema_fast, ema_slow,
         trend_threshold, entry_z, exit_z, risk_per_trade_pct,
         max_position_notional_pct, max_trades_per_hour,
         cooldown_candles_after_loss. clock=None (default real clock).
@@ -57,6 +57,7 @@ def create_vfmr_factory(
             return float(raw)
         return float(full[key])
 
+    interval_minutes = _get_int("interval_minutes")
     anchor_window = _get_int("anchor_window")
     atr_window = _get_int("atr_window")
     ema_fast = _get_int("ema_fast")
@@ -73,6 +74,7 @@ def create_vfmr_factory(
         return VolatilityFilteredMeanReversionStrategy(
             market_slug=market_slug,
             store=store,
+            interval_minutes=interval_minutes,
             anchor_window=anchor_window,
             atr_window=atr_window,
             ema_fast=ema_fast,

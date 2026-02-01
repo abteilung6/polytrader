@@ -284,6 +284,16 @@ class TestVfmrExitLogic:
 class TestVfmrConstructor:
     """Constructor validation."""
 
+    def test_interval_minutes_below_one_raises(self) -> None:
+        """interval_minutes < 1 raises ValueError."""
+        store = MemoryMarketDataStore()
+        with pytest.raises(ValueError, match="interval_minutes must be >= 1"):
+            VolatilityFilteredMeanReversionStrategy(
+                market_slug="test",
+                store=store,
+                interval_minutes=0,
+            )
+
     def test_ema_slow_le_ema_fast_raises(self) -> None:
         """ema_slow <= ema_fast raises ValueError."""
         store = MemoryMarketDataStore()

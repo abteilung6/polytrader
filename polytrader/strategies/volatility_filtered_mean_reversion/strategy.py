@@ -48,6 +48,7 @@ class VolatilityFilteredMeanReversionStrategy(IStrategy):
         self,
         market_slug: str,
         store: IMarketDataStore,
+        interval_minutes: int = 15,
         anchor_window: int = 96,
         atr_window: int = 14,
         ema_fast: int = 20,
@@ -66,6 +67,7 @@ class VolatilityFilteredMeanReversionStrategy(IStrategy):
         Args:
             market_slug: Market to trade
             store: Market data store for tick history
+            interval_minutes: Candle interval in minutes (1 = fast demo, 15 = production)
             anchor_window: Rolling window for fair-price anchor
             atr_window: ATR period
             ema_fast: EMA fast period for trend filter
@@ -85,9 +87,12 @@ class VolatilityFilteredMeanReversionStrategy(IStrategy):
             )
         if exit_z >= entry_z:
             raise ValueError(f"exit_z must be < entry_z, got exit_z={exit_z} entry_z={entry_z}")
+        if interval_minutes < 1:
+            raise ValueError(f"interval_minutes must be >= 1, got {interval_minutes}")
 
         self.market_slug = market_slug
         self.store = store
+        self.interval_minutes = interval_minutes
         self.anchor_window = anchor_window
         self.atr_window = atr_window
         self.ema_fast = ema_fast
@@ -143,7 +148,7 @@ class VolatilityFilteredMeanReversionStrategy(IStrategy):
                 return None
 
             history = self.store.history(market_data.market_slug, market_data.outcome)
-            candles = aggregate_ticks_to_candles(history, interval_minutes=15)
+            candles = aggregate_ticks_to_candles(history, interval_minutes=self.interval_minutes)
 
             if len(candles) < self._warmup_candles():
                 return None

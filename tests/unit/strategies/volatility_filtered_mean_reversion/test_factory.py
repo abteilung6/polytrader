@@ -51,6 +51,7 @@ class TestVfmrFactory:
         factory = create_vfmr_factory(config, store)
         strategy = factory("test-market")
         assert isinstance(strategy, VolatilityFilteredMeanReversionStrategy)
+        assert strategy.interval_minutes == 15
         assert strategy.anchor_window == 96
         assert strategy.atr_window == 14
         assert strategy.ema_fast == 20

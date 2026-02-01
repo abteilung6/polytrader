@@ -21,6 +21,7 @@ class TestVfmrSchema:
     def test_schema_has_expected_parameters(self) -> None:
         """Schema has all flat VFMR parameters."""
         expected = {
+            "interval_minutes",
             "anchor_window",
             "atr_window",
             "ema_fast",
@@ -35,14 +36,24 @@ class TestVfmrSchema:
         }
         assert set(VFMR_SCHEMA.parameters.keys()) == expected
 
+    def test_interval_minutes_default_and_bounds(self) -> None:
+        """interval_minutes: default 15, int, min 1, max 60."""
+        p = VFMR_SCHEMA.parameters["interval_minutes"]
+        assert p.name == "interval_minutes"
+        assert p.type is int
+        assert p.required is False
+        assert p.default == 15
+        assert p.min_value == 1
+        assert p.max_value == 60
+
     def test_anchor_window_default_and_bounds(self) -> None:
-        """anchor_window: default 96, int, min 24, max 500."""
+        """anchor_window: default 96, int, min 2, max 500."""
         p = VFMR_SCHEMA.parameters["anchor_window"]
         assert p.name == "anchor_window"
         assert p.type is int
         assert p.required is False
         assert p.default == 96
-        assert p.min_value == 24
+        assert p.min_value == 2
         assert p.max_value == 500
 
     def test_entry_z_default_and_bounds(self) -> None:
@@ -61,6 +72,7 @@ class TestVfmrSchema:
     def test_validate_config_with_defaults(self) -> None:
         """Config with default values is valid."""
         config = {
+            "interval_minutes": 15,
             "anchor_window": 96,
             "atr_window": 14,
             "ema_fast": 20,
@@ -77,8 +89,8 @@ class TestVfmrSchema:
         assert errors == []
 
     def test_validate_anchor_window_below_minimum(self) -> None:
-        """anchor_window below 24 is invalid."""
-        config = {"anchor_window": 20}
+        """anchor_window below 2 is invalid."""
+        config = {"anchor_window": 1}
         errors = VFMR_SCHEMA.validate(config)
         assert len(errors) >= 1
         assert any("anchor_window" in err and "less than minimum" in err for err in errors)
@@ -123,6 +135,7 @@ class TestVfmrSchema:
         config: dict[str, object] = {}
         result = VFMR_SCHEMA.apply_defaults(config)
 
+        assert result["interval_minutes"] == 15
         assert result["anchor_window"] == 96
         assert result["atr_window"] == 14
         assert result["ema_fast"] == 20
@@ -137,9 +150,10 @@ class TestVfmrSchema:
 
     def test_apply_defaults_partial_config(self) -> None:
         """apply_defaults only fills missing parameters."""
-        config = {"anchor_window": 48, "entry_z": 2.0}
+        config = {"interval_minutes": 1, "anchor_window": 48, "entry_z": 2.0}
         result = VFMR_SCHEMA.apply_defaults(config)
 
+        assert result["interval_minutes"] == 1
         assert result["anchor_window"] == 48
         assert result["entry_z"] == 2.0
         assert result["atr_window"] == 14

@@ -8,6 +8,16 @@ from polytrader.strategies.schema import ParameterDefinition, ParameterSchema
 
 VFMR_SCHEMA = ParameterSchema(
     parameters={
+        "interval_minutes": ParameterDefinition(
+            name="interval_minutes",
+            type=int,
+            required=False,
+            default=15,
+            description="Candle interval in minutes (1 = fast demo, 15 = production)",
+            validation=None,
+            min_value=1,
+            max_value=60,
+        ),
         "anchor_window": ParameterDefinition(
             name="anchor_window",
             type=int,
@@ -15,7 +25,7 @@ VFMR_SCHEMA = ParameterSchema(
             default=96,
             description="Rolling window for fair-price anchor (~24h of 15m candles)",
             validation=None,
-            min_value=24,
+            min_value=2,
             max_value=500,
         ),
         "atr_window": ParameterDefinition(
@@ -25,7 +35,7 @@ VFMR_SCHEMA = ParameterSchema(
             default=14,
             description="ATR period for volatility scale",
             validation=None,
-            min_value=5,
+            min_value=2,
             max_value=100,
         ),
         "ema_fast": ParameterDefinition(
@@ -35,7 +45,7 @@ VFMR_SCHEMA = ParameterSchema(
             default=20,
             description="EMA fast period for trend filter",
             validation=None,
-            min_value=5,
+            min_value=2,
             max_value=200,
         ),
         "ema_slow": ParameterDefinition(
@@ -45,7 +55,7 @@ VFMR_SCHEMA = ParameterSchema(
             default=80,
             description="EMA slow period for trend filter; must be > ema_fast",
             validation=None,
-            min_value=6,
+            min_value=4,
             max_value=500,
         ),
         "trend_threshold": ParameterDefinition(
