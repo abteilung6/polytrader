@@ -1,4 +1,5 @@
 import type { ColumnDef } from '@tanstack/react-table'
+import { Link } from '@tanstack/react-router'
 import { ArrowUpDown } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
@@ -18,21 +19,8 @@ function formatTs(v: unknown): string {
 
 export const strategyOrderColumns: ColumnDef<StrategyOrderItem>[] = [
   {
-    accessorKey: 'order_id',
-    header: ({ column }) => (
-      <Button variant="ghost" onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}>
-        Order ID
-        <ArrowUpDown className="ml-2 size-4" />
-      </Button>
-    ),
-    cell: ({ row }) => (
-      <span className="font-mono text-muted-foreground text-xs break-all">
-        {String(row.getValue('order_id'))}
-      </span>
-    ),
-  },
-  {
     accessorKey: 'ts_wall',
+    meta: { className: 'w-[10rem]' },
     header: ({ column }) => (
       <Button variant="ghost" onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}>
         Time
@@ -53,7 +41,18 @@ export const strategyOrderColumns: ColumnDef<StrategyOrderItem>[] = [
         <ArrowUpDown className="ml-2 size-4" />
       </Button>
     ),
-    cell: ({ row }) => <span className="font-medium">{row.getValue('market_slug')}</span>,
+    cell: ({ row }) => {
+      const slug = String(row.getValue('market_slug'))
+      return (
+        <Link
+          to="/markets/$marketSlug"
+          params={{ marketSlug: slug }}
+          className="font-medium hover:underline"
+        >
+          {slug}
+        </Link>
+      )
+    },
   },
   {
     accessorKey: 'side',

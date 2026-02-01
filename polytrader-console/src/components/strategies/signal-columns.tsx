@@ -1,4 +1,5 @@
 import type { ColumnDef } from '@tanstack/react-table'
+import { Link } from '@tanstack/react-router'
 import { ArrowUpDown } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -26,6 +27,7 @@ function formatNum(n: number, decimals = 4): string {
 export const strategySignalColumns: ColumnDef<StrategySignalItem>[] = [
   {
     accessorKey: 'ts_wall',
+    meta: { className: 'w-[10rem]' },
     header: ({ column }) => (
       <Button variant="ghost" onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}>
         Time
@@ -46,7 +48,18 @@ export const strategySignalColumns: ColumnDef<StrategySignalItem>[] = [
         <ArrowUpDown className="ml-2 size-4" />
       </Button>
     ),
-    cell: ({ row }) => <span className="font-medium">{row.getValue('market_slug')}</span>,
+    cell: ({ row }) => {
+      const slug = String(row.getValue('market_slug'))
+      return (
+        <Link
+          to="/markets/$marketSlug"
+          params={{ marketSlug: slug }}
+          className="font-medium hover:underline"
+        >
+          {slug}
+        </Link>
+      )
+    },
   },
   {
     accessorKey: 'outcome',
