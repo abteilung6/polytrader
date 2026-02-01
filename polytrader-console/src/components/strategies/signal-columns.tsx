@@ -25,20 +25,6 @@ function formatNum(n: number, decimals = 4): string {
 
 export const strategySignalColumns: ColumnDef<StrategySignalItem>[] = [
   {
-    accessorKey: 'event_id',
-    header: ({ column }) => (
-      <Button variant="ghost" onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}>
-        Event ID
-        <ArrowUpDown className="ml-2 size-4" />
-      </Button>
-    ),
-    cell: ({ row }) => (
-      <span className="font-mono text-muted-foreground text-xs">
-        {String(row.getValue('event_id')).slice(0, 8)}…
-      </span>
-    ),
-  },
-  {
     accessorKey: 'ts_wall',
     header: ({ column }) => (
       <Button variant="ghost" onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}>

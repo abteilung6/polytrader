@@ -43,7 +43,7 @@ export interface ClosedTradeItem {
      */
     'entry_price': number;
     /**
-     * Exit fill price
+     * Exit fill/settlement price (0 allowed for binary settlement)
      */
     'exit_price': number;
     /**

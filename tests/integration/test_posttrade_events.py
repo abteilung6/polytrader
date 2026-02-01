@@ -9,16 +9,27 @@ import asyncio
 
 import pytest
 
-from polytrader.events import FILLS, MARKET_DATA, PNL_UPDATES, POSITION_UPDATES, EventBus
+from polytrader.events import (
+    FILLS,
+    MARKET_CHANGE,
+    MARKET_DATA,
+    PNL_UPDATES,
+    POSITION_UPDATES,
+    PROPOSALS,
+    STRATEGY_CLOSED_TRADES,
+    EventBus,
+)
 from polytrader.events.store import MemoryEventStore
 from polytrader.events.types import (
     FillEvent,
+    MarketChangeEvent,
     MarketDataEvent,
     OrderAckEvent,
     OrderIntentEvent,
     OrderSubmittedEvent,
     PnLEvent,
     PositionUpdatedEvent,
+    StrategyClosedTradeEvent,
 )
 from polytrader.oms.store import InMemoryOrderStore
 from polytrader.position_manager.paper import PaperPositionManager
@@ -430,6 +441,277 @@ class TestPositionUpdatedEvent:
             assert position_event.update_type == "closed"
             assert position_event.net_position == 0.0
             assert position_event.size == 0.0
+        finally:
+            position_manager.stop()
+            position_task.cancel()
+            try:
+                await position_task
+            except asyncio.CancelledError:
+                pass
+
+
+class TestStrategyClosedTradeEvent:
+    """Tests for StrategyClosedTradeEvent (Past Performance)."""
+
+    @pytest.mark.asyncio
+    async def test_closed_trade_attributed_to_opening_strategy_when_sell_has_position_manager(
+        self,
+        bus: EventBus,
+        position_manager: PaperPositionManager,
+        order_store: InMemoryOrderStore,
+    ) -> None:
+        """SELL from target-price (strategy_id=position_manager) attributes to opener.
+
+        When PositionManager generates a SELL proposal (target price reached), the order
+        has strategy_id='position_manager'. The position was opened by the strategy instance.
+        PaperPositionManager must use _position_strategy to attribute the close to the
+        correct strategy so Past Performance shows the trade under the strategy.
+        """
+        closed_queue = bus.subscribe(STRATEGY_CLOSED_TRADES)
+
+        buy_intent = OrderIntentEvent(
+            market_slug="test-market",
+            outcome="UP",
+            side="BUY",
+            target_price=0.5,
+            limit_price=0.45,
+            size=100.0,
+            reason="Test buy",
+            correlation_id="corr-buy",
+            strategy_id="my-strategy-instance-id",
+        )
+        buy_order = await order_store.create_order(buy_intent, "client-buy")
+        order_store.handle_order_submitted(
+            OrderSubmittedEvent(order_id=buy_order.order_id, client_order_id="client-buy")
+        )
+        order_store.handle_order_ack(
+            OrderAckEvent(
+                order_id=buy_order.order_id,
+                venue_order_id="venue-buy",
+                correlation_id=buy_intent.correlation_id,
+            )
+        )
+
+        position_task = asyncio.create_task(position_manager.run())
+        await asyncio.sleep(0.1)
+
+        try:
+            await bus.publish(
+                FILLS,
+                FillEvent(
+                    order_id=buy_order.order_id,
+                    fill_id="fill-buy",
+                    size=100.0,
+                    price=0.45,
+                    fee=0.01,
+                    correlation_id=buy_intent.correlation_id,
+                ),
+            )
+            await asyncio.sleep(0.2)
+
+            sell_intent = OrderIntentEvent(
+                market_slug="test-market",
+                outcome="UP",
+                side="SELL",
+                target_price=0.5,
+                limit_price=0.55,
+                size=100.0,
+                reason="Target price reached",
+                correlation_id="corr-sell",
+                strategy_id="position_manager",
+            )
+            sell_order = await order_store.create_order(sell_intent, "client-sell")
+            order_store.handle_order_submitted(
+                OrderSubmittedEvent(order_id=sell_order.order_id, client_order_id="client-sell")
+            )
+            order_store.handle_order_ack(
+                OrderAckEvent(
+                    order_id=sell_order.order_id,
+                    venue_order_id="venue-sell",
+                    correlation_id=sell_intent.correlation_id,
+                )
+            )
+
+            await bus.publish(
+                FILLS,
+                FillEvent(
+                    order_id=sell_order.order_id,
+                    fill_id="fill-sell",
+                    size=100.0,
+                    price=0.55,
+                    fee=0.01,
+                    correlation_id=sell_intent.correlation_id,
+                ),
+            )
+            await asyncio.sleep(0.3)
+
+            assert not closed_queue.empty(), "StrategyClosedTradeEvent was not emitted"
+            closed_event = await closed_queue.get()
+            assert isinstance(closed_event, StrategyClosedTradeEvent)
+            assert closed_event.strategy_id == "my-strategy-instance-id"
+            assert closed_event.market_slug == "test-market"
+            assert closed_event.outcome == "UP"
+            assert closed_event.pnl == pytest.approx(10.0)
+        finally:
+            position_manager.stop()
+            position_task.cancel()
+            try:
+                await position_task
+            except asyncio.CancelledError:
+                pass
+
+    @pytest.mark.asyncio
+    async def test_market_expiry_close_emits_strategy_closed_trade_event(
+        self,
+        bus: EventBus,
+        position_manager: PaperPositionManager,
+        order_store: InMemoryOrderStore,
+    ) -> None:
+        """MarketChangeEvent (expired market) close emits StrategyClosedTradeEvent.
+
+        When the supervisor publishes MarketChangeEvent (old_market → new_market),
+        PaperPositionManager closes positions in the old market at settlement price
+        and must emit StrategyClosedTradeEvent so Past Performance shows the trade.
+        """
+        closed_queue = bus.subscribe(STRATEGY_CLOSED_TRADES)
+        old_market = "btc-updown-15m-1769943600"
+        new_market = "btc-updown-15m-1769944500"
+
+        buy_intent = OrderIntentEvent(
+            market_slug=old_market,
+            outcome="UP",
+            side="BUY",
+            target_price=0.975,
+            limit_price=0.97,
+            size=1.0,
+            reason="Test buy",
+            correlation_id="corr-expiry",
+            strategy_id="market-data-collector",
+        )
+        buy_order = await order_store.create_order(buy_intent, "client-expiry")
+        order_store.handle_order_submitted(
+            OrderSubmittedEvent(order_id=buy_order.order_id, client_order_id="client-expiry")
+        )
+        order_store.handle_order_ack(
+            OrderAckEvent(
+                order_id=buy_order.order_id,
+                venue_order_id="venue-expiry",
+                correlation_id=buy_intent.correlation_id,
+            )
+        )
+
+        position_task = asyncio.create_task(position_manager.run())
+        await asyncio.sleep(0.1)
+
+        try:
+            await bus.publish(
+                FILLS,
+                FillEvent(
+                    order_id=buy_order.order_id,
+                    fill_id="fill-expiry",
+                    size=1.0,
+                    price=0.975,
+                    fee=0.0,
+                    correlation_id=buy_intent.correlation_id,
+                ),
+            )
+            await asyncio.sleep(0.15)
+
+            market_change = MarketChangeEvent(
+                old_market=old_market,
+                new_market=new_market,
+                correlation_id="corr-market-change",
+            )
+            await bus.publish(MARKET_CHANGE, market_change)
+            await asyncio.sleep(0.2)
+
+            assert not closed_queue.empty(), "StrategyClosedTradeEvent was not emitted"
+            closed_event = await closed_queue.get()
+            assert isinstance(closed_event, StrategyClosedTradeEvent)
+            assert closed_event.strategy_id == "market-data-collector"
+            assert closed_event.market_slug == old_market
+            assert closed_event.outcome == "UP"
+            assert closed_event.execution_mode == "paper"
+            assert closed_event.order_id == ""
+            assert closed_event.fill_id == ""
+            assert closed_event.correlation_id == "corr-market-change"
+        finally:
+            position_manager.stop()
+            position_task.cancel()
+            try:
+                await position_task
+            except asyncio.CancelledError:
+                pass
+
+
+class TestPaperPositionManagerTargetPriceSell:
+    """PaperPositionManager publishes SELL to PROPOSALS when mid >= target (platform mode)."""
+
+    @pytest.mark.asyncio
+    async def test_market_data_mid_above_target_publishes_sell_proposal(
+        self,
+        bus: EventBus,
+        position_manager: PaperPositionManager,
+        order_store: InMemoryOrderStore,
+        sample_intent: OrderIntentEvent,
+    ) -> None:
+        """When market data has mid >= position.target_price, PaperPositionManager publishes SELL.
+
+        In platform mode only PaperPositionManager runs; it must emit target-price SELLs
+        so positions can close and StrategyClosedTradeEvent (Past Performance) appears.
+        """
+        proposals_queue = bus.subscribe(PROPOSALS)
+
+        order = await order_store.create_order(sample_intent, "client-123")
+        order_store.handle_order_submitted(
+            OrderSubmittedEvent(order_id=order.order_id, client_order_id="client-123")
+        )
+        order_store.handle_order_ack(
+            OrderAckEvent(
+                order_id=order.order_id,
+                venue_order_id="venue-456",
+                correlation_id=sample_intent.correlation_id,
+            )
+        )
+
+        position_task = asyncio.create_task(position_manager.run())
+        await asyncio.sleep(0.1)
+
+        try:
+            await bus.publish(
+                FILLS,
+                FillEvent(
+                    order_id=order.order_id,
+                    fill_id="fill-789",
+                    size=100.0,
+                    price=0.45,
+                    fee=0.01,
+                    correlation_id=sample_intent.correlation_id,
+                ),
+            )
+            await asyncio.sleep(0.2)
+
+            # Position has target_price=0.5 (from sample_intent). best_bid/ask => mid=0.55 >= 0.5.
+            await bus.publish(
+                MARKET_DATA,
+                MarketDataEvent(
+                    market_slug="test-market",
+                    outcome="UP",
+                    best_bid=0.54,
+                    best_ask=0.56,
+                    correlation_id="corr-md",
+                ),
+            )
+            await asyncio.sleep(0.2)
+
+            assert not proposals_queue.empty(), "SELL proposal was not published"
+            proposal = await proposals_queue.get()
+            assert isinstance(proposal, OrderIntentEvent)
+            assert proposal.side == "SELL"
+            assert proposal.market_slug == "test-market"
+            assert proposal.outcome == "UP"
+            assert proposal.size == 100.0
+            assert proposal.target_price == 0.5
         finally:
             position_manager.stop()
             position_task.cancel()

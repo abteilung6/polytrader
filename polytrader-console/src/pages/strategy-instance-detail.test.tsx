@@ -88,7 +88,6 @@ describe('StrategyInstanceDetailPage', () => {
       expect(rows).toHaveLength(2)
 
       const headerRow = rows[0]
-      expect(headerRow).toHaveTextContent('Event ID')
       expect(headerRow).toHaveTextContent('Market')
       expect(headerRow).toHaveTextContent('Rationale')
 
@@ -171,12 +170,12 @@ describe('StrategyInstanceDetailPage', () => {
 
       const headerRow = rows[0]
       expect(headerRow).toHaveTextContent('Order ID')
-      expect(headerRow).toHaveTextContent('Client order ID')
       expect(headerRow).toHaveTextContent('Market')
       expect(headerRow).toHaveTextContent('Side')
       expect(headerRow).toHaveTextContent('Status')
 
       const dataRow = rows[1]
+      expect(dataRow).toHaveTextContent('ord-001')
       expect(dataRow).toHaveTextContent('btc-updown-15m')
       expect(dataRow).toHaveTextContent('BUY')
       expect(dataRow).toHaveTextContent('LIVE')

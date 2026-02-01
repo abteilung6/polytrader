@@ -1385,10 +1385,10 @@
           },
           "exit_price": {
             "type": "number",
+            "minimum": 0.0,
             "maximum": 1.0,
-            "exclusiveMinimum": 0.0,
             "title": "Exit Price",
-            "description": "Exit fill price"
+            "description": "Exit fill/settlement price (0 allowed for binary settlement)"
           },
           "size": {
             "type": "number",

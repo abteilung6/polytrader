@@ -26,22 +26,8 @@ export const strategyOrderColumns: ColumnDef<StrategyOrderItem>[] = [
       </Button>
     ),
     cell: ({ row }) => (
-      <span className="font-mono text-muted-foreground text-xs">
-        {String(row.getValue('order_id')).slice(0, 8)}…
-      </span>
-    ),
-  },
-  {
-    accessorKey: 'client_order_id',
-    header: ({ column }) => (
-      <Button variant="ghost" onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}>
-        Client order ID
-        <ArrowUpDown className="ml-2 size-4" />
-      </Button>
-    ),
-    cell: ({ row }) => (
-      <span className="font-mono text-muted-foreground text-xs">
-        {String(row.getValue('client_order_id')).slice(0, 8)}…
+      <span className="font-mono text-muted-foreground text-xs break-all">
+        {String(row.getValue('order_id'))}
       </span>
     ),
   },

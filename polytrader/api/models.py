@@ -302,7 +302,10 @@ class ClosedTradeItem(BaseModel):
     exit_time: float = Field(description="Exit time (monotonic)")
     exit_ts_wall: datetime = Field(description="Exit wall-clock time (UTC)")
     entry_price: float = Field(gt=0, le=1, description="Average entry price")
-    exit_price: float = Field(gt=0, le=1, description="Exit fill price")
+    exit_price: float = Field(
+        ge=0, le=1,
+        description="Exit fill/settlement price (0 allowed for binary settlement)",
+    )
     size: float = Field(gt=0, description="Position size in USD")
     pnl: float = Field(description="Realized P&L in USD")
     pnl_pct: float = Field(description="Realized P&L as percentage")

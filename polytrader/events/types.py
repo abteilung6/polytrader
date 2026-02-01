@@ -1080,8 +1080,8 @@ class StrategyClosedTradeEvent(Event):
         exit_time: Monotonic timestamp when position was closed
         result: "WIN" if pnl > 0, "LOSS" if pnl < 0, "BREAKEVEN" if pnl == 0
         execution_mode: "paper" or "live"
-        order_id: Internal order UUID that caused the close
-        fill_id: Internal fill UUID for the closing fill
+        order_id: Internal order UUID that caused the close (empty for market-expiry)
+        fill_id: Internal fill UUID for the closing fill (empty for market-expiry)
     """
 
     source: EventSource = Field(default=EventSource.POSTTRADE)
@@ -1090,7 +1090,11 @@ class StrategyClosedTradeEvent(Event):
     market_slug: str = Field(description="Polymarket market identifier")
     outcome: Outcome = Field(description="Market outcome: UP or DOWN")
     entry_price: float = Field(gt=0, le=1, description="Average entry price for the position")
-    exit_price: float = Field(gt=0, le=1, description="Fill price when position was closed")
+    exit_price: float = Field(
+        ge=0,
+        le=1,
+        description="Fill/settlement price when position was closed (0 allowed for settlement)",
+    )
     size: float = Field(gt=0, description="Position size in USD")
     pnl: float = Field(description="Realized P&L in USD")
     pnl_pct: float = Field(description="Realized P&L as percentage")
@@ -1100,8 +1104,12 @@ class StrategyClosedTradeEvent(Event):
         description="WIN if pnl > 0, LOSS if pnl < 0, BREAKEVEN if pnl == 0"
     )
     execution_mode: Literal["paper", "live"] = Field(description="Execution mode: paper or live")
-    order_id: str = Field(description="Internal order UUID that caused the close")
-    fill_id: str = Field(description="Internal fill UUID for the closing fill")
+    order_id: str = Field(
+        description="Internal order UUID that caused the close (empty for market-expiry)"
+    )
+    fill_id: str = Field(
+        description="Internal fill UUID for the closing fill (empty for market-expiry)"
+    )
 
 
 class CancelRequestedEvent(Event):

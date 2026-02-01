@@ -12,7 +12,7 @@ Name | Type | Description | Notes
 **exit_time** | **number** | Exit time (monotonic) | [default to undefined]
 **exit_ts_wall** | **string** | Exit wall-clock time (UTC) | [default to undefined]
 **entry_price** | **number** | Average entry price | [default to undefined]
-**exit_price** | **number** | Exit fill price | [default to undefined]
+**exit_price** | **number** | Exit fill/settlement price (0 allowed for binary settlement) | [default to undefined]
 **size** | **number** | Position size in USD | [default to undefined]
 **pnl** | **number** | Realized P&amp;L in USD | [default to undefined]
 **pnl_pct** | **number** | Realized P&amp;L as percentage | [default to undefined]

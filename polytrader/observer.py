@@ -134,7 +134,7 @@ class Observer(IObserver):
             bid=event.best_bid,
             ask=event.best_ask,
             mid=event.mid,
-        ).info(
+        ).debug(
             "📊 {market_slug}/{outcome} bid={bid:.4f} ask={ask:.4f} mid={mid:.4f}",
             market_slug=event.market_slug,
             outcome=event.outcome,
