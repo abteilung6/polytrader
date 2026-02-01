@@ -37,9 +37,13 @@ def test_list_strategy_templates(client: TestClient) -> None:
     assert "types" in data
     assert isinstance(data["types"], list)
 
-    # Should have at least simple_threshold template
+    # Should have both simple_threshold and volatility_filtered_mean_reversion (Commit 8)
     types = data["types"]
-    assert len(types) > 0
+    assert len(types) >= 2
+
+    type_ids = {t["type_id"] for t in types}
+    assert "simple_threshold" in type_ids
+    assert "volatility_filtered_mean_reversion" in type_ids
 
     # Find simple_threshold template
     simple_threshold = next((t for t in types if t["type_id"] == "simple_threshold"), None)
@@ -75,6 +79,17 @@ def test_list_strategy_templates(client: TestClient) -> None:
     assert min_history_param["default"] == 30
     assert min_history_param["minimum"] == 0
     assert "Minimum history ticks" in min_history_param["description"]
+
+    # VFMR template (Commit 8)
+    vfmr = next((t for t in types if t["type_id"] == "volatility_filtered_mean_reversion"), None)
+    assert vfmr is not None
+    assert vfmr["type_id"] == "volatility_filtered_mean_reversion"
+    assert "1.0.0" in vfmr.get("available_versions", [])
+    assert "parameter_schema" in vfmr
+    vfmr_schema = vfmr["parameter_schema"]
+    assert "properties" in vfmr_schema
+    assert "anchor_window" in vfmr_schema["properties"]
+    assert "entry_z" in vfmr_schema["properties"]
 
 
 @pytest.mark.integration
@@ -121,6 +136,28 @@ def test_get_strategy_template_not_found(client: TestClient) -> None:
     assert "error" in data["detail"]
     assert "Template not found" in data["detail"]["error"]
     assert "nonexistent_template" in data["detail"]["detail"]
+
+
+@pytest.mark.integration
+def test_get_strategy_template_vfmr(client: TestClient) -> None:
+    """Test GET /state/strategies/templates/volatility_filtered_mean_reversion.
+
+    Commit 8: VFMR template is discoverable and returns parameter schema.
+    """
+    response = client.get("/api/v1/state/strategies/templates/volatility_filtered_mean_reversion")
+
+    assert response.status_code == 200
+    data = response.json()
+
+    assert data["type_id"] == "volatility_filtered_mean_reversion"
+    assert "1.0.0" in data.get("available_versions", [])
+    assert "parameter_schema" in data
+    schema = data["parameter_schema"]
+    assert schema["type"] == "object"
+    assert "properties" in schema
+    assert "anchor_window" in schema["properties"]
+    assert "entry_z" in schema["properties"]
+    assert "trend_threshold" in schema["properties"]
 
 
 @pytest.mark.integration
