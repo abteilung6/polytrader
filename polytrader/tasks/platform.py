@@ -38,6 +38,7 @@ from polytrader.platform.control import (
 )
 from polytrader.platform.control_plane import ControlPlaneService
 from polytrader.platform.orchestrator import PlatformOrchestrator
+from polytrader.platform.registry import StrategyRegistry
 from polytrader.position_manager.paper import PaperPositionManager
 from polytrader.store_factory import create_market_data_store
 
@@ -144,12 +145,14 @@ async def platform_start_task(
         command_repo = ControlCommandRepository(control_session)
         execution_repo = ExecutionControlRepository(control_session)
         live_repo = LiveStrategyRepository(control_session)
+        strategy_registry = StrategyRegistry(control_session)
 
         # Create control plane service
         control_plane_service = ControlPlaneService(
             command_repo=command_repo,
             execution_repo=execution_repo,
             live_repo=live_repo,
+            strategy_registry=strategy_registry,
             execution_control=execution_control,
             bus=bus,
             poll_interval_s=1.0,

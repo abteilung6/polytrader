@@ -491,6 +491,94 @@ async def test_stop_cancels_tasks(
 
 
 @pytest.mark.asyncio
+async def test_market_slug_change_resets_strategy_instance(
+    strategy_record: StrategyRecord,
+    bus: EventBus,
+    store: IMarketDataStore,
+    market_supervisor: MarketSupervisor,
+    strategy_factory: Callable[[str], IStrategy],
+    session: "AsyncSession",
+) -> None:
+    """When current market (slug) changes, runner resets and creates strategy for new market."""
+    # Track which market_slugs the factory was called with
+    created_markets: list[str] = []
+
+    def tracking_factory(market_slug: str) -> IStrategy:
+        created_markets.append(market_slug)
+        return strategy_factory(market_slug)
+
+    await market_supervisor.start()
+    # Supervisor's current_market is set by discovery to "test-market-1"
+    assert market_supervisor.current_market == "test-market-1"
+
+    runner = StrategyRunner(
+        strategy=strategy_record,
+        bus=bus,
+        store=store,
+        market_supervisor=market_supervisor,
+        strategy_factory=tracking_factory,
+        session=session,
+    )
+    await runner.start()
+
+    signals_received: list[SignalEvent] = []
+    signals_queue = bus.subscribe(SIGNALS)
+
+    async def collect_signals() -> None:
+        while True:
+            try:
+                event = await asyncio.wait_for(signals_queue.get(), timeout=0.5)
+                signals_received.append(event)
+            except TimeoutError:
+                break
+
+    collect_task = asyncio.create_task(collect_signals())
+
+    # First market: publish event for test-market-1
+    await bus.publish(
+        MARKET_DATA,
+        MarketDataEvent(
+            market_slug="test-market-1",
+            outcome="UP",
+            best_bid=0.49,
+            best_ask=0.51,
+        ),
+    )
+    await asyncio.sleep(0.15)
+
+    # Simulate slug change (e.g. 15m roll)
+    market_supervisor.current_market = "test-market-2"
+
+    # Second market: publish event for test-market-2
+    await bus.publish(
+        MARKET_DATA,
+        MarketDataEvent(
+            market_slug="test-market-2",
+            outcome="DOWN",
+            best_bid=0.48,
+            best_ask=0.52,
+        ),
+    )
+    await asyncio.sleep(0.15)
+
+    collect_task.cancel()
+    try:
+        await collect_task
+    except asyncio.CancelledError:
+        pass
+
+    await runner.stop()
+
+    # Runner should have created strategy for market-1, then after slug change for market-2
+    assert created_markets == ["test-market-1", "test-market-2"]
+    # Should have received signals for both markets
+    assert len(signals_received) >= 2
+    market_slugs = [s.market_slug for s in signals_received]
+    assert "test-market-1" in market_slugs
+    assert "test-market-2" in market_slugs
+
+
+@pytest.mark.asyncio
 async def test_evaluation_errors_handled(
     strategy_record: StrategyRecord,
     bus: EventBus,

@@ -35,6 +35,12 @@ def register_all_strategies(registry: StrategyRegistry) -> None:
     from polytrader.strategies.simple_threshold.schema import (
         SIMPLE_THRESHOLD_SCHEMA,
     )
+    from polytrader.strategies.volatility_filtered_mean_reversion.factory import (
+        create_vfmr_factory,
+    )
+    from polytrader.strategies.volatility_filtered_mean_reversion.schema import (
+        VFMR_SCHEMA,
+    )
 
     # Register simple_threshold strategy
     registry.register(
@@ -46,4 +52,16 @@ def register_all_strategies(registry: StrategyRegistry) -> None:
         factory=create_simple_threshold_factory,
     )
 
-    # Register other strategies as they are implemented...
+    # Register volatility_filtered_mean_reversion strategy (warm start across slug rolls)
+    registry.register(
+        type_id="volatility_filtered_mean_reversion",
+        version="1.0.0",
+        name="Volatility-Filtered Mean Reversion",
+        description=(
+            "Mean reversion with trend gate: trades when trend_strength <= threshold; "
+            "entry on |z| >= entry_z, exit when z crosses exit_z"
+        ),
+        parameter_schema=VFMR_SCHEMA,
+        factory=create_vfmr_factory,
+        use_pattern_history=True,
+    )

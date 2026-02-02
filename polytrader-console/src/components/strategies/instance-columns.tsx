@@ -1,10 +1,16 @@
 import type { ColumnDef } from '@tanstack/react-table'
 import { Link } from '@tanstack/react-router'
-import { ArrowUpDown } from 'lucide-react'
+import { ArrowUpDown, MoreVertical } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { useActivateStrategy, useDeactivateStrategy } from '@/hooks/strategy-instances'
 import type { StrategyResponse } from '@/lib/api'
 
 function formatCreatedAt(v: unknown): string {
@@ -15,6 +21,40 @@ function formatCreatedAt(v: unknown): string {
   } catch {
     return '—'
   }
+}
+
+/** Actions cell: dropdown always has one item — Enable when disabled, Disable when enabled. Source of truth: StrategyResponse.enabled (from GET /api/v1/state/strategies). */
+function StrategyInstanceActionsCell({ strategy }: { strategy: StrategyResponse }) {
+  const activateMutation = useActivateStrategy(strategy.strategy_id)
+  const deactivateMutation = useDeactivateStrategy(strategy.strategy_id)
+  const isPending = activateMutation.isPending || deactivateMutation.isPending
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon" className="size-8" aria-label="Open actions menu">
+          <MoreVertical className="size-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-32">
+        {strategy.enabled ? (
+          <DropdownMenuItem
+            onClick={() => deactivateMutation.mutate()}
+            disabled={isPending}
+          >
+            {deactivateMutation.isPending ? 'Disabling…' : 'Disable'}
+          </DropdownMenuItem>
+        ) : (
+          <DropdownMenuItem
+            onClick={() => activateMutation.mutate()}
+            disabled={isPending}
+          >
+            {activateMutation.isPending ? 'Enabling…' : 'Enable'}
+          </DropdownMenuItem>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
 }
 
 export const strategyInstanceColumns: ColumnDef<StrategyResponse>[] = [
@@ -96,5 +136,12 @@ export const strategyInstanceColumns: ColumnDef<StrategyResponse>[] = [
         {formatCreatedAt(row.getValue('created_at'))}
       </span>
     ),
+  },
+  {
+    id: 'actions',
+    header: 'Actions',
+    cell: ({ row }) => <StrategyInstanceActionsCell strategy={row.original} />,
+    enableSorting: false,
+    enableHiding: false,
   },
 ]

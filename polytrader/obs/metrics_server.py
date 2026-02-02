@@ -59,13 +59,10 @@ def start_metrics_server(
     # the caller should pass that registry here
     metrics_registry = registry or REGISTRY
 
-    def run_server() -> None:
-        """Run the Prometheus HTTP server (blocking)."""
-        start_http_server(port, registry=metrics_registry)
-
-    # Create and start daemon thread
-    thread = threading.Thread(target=run_server, daemon=True, name="metrics-server")
-    thread.start()
+    # prometheus_client.start_http_server starts its own daemon thread and returns
+    # (server, thread). We return that thread so callers can assert thread.is_alive().
+    _server, thread = start_http_server(port, registry=metrics_registry)
+    thread.name = "metrics-server"
 
     # Store reference for potential cleanup
     _metrics_server_thread = thread

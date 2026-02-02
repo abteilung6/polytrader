@@ -273,6 +273,47 @@ def test_create_strategy(client: TestClient) -> None:
     StrategyResponse(**data)  # Should not raise
 
 
+def test_create_strategy_vfmr(client: TestClient) -> None:
+    """Test POST /commands/strategies with volatility_filtered_mean_reversion template.
+
+    Commit 8: Full stack supports VFMR as second template; create with valid config succeeds.
+    """
+    import uuid
+
+    strategy_id = f"vfmr-strategy-{uuid.uuid4().hex[:8]}"
+    request = {
+        "strategy_id": strategy_id,
+        "name": "VFMR Strategy",
+        "description": "Volatility-Filtered Mean Reversion instance",
+        "config": {
+            "anchor_window": 96,
+            "atr_window": 14,
+            "ema_fast": 20,
+            "ema_slow": 80,
+            "trend_threshold": 0.5,
+            "entry_z": 1.5,
+            "exit_z": 0.3,
+            "risk_per_trade_pct": 0.25,
+            "max_position_notional_pct": 100.0,
+            "max_trades_per_hour": 4,
+            "cooldown_candles_after_loss": 1,
+        },
+        "template_type_id": "volatility_filtered_mean_reversion",
+        "version_selector": {"exact": "1.0.0"},
+        "desired_state": "STOPPED",
+    }
+
+    response = client.post("/api/v1/commands/strategies", json=request)
+    assert response.status_code == 201
+    data = response.json()
+    assert data["strategy_id"] == strategy_id
+    assert data["name"] == "VFMR Strategy"
+    assert data["template_type_id"] == "volatility_filtered_mean_reversion"
+    assert data["template_version"] == "1.0.0"
+    assert data["config"]["anchor_window"] == 96
+    assert data["config"]["entry_z"] == 1.5
+
+
 def test_create_strategy_duplicate(client: TestClient, test_strategy: str) -> None:
     """Test POST /commands/strategies returns 409 for duplicate strategy_id."""
     request = {

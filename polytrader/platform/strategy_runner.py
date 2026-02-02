@@ -104,6 +104,7 @@ class StrategyRunner:
 
         self._running = False
         self._strategy_instance: IStrategy | None = None
+        self._strategy_market_slug: str | None = None
         self._subscription: asyncio.Queue[MarketDataEvent] | None = None
         self._evaluation_task: asyncio.Task | None = None
         self._background_task: asyncio.Task | None = None
@@ -221,9 +222,35 @@ class StrategyRunner:
                 if event.market_slug != self.market_supervisor.current_market:
                     continue
 
-                # Create strategy instance on first market data if not created yet
+                # When current market (slug) changes, reset strategy instance for the new market
+                if (
+                    self._strategy_instance is not None
+                    and self._strategy_market_slug is not None
+                    and event.market_slug != self._strategy_market_slug
+                ):
+                    logger.bind(
+                        strategy_id=self.strategy.strategy_id,
+                    ).info(
+                        "Market slug changed: resetting strategy instance "
+                        "({old_market} → {new_market})",
+                        old_market=self._strategy_market_slug,
+                        new_market=event.market_slug,
+                    )
+                    self._strategy_instance.stop()
+                    self._strategy_instance = None
+                    self._strategy_market_slug = None
+                    if self._background_task and not self._background_task.done():
+                        self._background_task.cancel()
+                        try:
+                            await self._background_task
+                        except asyncio.CancelledError:
+                            pass
+                    self._background_task = None
+
+                # Create strategy instance on first market data (or after slug change)
                 if self._strategy_instance is None:
                     self._strategy_instance = self.strategy_factory(event.market_slug)
+                    self._strategy_market_slug = event.market_slug
                     logger.bind(
                         strategy_id=self.strategy.strategy_id,
                         market=event.market_slug,
@@ -241,12 +268,12 @@ class StrategyRunner:
                         logger.bind(
                             strategy_id=self.strategy.strategy_id,
                             market=event.market_slug,
+                        ).info(
+                            "Generated signal: {outcome} "
+                            "(edge={edge:.4f}, confidence={confidence:.4f})",
                             outcome=signal.outcome,
                             edge=signal.edge,
                             confidence=signal.confidence,
-                        ).info(
-                            "Generated signal: {outcome} "
-                            "(edge={edge:.4f}, confidence={confidence:.4f})"
                         )
                         # Ensure signal has correct model_id (strategy_id from registry)
                         # Note: strategy.evaluate() may return SignalEvent with different model_id
