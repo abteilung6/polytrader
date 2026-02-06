@@ -30,6 +30,12 @@ class FakePositionManager(IPositionManager):
             result[(market_slug, outcome)] = position
         return result if result else None
 
+    def get_positions_for_strategy(
+        self, strategy_id: str
+    ) -> dict[tuple[str, Outcome], Position] | None:
+        """Return positions (fake does not filter by strategy)."""
+        return self.get_positions()
+
     def get_position(self, market_slug: str, outcome: Outcome) -> Position | None:
         """Get position for a specific market and outcome."""
         key = (market_slug, outcome)

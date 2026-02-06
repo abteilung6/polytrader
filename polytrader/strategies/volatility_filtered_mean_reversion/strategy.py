@@ -49,6 +49,7 @@ class VolatilityFilteredMeanReversionStrategy(IStrategy):
         market_slug: str,
         store: IMarketDataStore,
         interval_minutes: int = 15,
+        interval_seconds: int = 0,
         anchor_window: int = 96,
         atr_window: int = 14,
         ema_fast: int = 20,
@@ -67,7 +68,8 @@ class VolatilityFilteredMeanReversionStrategy(IStrategy):
         Args:
             market_slug: Market to trade
             store: Market data store for tick history
-            interval_minutes: Candle interval in minutes (1 = fast demo, 15 = production)
+            interval_minutes: Candle interval in minutes (used when interval_seconds=0)
+            interval_seconds: Candle interval in seconds (e.g. 5 for ~20s warmup); 0=use minutes
             anchor_window: Rolling window for fair-price anchor
             atr_window: ATR period
             ema_fast: EMA fast period for trend filter
@@ -87,12 +89,17 @@ class VolatilityFilteredMeanReversionStrategy(IStrategy):
             )
         if exit_z >= entry_z:
             raise ValueError(f"exit_z must be < entry_z, got exit_z={exit_z} entry_z={entry_z}")
-        if interval_minutes < 1:
-            raise ValueError(f"interval_minutes must be >= 1, got {interval_minutes}")
+        if interval_seconds <= 0 and interval_minutes < 1:
+            raise ValueError(
+                f"interval_minutes must be >= 1 when interval_seconds=0, got {interval_minutes}"
+            )
+        if interval_seconds > 0 and interval_seconds < 1:
+            raise ValueError(f"interval_seconds must be >= 1 when used, got {interval_seconds}")
 
         self.market_slug = market_slug
         self.store = store
         self.interval_minutes = interval_minutes
+        self.interval_seconds = interval_seconds
         self.anchor_window = anchor_window
         self.atr_window = atr_window
         self.ema_fast = ema_fast
@@ -148,9 +155,15 @@ class VolatilityFilteredMeanReversionStrategy(IStrategy):
                 return None
 
             history = self.store.history(market_data.market_slug, market_data.outcome)
-            candles = aggregate_ticks_to_candles(history, interval_minutes=self.interval_minutes)
+            candles = aggregate_ticks_to_candles(
+                history,
+                interval_minutes=self.interval_minutes,
+                interval_seconds=self.interval_seconds,
+            )
+            warmup = self._warmup_candles()
+            n_candles = len(candles)
 
-            if len(candles) < self._warmup_candles():
+            if n_candles < warmup:
                 return None
 
             high = [c.high for c in candles]
@@ -169,7 +182,6 @@ class VolatilityFilteredMeanReversionStrategy(IStrategy):
             z = deviation_z(close[-1], anchor_series[-1], vol_series[-1])
             trend_strength = trend_series[-1]
             trend_ok = trend_strength <= self.trend_threshold
-
             position_state = self._position_state(positions)
 
             # Exit logic: in position and z crossed exit_z -> no new signal
@@ -185,7 +197,8 @@ class VolatilityFilteredMeanReversionStrategy(IStrategy):
             now = self._now()
             cutoff = now - timedelta(hours=1)
             self._signal_times = [t for t in self._signal_times if t > cutoff]
-            if len(self._signal_times) >= self.max_trades_per_hour:
+            n_signals_last_hour = len(self._signal_times)
+            if n_signals_last_hour >= self.max_trades_per_hour:
                 return None
 
             # One signal per candle: deduplicate by last candle ts_start

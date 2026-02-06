@@ -13,10 +13,20 @@ VFMR_SCHEMA = ParameterSchema(
             type=int,
             required=False,
             default=15,
-            description="Candle interval in minutes (1 = fast demo, 15 = production)",
+            description="Candle interval in minutes (used when interval_seconds=0)",
             validation=None,
             min_value=1,
             max_value=60,
+        ),
+        "interval_seconds": ParameterDefinition(
+            name="interval_seconds",
+            type=int,
+            required=False,
+            default=0,
+            description="Candle interval in seconds (e.g. 5 for ~20s warmup); 0=use minutes",
+            validation=None,
+            min_value=0,
+            max_value=120,
         ),
         "anchor_window": ParameterDefinition(
             name="anchor_window",
@@ -127,6 +137,16 @@ VFMR_SCHEMA = ParameterSchema(
             validation=None,
             min_value=0,
             max_value=100,
+        ),
+        "market_pattern": ParameterDefinition(
+            name="market_pattern",
+            type=str,
+            required=False,
+            default="btc-updown-15m",
+            description="Orchestrator: market pattern for grouping; not passed to strategy",
+            validation=None,
+            min_value=None,
+            max_value=None,
         ),
     }
 )

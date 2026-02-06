@@ -89,6 +89,38 @@ async def test_position_manager_creates_position_from_buy_order() -> None:
 
 
 @pytest.mark.asyncio
+async def test_position_manager_get_positions_for_strategy_returns_all_positions() -> None:
+    """Live PositionManager does not track per-strategy; returns same as get_positions."""
+    bus = EventBus()
+    clob_factory = create_fake_clob_factory()
+    gamma_client = MagicMock(spec=GammaClient)
+
+    manager = PositionManager(
+        bus=bus,
+        clob_client_factory=clob_factory,
+        gamma_client=gamma_client,
+        sync_interval=0,
+    )
+
+    order = OrderExecutedEvent(
+        market_slug="test-market",
+        outcome="UP",
+        side="BUY",
+        size=1.0,
+        target_price=0.50,
+        proposal_reason="Test buy",
+        response={"order_id": "123", "status": "filled"},
+    )
+    await manager._handle_order(order)
+
+    all_positions = manager.get_positions()
+    for_strategy = manager.get_positions_for_strategy("any-strategy-id")
+
+    assert for_strategy is not None
+    assert for_strategy == all_positions
+
+
+@pytest.mark.asyncio
 async def test_position_manager_removes_position_from_sell_order() -> None:
     """Test that PositionManager removes a position from a SELL order."""
     bus = EventBus()

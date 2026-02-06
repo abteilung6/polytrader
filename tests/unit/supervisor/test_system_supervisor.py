@@ -1915,6 +1915,11 @@ class TestSystemSupervisor:
             def get_positions(self) -> dict | None:
                 return None
 
+            def get_positions_for_strategy(
+                self, strategy_id: str
+            ) -> dict[tuple[str, Outcome], Position] | None:
+                return None
+
             def get_position(self, market_slug: str, outcome: str) -> None:
                 return None
 

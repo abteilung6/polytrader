@@ -495,6 +495,8 @@ class MarketSupervisor:
         """Get current positions for strategy context.
 
         Queries PositionManager from SystemSupervisor (doesn't own it).
+        When the strategy has strategy_id and the manager supports it, returns
+        only this strategy's positions (so strategies don't see each other's).
 
         Returns:
             Dict mapping (market_slug, outcome) -> Position
@@ -502,7 +504,12 @@ class MarketSupervisor:
         if self.position_manager is None:
             return {}
 
-        positions = self.position_manager.get_positions()
+        get_for_strategy = getattr(self.position_manager, "get_positions_for_strategy", None)
+        strategy_id = getattr(self.strategy, "strategy_id", None) if self.strategy else None
+        if callable(get_for_strategy) and strategy_id:
+            positions = get_for_strategy(strategy_id)
+        else:
+            positions = self.position_manager.get_positions()
         if positions is None:
             return {}
 

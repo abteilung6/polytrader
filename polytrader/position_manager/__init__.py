@@ -39,6 +39,23 @@ class IPositionManager(Protocol):
         """
         ...
 
+    def get_positions_for_strategy(
+        self, strategy_id: str
+    ) -> dict[tuple[str, Outcome], Position] | None:
+        """Get current positions for the given strategy only.
+
+        When the implementation tracks positions per strategy (e.g. paper from fills),
+        returns only positions opened by that strategy. Callers use this so each
+        strategy sees only its own positions (e.g. for entry-only-when-flat).
+
+        Implementations that do not track per-strategy (e.g. legacy live) may return
+        the same as get_positions().
+
+        Returns:
+            Dictionary mapping (market_slug, outcome) to Position, or None if not available.
+        """
+        ...
+
     def get_position(self, market_slug: str, outcome: Outcome) -> Position | None:
         """Get position for a specific market and outcome.
 
@@ -882,6 +899,16 @@ class PositionManager(IPositionManager):
         if not self._positions:
             return {}
         return self._positions.copy()
+
+    def get_positions_for_strategy(
+        self, strategy_id: str
+    ) -> dict[tuple[str, Outcome], Position] | None:
+        """Get current positions for the given strategy only.
+
+        This implementation does not track strategy_id per position; returns all
+        positions (same as get_positions()) for backward compatibility.
+        """
+        return self.get_positions()
 
     def get_position(self, market_slug: str, outcome: Outcome) -> Position | None:
         """Get position for a specific market and outcome.

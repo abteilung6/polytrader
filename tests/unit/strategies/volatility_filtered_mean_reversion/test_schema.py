@@ -22,6 +22,7 @@ class TestVfmrSchema:
         """Schema has all flat VFMR parameters."""
         expected = {
             "interval_minutes",
+            "interval_seconds",
             "anchor_window",
             "atr_window",
             "ema_fast",
@@ -33,6 +34,7 @@ class TestVfmrSchema:
             "max_position_notional_pct",
             "max_trades_per_hour",
             "cooldown_candles_after_loss",
+            "market_pattern",
         }
         assert set(VFMR_SCHEMA.parameters.keys()) == expected
 

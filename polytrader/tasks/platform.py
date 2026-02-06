@@ -121,8 +121,7 @@ async def platform_start_task(
     # Create execution control for control plane
     execution_control = ExecutionControl(bus=bus)
 
-    # Create platform orchestrator (needs session for loading strategies)
-    # Session is only used during start() to load strategies
+    # Create platform orchestrator; keep session for full run so add_strategy works
     async with Session() as orchestrator_session:
         orchestrator = PlatformOrchestrator(
             bus=bus,
@@ -138,141 +137,141 @@ async def platform_start_task(
         # Start orchestrator (loads strategies, creates runners)
         await orchestrator.start()
 
-    # Create repositories for control plane service
-    # Control plane service needs persistent session for polling
-    control_session = Session()
-    try:
-        command_repo = ControlCommandRepository(control_session)
-        execution_repo = ExecutionControlRepository(control_session)
-        live_repo = LiveStrategyRepository(control_session)
-        strategy_registry = StrategyRegistry(control_session)
-
-        # Create control plane service
-        control_plane_service = ControlPlaneService(
-            command_repo=command_repo,
-            execution_repo=execution_repo,
-            live_repo=live_repo,
-            strategy_registry=strategy_registry,
-            execution_control=execution_control,
-            bus=bus,
-            poll_interval_s=1.0,
-        )
-
-        # Start control plane service
-        await control_plane_service.start()
-
-        # Start FastAPI server in background
-        app = create_app()
-        config = uvicorn.Config(
-            app=app,
-            host=api_host,
-            port=api_port,
-            log_level="info",
-        )
-        server = uvicorn.Server(config)
-
-        # Start server in background task
-        server_task = asyncio.create_task(server.serve())
-
-        # Start dedicated metrics server on separate port
-        from polytrader.config import MetricsConfig
-        from polytrader.obs.metrics_server import start_metrics_server
-
-        metrics_config = MetricsConfig()
-        start_metrics_server(port=metrics_config.metrics_port, config=metrics_config)
-        logger.info("Metrics server started on port {port}", port=metrics_config.metrics_port)
-
-        logger.info("🚀 Platform started")
-        logger.info("Control API: http://{host}:{port}/docs", host=api_host, port=api_port)
-        logger.info(
-            "Metrics server: http://{host}:{port}/metrics",
-            host="localhost",
-            port=metrics_config.metrics_port,
-        )
-        logger.info("Press Ctrl+C to stop")
-
+        # Control plane service needs its own session for polling
+        control_session = Session()
         try:
-            # Wait for shutdown signal
-            shutdown_event = asyncio.Event()
+            command_repo = ControlCommandRepository(control_session)
+            execution_repo = ExecutionControlRepository(control_session)
+            live_repo = LiveStrategyRepository(control_session)
+            strategy_registry = StrategyRegistry(control_session)
 
-            def signal_handler() -> None:
-                logger.info("Shutdown signal received")
-                shutdown_event.set()
+            # Create control plane service
+            control_plane_service = ControlPlaneService(
+                command_repo=command_repo,
+                execution_repo=execution_repo,
+                live_repo=live_repo,
+                strategy_registry=strategy_registry,
+                execution_control=execution_control,
+                bus=bus,
+                poll_interval_s=1.0,
+            )
 
-            # Register signal handlers
-            loop = asyncio.get_event_loop()
-            for sig in (signal.SIGINT, signal.SIGTERM):
-                loop.add_signal_handler(sig, signal_handler)
+            # Start control plane service
+            await control_plane_service.start()
 
-            # Wait for shutdown
-            await shutdown_event.wait()
+            # Start FastAPI server in background; inject orchestrator for runtime add
+            app = create_app()
+            app.state.orchestrator = orchestrator
+            config = uvicorn.Config(
+                app=app,
+                host=api_host,
+                port=api_port,
+                log_level="info",
+            )
+            server = uvicorn.Server(config)
 
-        except KeyboardInterrupt:
-            logger.info("Keyboard interrupt received")
-        finally:
-            # Graceful shutdown
-            logger.info("Shutting down platform...")
+            # Start server in background task
+            server_task = asyncio.create_task(server.serve())
 
-            # Stop server
-            server.should_exit = True
-            server_task.cancel()
+            # Start dedicated metrics server on separate port
+            from polytrader.config import MetricsConfig
+            from polytrader.obs.metrics_server import start_metrics_server
+
+            metrics_config = MetricsConfig()
+            start_metrics_server(port=metrics_config.metrics_port, config=metrics_config)
+            logger.info("Metrics server started on port {port}", port=metrics_config.metrics_port)
+
+            logger.info("🚀 Platform started")
+            logger.info("Control API: http://{host}:{port}/docs", host=api_host, port=api_port)
+            logger.info(
+                "Metrics server: http://{host}:{port}/metrics",
+                host="localhost",
+                port=metrics_config.metrics_port,
+            )
+            logger.info("Press Ctrl+C to stop")
+
             try:
-                await server_task
-            except asyncio.CancelledError:
-                pass
+                # Wait for shutdown signal
+                shutdown_event = asyncio.Event()
 
-            # Stop control plane service
-            await control_plane_service.stop()
+                def signal_handler() -> None:
+                    logger.info("Shutdown signal received")
+                    shutdown_event.set()
 
-            # Stop orchestrator
-            await orchestrator.stop()
+                # Register signal handlers
+                loop = asyncio.get_event_loop()
+                for sig in (signal.SIGINT, signal.SIGTERM):
+                    loop.add_signal_handler(sig, signal_handler)
 
-            # Stop EventSink and cleanup PostgreSQL event store
-            if event_sink_task is not None:
-                if event_sink is not None:
+                # Wait for shutdown
+                await shutdown_event.wait()
+
+            except KeyboardInterrupt:
+                logger.info("Keyboard interrupt received")
+            finally:
+                # Graceful shutdown
+                logger.info("Shutting down platform...")
+
+                # Stop server
+                server.should_exit = True
+                server_task.cancel()
+                try:
+                    await server_task
+                except asyncio.CancelledError:
+                    pass
+
+                # Stop control plane service
+                await control_plane_service.stop()
+
+                # Stop orchestrator
+                await orchestrator.stop()
+
+                # Stop EventSink and cleanup PostgreSQL event store
+                if event_sink_task is not None:
+                    if event_sink is not None:
+                        await event_sink.stop()
+                    event_sink_task.cancel()
+                    try:
+                        await asyncio.wait_for(event_sink_task, timeout=5.0)
+                    except (asyncio.CancelledError, TimeoutError):
+                        pass
+                    event_sink_task = None
+                if postgres_event_store is not None:
+                    try:
+                        await postgres_event_store.cleanup()
+                    except Exception as e:
+                        logger.exception(
+                            "Error cleaning up event store: {error}",
+                            error=str(e),
+                        )
+                    postgres_event_store = None
+
+                # Close control plane session
+                await control_session.close()
+
+                # Close database engine
+                await engine.dispose()
+
+                logger.info("Platform stopped")
+        except Exception:
+            # Stop EventSink and cleanup on error
+            if event_sink_task is not None and event_sink is not None:
+                try:
                     await event_sink.stop()
+                except Exception:
+                    pass
                 event_sink_task.cancel()
                 try:
-                    await asyncio.wait_for(event_sink_task, timeout=5.0)
-                except (asyncio.CancelledError, TimeoutError):
+                    await event_sink_task
+                except asyncio.CancelledError:
                     pass
-                event_sink_task = None
             if postgres_event_store is not None:
                 try:
                     await postgres_event_store.cleanup()
-                except Exception as e:
-                    logger.exception(
-                        "Error cleaning up event store: {error}",
-                        error=str(e),
-                    )
-                postgres_event_store = None
-
-            # Close control plane session
+                except Exception:
+                    pass
+            # Close control plane session on error
             await control_session.close()
-
-            # Close database engine
+            # Close database engine on error
             await engine.dispose()
-
-            logger.info("Platform stopped")
-    except Exception:
-        # Stop EventSink and cleanup on error
-        if event_sink_task is not None and event_sink is not None:
-            try:
-                await event_sink.stop()
-            except Exception:
-                pass
-            event_sink_task.cancel()
-            try:
-                await event_sink_task
-            except asyncio.CancelledError:
-                pass
-        if postgres_event_store is not None:
-            try:
-                await postgres_event_store.cleanup()
-            except Exception:
-                pass
-        # Close control plane session on error
-        await control_session.close()
-        # Close database engine on error
-        await engine.dispose()
-        raise
+            raise

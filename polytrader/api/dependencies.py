@@ -5,8 +5,9 @@ Enables clean testing by allowing dependency override.
 """
 
 from collections.abc import AsyncGenerator
+from typing import TYPE_CHECKING
 
-from fastapi import Depends
+from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -24,6 +25,9 @@ from polytrader.platform.control import (
 from polytrader.platform.registry import StrategyRegistry
 from polytrader.strategies.registration import register_all_strategies
 from polytrader.strategies.registry import StrategyRegistry as InMemoryStrategyRegistry
+
+if TYPE_CHECKING:
+    from polytrader.platform.orchestrator import PlatformOrchestrator
 
 # Global engine and session factory (created on first use)
 _engine: AsyncEngine | None = None
@@ -173,6 +177,15 @@ def get_in_memory_strategy_registry() -> InMemoryStrategyRegistry:
         _in_memory_registry = InMemoryStrategyRegistry()
         register_all_strategies(_in_memory_registry)
     return _in_memory_registry
+
+
+def get_orchestrator(request: Request) -> "PlatformOrchestrator | None":
+    """Provide platform orchestrator from app state when running under platform task.
+
+    Returns None when not set (e.g. in tests or when API is run standalone).
+    Used to add newly created RUNNING strategies to the running orchestrator.
+    """
+    return getattr(request.app.state, "orchestrator", None)
 
 
 def get_market_tick_repository(

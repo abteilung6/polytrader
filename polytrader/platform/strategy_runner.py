@@ -251,10 +251,11 @@ class StrategyRunner:
                 if self._strategy_instance is None:
                     self._strategy_instance = self.strategy_factory(event.market_slug)
                     self._strategy_market_slug = event.market_slug
-                    logger.bind(
-                        strategy_id=self.strategy.strategy_id,
-                        market=event.market_slug,
-                    ).info("Created strategy instance for market: {market}")
+                    logger.info(
+                        "Created strategy instance for market: {} strategy_id={}",
+                        event.market_slug,
+                        self.strategy.strategy_id,
+                    )
                     # Start background tasks now that strategy exists
                     if self._background_task is None:
                         self._background_task = asyncio.create_task(self._run_strategy_background())
@@ -265,15 +266,14 @@ class StrategyRunner:
                     signal = self._strategy_instance.evaluate(event, positions=positions)
 
                     if signal is not None:
-                        logger.bind(
-                            strategy_id=self.strategy.strategy_id,
-                            market=event.market_slug,
-                        ).info(
-                            "Generated signal: {outcome} "
-                            "(edge={edge:.4f}, confidence={confidence:.4f})",
-                            outcome=signal.outcome,
-                            edge=signal.edge,
-                            confidence=signal.confidence,
+                        logger.info(
+                            "Generated signal: {} (edge={:.4f}, confidence={:.4f}) "
+                            "strategy_id={} market={}",
+                            signal.outcome,
+                            signal.edge,
+                            signal.confidence,
+                            self.strategy.strategy_id,
+                            event.market_slug,
                         )
                         # Ensure signal has correct model_id (strategy_id from registry)
                         # Note: strategy.evaluate() may return SignalEvent with different model_id
@@ -329,9 +329,9 @@ class StrategyRunner:
         if self.position_manager is None:
             return {}
 
-        # Get positions for this strategy
-        # Note: PositionManager may need strategy_id filtering in future
-        all_positions = self.position_manager.get_positions()
+        # Get positions for this strategy only (not shared with other strategies).
+        # VFMR etc. must only see their own positions for "entry only when flat".
+        all_positions = self.position_manager.get_positions_for_strategy(self.strategy.strategy_id)
         if all_positions is None:
             return {}
 

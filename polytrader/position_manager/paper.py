@@ -657,6 +657,26 @@ class PaperPositionManager(IPositionManager):
             return {}
         return self._positions.copy()
 
+    def get_positions_for_strategy(
+        self, strategy_id: str
+    ) -> dict[tuple[str, Outcome], Position] | None:
+        """Get current positions opened by the given strategy only.
+
+        Each strategy must only see its own positions (e.g. for entry-only-when-flat).
+        Positions from other strategies (e.g. market-data-collector) are excluded.
+
+        Returns:
+            Dictionary mapping (market_slug, outcome) to Position for this strategy,
+            or None if not available.
+        """
+        if not self._positions:
+            return {}
+        result: dict[tuple[str, Outcome], Position] = {}
+        for key, position in self._positions.items():
+            if self._position_strategy.get(key) == strategy_id:
+                result[key] = position
+        return result
+
     def get_position(self, market_slug: str, outcome: Outcome) -> Position | None:
         """Get position for a specific market and outcome.
 

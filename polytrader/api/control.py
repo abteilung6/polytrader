@@ -4,7 +4,10 @@ Per Platform_Proposal.md: Elite-style API design with separation of
 state endpoints (/state/*) and command endpoints (/commands/*).
 """
 
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:
+    from polytrader.platform.orchestrator import PlatformOrchestrator
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
@@ -14,6 +17,7 @@ from polytrader.api.dependencies import (
     get_execution_control_repo,
     get_in_memory_strategy_registry,
     get_live_strategy_repo,
+    get_orchestrator,
     get_strategy_registry,
 )
 from polytrader.api.models import (
@@ -896,6 +900,7 @@ async def create_strategy(
     request: CreateStrategyRequest,
     registry: StrategyRegistry = Depends(get_strategy_registry),  # noqa: B008
     in_memory_registry: InMemoryStrategyRegistry = Depends(get_in_memory_strategy_registry),  # noqa: B008
+    orchestrator: "PlatformOrchestrator | None" = Depends(get_orchestrator),  # noqa: B008
 ) -> StrategyResponse:
     """Create a new strategy in registry.
 
@@ -1025,6 +1030,38 @@ async def create_strategy(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=ErrorResponse(error="Failed to create strategy", detail=str(e)).model_dump(),
         ) from e
+
+    # If created with desired_state=RUNNING and platform is running, add to orchestrator
+    # so the strategy starts immediately and can produce signals
+    if (
+        orchestrator is not None
+        and request.desired_state == "RUNNING"
+        and strategy.desired_state == "RUNNING"
+    ):
+        try:
+            await orchestrator.add_strategy(strategy.strategy_id)
+        except Exception as e:
+            from polytrader.logging_config import logger
+
+            logger.warning(
+                "Strategy created but could not add to orchestrator: {error}",
+                strategy_id=strategy.strategy_id,
+                error=str(e),
+                error_type=type(e).__name__,
+            )
+            # Still return 201; strategy is in DB and can be activated via command
+    elif (
+        orchestrator is None
+        and request.desired_state == "RUNNING"
+        and strategy.desired_state == "RUNNING"
+    ):
+        from polytrader.logging_config import logger
+
+        logger.info(
+            "Strategy created with RUNNING but no live orchestrator: {strategy_id} "
+            "will not produce signals until platform is started and strategy is activated.",
+            strategy_id=strategy.strategy_id,
+        )
 
     return StrategyResponse(
         strategy_id=strategy.strategy_id,

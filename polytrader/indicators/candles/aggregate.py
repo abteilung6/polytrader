@@ -40,9 +40,22 @@ def _truncate_to_interval(dt: datetime, interval_minutes: int) -> datetime:
     )
 
 
+def _truncate_to_interval_seconds(dt: datetime, interval_seconds: int) -> datetime:
+    """Truncate datetime to interval boundary in seconds (e.g. 5s for fast demo)."""
+    total_seconds = dt.hour * 3600 + dt.minute * 60 + dt.second
+    truncated = (total_seconds // interval_seconds) * interval_seconds
+    return dt.replace(
+        hour=truncated // 3600,
+        minute=(truncated % 3600) // 60,
+        second=truncated % 60,
+        microsecond=0,
+    )
+
+
 def aggregate_ticks_to_candles(
     events: list[MarketDataEvent],
     interval_minutes: int = 15,
+    interval_seconds: int = 0,
 ) -> list[Candle]:
     """Convert tick-level market data events into OHLC candles.
 
@@ -53,15 +66,21 @@ def aggregate_ticks_to_candles(
     Args:
         events: List of MarketDataEvent (e.g. from store.history()). Assumed
             single market/outcome when called by strategy.
-        interval_minutes: Candle interval in minutes (default 15).
+        interval_minutes: Candle interval in minutes (default 15); used when
+            interval_seconds is 0.
+        interval_seconds: When > 0, candle interval in seconds (e.g. 5 for
+            ~20s warmup with 4 candles). Takes precedence over interval_minutes.
 
     Returns:
-        List of Candle sorted by ts_start; empty if no events or interval < 1.
+        List of Candle sorted by ts_start; empty if no events or invalid interval.
 
     Note:
         Pure function; deterministic. Empty list returns [].
     """
-    if interval_minutes < 1:
+    if interval_seconds > 0:
+        if interval_seconds < 1:
+            raise ValueError(f"interval_seconds must be >= 1 when used, got {interval_seconds}")
+    elif interval_minutes < 1:
         raise ValueError(f"interval_minutes must be >= 1, got {interval_minutes}")
     if not events:
         return []
@@ -69,11 +88,17 @@ def aggregate_ticks_to_candles(
     # Sort by ts_wall for deterministic grouping
     sorted_events = sorted(events, key=lambda e: e.ts_wall)
 
+    use_seconds = interval_seconds > 0
+
     # Group by truncated interval start
     buckets: dict[datetime, list[MarketDataEvent]] = defaultdict(list)
     for event in sorted_events:
         dt = _parse_ts_wall(event.ts_wall)
-        bucket_start = _truncate_to_interval(dt, interval_minutes)
+        bucket_start = (
+            _truncate_to_interval_seconds(dt, interval_seconds)
+            if use_seconds
+            else _truncate_to_interval(dt, interval_minutes)
+        )
         buckets[bucket_start].append(event)
 
     # Build OHLC per bucket

@@ -180,3 +180,35 @@ class TestAggregateTicksToCandles:
         assert result[0].ts_start == datetime(2024, 1, 15, 10, 0, 0, tzinfo=UTC)
         assert result[1].ts_start == datetime(2024, 1, 15, 10, 30, 0, tzinfo=UTC)
         assert result[2].ts_start == datetime(2024, 1, 15, 11, 0, 0, tzinfo=UTC)
+
+    def test_interval_seconds_bucketing(self) -> None:
+        """When interval_seconds > 0, buckets are by seconds; ~20s warmup with 5s candles."""
+        events = [
+            _event("2024-01-15T10:00:00Z", 0.1),
+            _event("2024-01-15T10:00:03Z", 0.2),
+            _event("2024-01-15T10:00:06Z", 0.3),
+            _event("2024-01-15T10:00:10Z", 0.4),
+            _event("2024-01-15T10:00:15Z", 0.5),
+        ]
+        result = aggregate_ticks_to_candles(events, interval_seconds=5)
+        assert len(result) == 4
+        assert result[0].ts_start == datetime(2024, 1, 15, 10, 0, 0, tzinfo=UTC)
+        assert result[0].open == 0.1
+        assert result[0].high == 0.2
+        assert result[0].close == 0.2
+        assert result[1].ts_start == datetime(2024, 1, 15, 10, 0, 5, tzinfo=UTC)
+        assert result[1].open == 0.3
+        assert result[1].close == 0.3
+        assert result[2].ts_start == datetime(2024, 1, 15, 10, 0, 10, tzinfo=UTC)
+        assert result[2].open == 0.4
+        assert result[2].close == 0.4
+        assert result[3].ts_start == datetime(2024, 1, 15, 10, 0, 15, tzinfo=UTC)
+        assert result[3].open == 0.5
+        assert result[3].close == 0.5
+
+    def test_interval_seconds_zero_uses_minutes(self) -> None:
+        """interval_seconds=0 (default) uses interval_minutes."""
+        events = [_event("2024-01-15T10:30:00Z", 0.5)]
+        result = aggregate_ticks_to_candles(events, interval_minutes=15, interval_seconds=0)
+        assert len(result) == 1
+        assert result[0].ts_start == datetime(2024, 1, 15, 10, 30, 0, tzinfo=UTC)
