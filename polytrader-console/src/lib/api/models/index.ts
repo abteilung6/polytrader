@@ -18,6 +18,8 @@ export * from './location-inner';
 export * from './market-info-response';
 export * from './market-tick-response';
 export * from './markets-response';
+export * from './performance-overview-item-response';
+export * from './performance-overview-response';
 export * from './performance-response';
 export * from './performance-summary';
 export * from './run-identity-response';

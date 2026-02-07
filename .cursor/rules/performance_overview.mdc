@@ -1,0 +1,80 @@
+---
+alwaysApply: true
+---
+
+# performance_overview.mdc — Performance Overview (Phase 2)
+
+## Purpose
+When multiple strategy instances run concurrently, the system MUST provide a population-first overview
+that enables fast selection of promising candidates and fast elimination of underperformers.
+
+The overview is a control-plane read model: portfolio view first, drill-down second.
+
+## Phase Scope
+This rule defines Phase 2 performance tracking:
+- Windowed, cross-strategy aggregates (1h / 7h / 1d / 7d / all)
+- Top performers categorization
+- Evidence labeling (INSUFFICIENT_DATA) to avoid ranking noise
+- Uses realized performance from CLOSED trades only (market resolved/closed)
+
+No unrealized PnL, equity curves, or portfolio allocation are required in this phase.
+
+## Core Principles (Elite Standard)
+1) Population-first: the default view is all strategy instances compared side-by-side.
+2) Windowed truth: comparisons must be selectable by time window.
+3) Evidence before ranking: never promote/rank without minimum sample thresholds.
+4) Cost realism: realized PnL MUST be net of fees (and explicitly documented).
+5) One-call overview: the UI MUST NOT use N+1 calls across strategies for the overview page.
+
+## Data Model Rules
+- Performance overview MUST be derived from CLOSED trades (StrategyClosedTradeEvent equivalent).
+- Each closed trade record MUST include:
+  - strategy_id, execution_mode, exit_ts_wall (UTC), pnl (net), result (WIN/LOSS/BREAKEVEN)
+  - optional: size, duration_seconds, market_slug (for later slicing)
+- Closed trade storage MUST be queryable by time window and grouped by strategy_id.
+
+## API Rules
+The Control API MUST expose a single endpoint for overview aggregation:
+
+GET /api/v1/state/strategies/performance/overview
+
+Query params:
+- since: ISO 8601 datetime UTC (optional; omit for "all time")
+- until: ISO 8601 datetime UTC (optional; default server now())
+- execution_mode: {paper, live} (optional)
+- template_type_id (optional)
+- state (optional: RUNNING/STOPPED/etc.)
+- sort_by: {total_realized_pnl, win_rate_pct, trade_count} (optional, default total_realized_pnl desc)
+- limit (optional, default 200, max 1000)
+
+The UI constructs since/until from window presets (1h, 7h, 1d, 7d, all) client-side.
+
+Response MUST include:
+- resolved from_ts_wall / to_ts_wall timestamps in UTC (server computed)
+- one row per strategy instance with aggregates for the resolved window
+
+The endpoint MUST be implementable without requiring the trader runtime process;
+it reads from persisted closed trade records and strategy registry.
+
+## Evidence Tier Rules (Phase 2)
+Each strategy row MUST include:
+- evidence_tier:
+  - INSUFFICIENT_DATA if trade_count < MIN_TRADES_WINDOW
+  - TRACKING otherwise
+
+MIN_TRADES_THRESHOLD MUST be configurable (env var PERF_MIN_TRADES_THRESHOLD).
+Initial default: 1 (we have limited data). Raise to 10–30 as trade volume grows.
+
+Top-performer categorization MUST ignore INSUFFICIENT_DATA rows by default.
+
+## UI Rules
+Console MUST provide a Performance Overview page:
+- Window selector: 1h / 7h / 1d / 7d / all (computes since/until client-side)
+- Table with sortable columns using overview endpoint only (single call)
+- Top performers panel derived from the same dataset
+- Drill-down link to existing per-strategy performance endpoint
+
+## Non-Negotiables
+- Do not compute “summary from page items” for overview: overview must be server-side aggregation.
+- Do not require reading all trades into memory for aggregation; use DB aggregation queries.
+- Do not promote strategies solely from being top in a short window; evidence tier gates apply.

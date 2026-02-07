@@ -8,6 +8,7 @@ import {
 import { LayoutComponent, NotFound } from '@/route-components'
 import { MarketDetailPage } from '@/pages/market-detail'
 import { MarketsPage } from '@/pages/markets'
+import { PerformancePage } from '@/pages/performance'
 import { StrategyInstanceDetailPage } from '@/pages/strategy-instance-detail'
 import { StrategiesInstancesPage } from '@/pages/strategies-instances'
 import { StrategiesTemplatesPage } from '@/pages/strategies-templates'
@@ -51,6 +52,12 @@ const marketDetailRoute = createRoute({
   component: MarketDetailPage,
 })
 
+const performanceRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: 'performance',
+  component: PerformancePage,
+})
+
 const strategiesTemplatesRoute = createRoute({
   getParentRoute: () => layoutRoute,
   path: 'strategies/templates',
@@ -86,6 +93,7 @@ export const routeTree = rootRoute.addChildren([
   layoutRoute.addChildren([
     indexRoute,
     marketsRoute.addChildren([marketsIndexRoute, marketDetailRoute]),
+    performanceRoute,
     strategiesTemplatesRoute,
     strategiesInstancesRoute.addChildren([
       strategiesInstancesIndexRoute,

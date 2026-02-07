@@ -60,6 +60,7 @@ Class | Method | HTTP request | Description
 *ControlApi* | [**getExecutionStateApiV1StateExecutionGet**](docs/ControlApi.md#getexecutionstateapiv1stateexecutionget) | **GET** /api/v1/state/execution | Get Execution State
 *ControlApi* | [**getHealthApiV1StateHealthGet**](docs/ControlApi.md#gethealthapiv1statehealthget) | **GET** /api/v1/state/health | Get Health
 *ControlApi* | [**getLiveStrategiesApiV1StateLiveStrategiesGet**](docs/ControlApi.md#getlivestrategiesapiv1statelivestrategiesget) | **GET** /api/v1/state/live-strategies | Get Live Strategies
+*ControlApi* | [**getPerformanceOverviewApiV1StateStrategiesPerformanceOverviewGet**](docs/ControlApi.md#getperformanceoverviewapiv1statestrategiesperformanceoverviewget) | **GET** /api/v1/state/strategies/performance/overview | Get Performance Overview
 *ControlApi* | [**getStrategiesApiV1StateStrategiesGet**](docs/ControlApi.md#getstrategiesapiv1statestrategiesget) | **GET** /api/v1/state/strategies | Get Strategies
 *ControlApi* | [**getStrategyByIdApiV1StateStrategiesStrategyIdGet**](docs/ControlApi.md#getstrategybyidapiv1statestrategiesstrategyidget) | **GET** /api/v1/state/strategies/{strategy_id} | Get Strategy By Id
 *ControlApi* | [**getStrategyOrdersApiV1StateStrategiesStrategyIdOrdersGet**](docs/ControlApi.md#getstrategyordersapiv1statestrategiesstrategyidordersget) | **GET** /api/v1/state/strategies/{strategy_id}/orders | Get Strategy Orders
@@ -97,6 +98,8 @@ Class | Method | HTTP request | Description
  - [MarketInfoResponse](docs/MarketInfoResponse.md)
  - [MarketTickResponse](docs/MarketTickResponse.md)
  - [MarketsResponse](docs/MarketsResponse.md)
+ - [PerformanceOverviewItemResponse](docs/PerformanceOverviewItemResponse.md)
+ - [PerformanceOverviewResponse](docs/PerformanceOverviewResponse.md)
  - [PerformanceResponse](docs/PerformanceResponse.md)
  - [PerformanceSummary](docs/PerformanceSummary.md)
  - [RunIdentityResponse](docs/RunIdentityResponse.md)

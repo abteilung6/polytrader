@@ -337,6 +337,105 @@ class TestRiskCheckerMaxTradesRaceCondition:
             pass
 
     @pytest.mark.asyncio
+    async def test_different_strategies_can_trade_same_market(self) -> None:
+        """Test that different strategy instances can trade the same market/outcome.
+
+        This is the KEY regression test: the old code tracked trades globally
+        by (market_slug, outcome), blocking all strategies after the first trade.
+        The fix scopes tracking by (strategy_id, market_slug, outcome).
+        """
+        bus = EventBus(store=MemoryEventStore())
+        store = MemoryMarketDataStore()
+
+        # Add market data
+        market_data = MarketDataEvent(
+            market_slug="test-market",
+            outcome="UP",
+            best_bid=0.44,
+            best_ask=0.46,
+        )
+        store.add(market_data)
+
+        # Create risk checker with max_trades_per_market=1
+        limits = get_default_limits()
+        limits.max_trades_per_market = 1
+        engine = RiskEngine(limits=limits)
+        checker = RiskChecker(bus=bus, engine=engine, store=store)
+
+        # Subscribe to approved proposals
+        approved_queue = bus.subscribe(APPROVED_PROPOSALS)
+
+        # Start risk checker
+        risk_task = asyncio.create_task(checker.run())
+        await asyncio.sleep(0.01)  # Give time to subscribe
+
+        # Strategy instance A trades the market
+        intent_a = OrderIntentEvent(
+            market_slug="test-market",
+            outcome="UP",
+            side="BUY",
+            target_price=0.5,
+            limit_price=0.45,
+            size=1.0,
+            reason="Strategy A order",
+            ttl_s=60.0,
+            strategy_id="strategy_instance_A",
+        )
+
+        await bus.publish(PROPOSALS, intent_a)
+        await asyncio.sleep(0.01)
+
+        approved_a = await asyncio.wait_for(approved_queue.get(), timeout=1.0)
+        assert approved_a.correlation_id == intent_a.correlation_id
+
+        # Strategy instance B trades the SAME market — should be ALLOWED
+        intent_b = OrderIntentEvent(
+            market_slug="test-market",
+            outcome="UP",
+            side="BUY",
+            target_price=0.5,
+            limit_price=0.45,
+            size=1.0,
+            reason="Strategy B order",
+            ttl_s=60.0,
+            strategy_id="strategy_instance_B",
+        )
+
+        await bus.publish(PROPOSALS, intent_b)
+        await asyncio.sleep(0.01)
+
+        approved_b = await asyncio.wait_for(approved_queue.get(), timeout=1.0)
+        assert approved_b.correlation_id == intent_b.correlation_id
+
+        # Same strategy A tries again — should be BLOCKED
+        intent_a2 = OrderIntentEvent(
+            market_slug="test-market",
+            outcome="UP",
+            side="BUY",
+            target_price=0.5,
+            limit_price=0.45,
+            size=1.0,
+            reason="Strategy A second order",
+            ttl_s=60.0,
+            strategy_id="strategy_instance_A",
+        )
+
+        await bus.publish(PROPOSALS, intent_a2)
+        await asyncio.sleep(0.01)
+
+        # Strategy A's second order should NOT be approved (should timeout)
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(approved_queue.get(), timeout=0.1)
+
+        # Cleanup
+        checker.stop()
+        risk_task.cancel()
+        try:
+            await risk_task
+        except asyncio.CancelledError:
+            pass
+
+    @pytest.mark.asyncio
     async def test_sell_orders_always_allowed(self) -> None:
         """Test that SELL orders are always allowed even after BUY order (for max_trades check)."""
         bus = EventBus(store=MemoryEventStore())

@@ -274,7 +274,7 @@ class TestCheckMaxTradesPerMarket:
     """Tests for check_max_trades_per_market policy."""
 
     def test_check_max_trades_per_market_buy_already_traded(self) -> None:
-        """Test that BUY orders are denied if already traded."""
+        """Test that BUY orders are denied if this strategy already traded."""
         intent = OrderIntentEvent(
             market_slug="test-market",
             outcome="UP",
@@ -288,7 +288,8 @@ class TestCheckMaxTradesPerMarket:
 
         context = RiskContext(
             intent=intent,
-            executed_trades={("test-market", "UP")},  # Already traded
+            # Same strategy already traded this market/outcome
+            executed_trades={("simple_threshold", "test-market", "UP")},
         )
         limits = RiskLimits(max_trades_per_market=1, version="1.0")
 
@@ -296,6 +297,7 @@ class TestCheckMaxTradesPerMarket:
 
         assert result.allowed is False
         assert RiskReasonCode.RISK_MAX_POSITION in result.reason_codes
+        assert result.metadata["strategy_id"] == "simple_threshold"
         assert result.metadata["market_slug"] == "test-market"
         assert result.metadata["outcome"] == "UP"
         assert result.metadata["max_trades_per_market"] == 1
@@ -340,7 +342,9 @@ class TestCheckMaxTradesPerMarket:
 
         context = RiskContext(
             intent=intent,
-            executed_trades={("test-market", "UP")},  # Already traded, but SELL is OK
+            executed_trades={
+                ("simple_threshold", "test-market", "UP")
+            },  # Already traded, but SELL is OK
         )
         limits = RiskLimits(max_trades_per_market=1)
 
@@ -364,7 +368,7 @@ class TestCheckMaxTradesPerMarket:
 
         context = RiskContext(
             intent=intent,
-            executed_trades={("test-market", "UP")},  # Traded UP, but not DOWN
+            executed_trades={("simple_threshold", "test-market", "UP")},  # Traded UP, but not DOWN
         )
         limits = RiskLimits(max_trades_per_market=1)
 
@@ -388,7 +392,7 @@ class TestCheckMaxTradesPerMarket:
 
         context = RiskContext(
             intent=intent,
-            executed_trades={("test-market", "UP")},  # Traded test-market, but not other-market
+            executed_trades={("simple_threshold", "test-market", "UP")},  # Different market
         )
         limits = RiskLimits(max_trades_per_market=1)
 
@@ -396,3 +400,58 @@ class TestCheckMaxTradesPerMarket:
 
         assert result.allowed is True
         assert RiskReasonCode.RISK_ALLOWED in result.reason_codes
+
+    def test_check_max_trades_per_market_different_strategy_allowed(self) -> None:
+        """Test that different strategy instances can trade the same market/outcome.
+
+        This is the KEY regression test for the bug where only one instance
+        per template could trade.  Scoping by strategy_id means instance B
+        is NOT blocked by instance A's trade on the same market.
+        """
+        intent = OrderIntentEvent(
+            market_slug="test-market",
+            outcome="UP",
+            side="BUY",
+            target_price=0.5,
+            limit_price=0.45,
+            size=1.0,
+            reason="Test",
+            strategy_id="strategy_instance_B",  # Different strategy instance
+        )
+
+        context = RiskContext(
+            intent=intent,
+            # Instance A already traded this market — but B should NOT be blocked
+            executed_trades={("strategy_instance_A", "test-market", "UP")},
+        )
+        limits = RiskLimits(max_trades_per_market=1)
+
+        result = check_max_trades_per_market(context, limits)
+
+        assert result.allowed is True
+        assert RiskReasonCode.RISK_ALLOWED in result.reason_codes
+
+    def test_check_max_trades_per_market_same_strategy_blocked(self) -> None:
+        """Test that the SAME strategy instance is blocked from re-trading the same market."""
+        intent = OrderIntentEvent(
+            market_slug="test-market",
+            outcome="UP",
+            side="BUY",
+            target_price=0.5,
+            limit_price=0.45,
+            size=1.0,
+            reason="Test",
+            strategy_id="strategy_instance_A",
+        )
+
+        context = RiskContext(
+            intent=intent,
+            # Same instance already traded — should be blocked
+            executed_trades={("strategy_instance_A", "test-market", "UP")},
+        )
+        limits = RiskLimits(max_trades_per_market=1)
+
+        result = check_max_trades_per_market(context, limits)
+
+        assert result.allowed is False
+        assert RiskReasonCode.RISK_MAX_POSITION in result.reason_codes

@@ -622,3 +622,139 @@ class ControlCommandRecord(Base):
         # Note: Unique index for idempotency will be created in migration
         # with COALESCE for NULL strategy_id and WHERE clause for client_request_id
     )
+
+
+class StrategyClosedTradeRecord(Base):
+    """CQRS read-model table for closed-trade aggregation.
+
+    Source of truth: StrategyClosedTradeEvent in the events table.
+    This table is a projection optimized for windowed GROUP BY queries
+    used by the Performance Overview endpoint.
+
+    Written by ClosedTradeSink; read by PerformanceOverviewRepository.
+
+    Per PERFORMANCE_OVERVIEW_PROPOSAL.md §4:
+    - Typed columns with B-tree indexes replace JSONB scanning.
+    - Events table (append-only, audit) is unchanged.
+    """
+
+    __tablename__ = "strategy_closed_trades"
+
+    # Identity
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        server_default=func.gen_random_uuid(),
+        comment="Unique row identifier (UUID)",
+    )
+    event_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        nullable=False,
+        unique=True,
+        comment="Reference to events.event_id (dedup key)",
+    )
+
+    # Strategy reference
+    strategy_id: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        comment="FK-like ref to strategy_instances.strategy_id",
+    )
+    execution_mode: Mapped[str] = mapped_column(
+        String(10),
+        nullable=False,
+        comment="paper or live",
+    )
+
+    # Timestamps
+    exit_ts_wall: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        comment="Wall-clock exit time (UTC) — primary windowing column",
+    )
+    entry_time: Mapped[float] = mapped_column(
+        Float,
+        nullable=False,
+        comment="Monotonic entry timestamp",
+    )
+    exit_time: Mapped[float] = mapped_column(
+        Float,
+        nullable=False,
+        comment="Monotonic exit timestamp",
+    )
+
+    # Trade outcome
+    pnl: Mapped[float] = mapped_column(
+        Float,
+        nullable=False,
+        comment="Realized P&L in USD (currently gross of fees — see proposal §9)",
+    )
+    pnl_pct: Mapped[float] = mapped_column(
+        Float,
+        nullable=False,
+        comment="P&L as percentage",
+    )
+    result: Mapped[str] = mapped_column(
+        String(12),
+        nullable=False,
+        comment="WIN, LOSS, or BREAKEVEN",
+    )
+
+    # Trade details (for later slicing per performance_overview.mdc)
+    size: Mapped[float] = mapped_column(
+        Float,
+        nullable=False,
+        comment="Position size (USD)",
+    )
+    duration_seconds: Mapped[float] = mapped_column(
+        Float,
+        nullable=False,
+        comment="exit_time - entry_time in seconds",
+    )
+    market_slug: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        comment="Market identifier",
+    )
+    outcome: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        comment="UP or DOWN",
+    )
+    entry_price: Mapped[float] = mapped_column(
+        Float,
+        nullable=False,
+        comment="Average entry price",
+    )
+    exit_price: Mapped[float] = mapped_column(
+        Float,
+        nullable=False,
+        comment="Exit/settlement price",
+    )
+
+    # Audit
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+        comment="Record insertion timestamp",
+    )
+
+    # Table constraints and indexes
+    __table_args__ = (
+        CheckConstraint(
+            "execution_mode IN ('paper', 'live')",
+            name="sct_execution_mode_check",
+        ),
+        CheckConstraint(
+            "result IN ('WIN', 'LOSS', 'BREAKEVEN')",
+            name="sct_result_check",
+        ),
+        CheckConstraint(
+            "outcome IN ('UP', 'DOWN')",
+            name="sct_outcome_check",
+        ),
+        Index("idx_sct_exit_ts_wall", "exit_ts_wall"),
+        Index("idx_sct_strategy_exit_ts", "strategy_id", "exit_ts_wall"),
+        Index("idx_sct_mode_exit_ts", "execution_mode", "exit_ts_wall"),
+    )

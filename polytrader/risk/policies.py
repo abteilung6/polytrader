@@ -357,13 +357,14 @@ def check_position_limits(context: RiskContext, limits: RiskLimits) -> RiskResul
 
 
 def check_max_trades_per_market(context: RiskContext, limits: RiskLimits) -> RiskResult:
-    """Check max trades per market/outcome (for BUY orders only).
+    """Check max trades per market/outcome per strategy instance (for BUY orders only).
 
-    This is a simple check: if we've already traded or approved a trade for
-    this market/outcome, deny additional BUY orders. SELL orders are allowed.
+    This check is scoped per strategy instance: each instance gets its own
+    max_trades_per_market budget. Instance A trading (market, outcome) does
+    NOT block instance B from trading the same pair.
 
-    Note: This uses executed_trades from RiskContext, which includes both
-    executed trades and approved orders (to prevent race conditions).
+    Note: executed_trades contains (strategy_id, market_slug, outcome) tuples,
+    which includes both executed and approved trades (to prevent race conditions).
     In Phase 3 (OMS), this will come from OMS state.
 
     Args:
@@ -371,7 +372,7 @@ def check_max_trades_per_market(context: RiskContext, limits: RiskLimits) -> Ris
         limits: Risk limits configuration
 
     Returns:
-        RiskResult with allowed=False if max trades exceeded
+        RiskResult with allowed=False if max trades exceeded for this strategy
     """
     intent = context.intent
     reasons: list[RiskReasonCode] = []
@@ -385,13 +386,14 @@ def check_max_trades_per_market(context: RiskContext, limits: RiskLimits) -> Ris
             metadata=metadata,
         )
 
-    # Check if we've already traded or approved a trade for this market/outcome
-    # executed_trades includes both executed and approved trades to prevent
-    # race condition where multiple orders pass risk checks before first executes
-    key = (intent.market_slug, intent.outcome)
+    # Check if THIS strategy has already traded or approved a trade for this
+    # market/outcome.  Scoped by (strategy_id, market_slug, outcome) so
+    # different instances are independent.
+    key = (intent.strategy_id, intent.market_slug, intent.outcome)
 
     if key in context.executed_trades:
         reasons.append(RiskReasonCode.RISK_MAX_POSITION)  # Reuse code
+        metadata["strategy_id"] = intent.strategy_id
         metadata["market_slug"] = intent.market_slug
         metadata["outcome"] = intent.outcome
         metadata["max_trades_per_market"] = limits.max_trades_per_market

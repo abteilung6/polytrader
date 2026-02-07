@@ -156,8 +156,8 @@ class RiskChecker:
         bus: Event bus for publishing events
         engine: Risk engine for running checks
         store: Optional market data store for building context
-        _executed_trades: Set of (market_slug, outcome) tuples for executed trades
-        _approved_trades: Set of (market_slug, outcome) tuples for approved BUY orders
+        _executed_trades: Set of (strategy_id, market_slug, outcome) tuples for executed trades
+        _approved_trades: Set of (strategy_id, market_slug, outcome) tuples for approved BUY orders
         _order_count_last_minute: Number of orders in the last minute (simple counter)
         _running: Whether the checker is running
     """
@@ -178,8 +178,11 @@ class RiskChecker:
         self.bus = bus
         self.engine = engine
         self.store = store
-        self._executed_trades: set[tuple[str, Outcome]] = set()
-        self._approved_trades: set[tuple[str, Outcome]] = set()
+        self._executed_trades: set[tuple[str, str, Outcome]] = set()
+        self._approved_trades: set[tuple[str, str, Outcome]] = set()
+        # Maps correlation_id → (strategy_id, market_slug, outcome) for approved trades
+        # so we can match OrderExecutedEvent (which lacks strategy_id) back to the right key
+        self._approved_correlation: dict[str, tuple[str, str, Outcome]] = {}
         self._order_count_last_minute = 0
         self._running = False
 
@@ -255,10 +258,13 @@ class RiskChecker:
             # Track approved BUY orders immediately to prevent race condition
             # where multiple orders pass risk checks before first one executes
             if intent.side == "BUY":
-                key = (intent.market_slug, intent.outcome)
+                key = (intent.strategy_id, intent.market_slug, intent.outcome)
                 self._approved_trades.add(key)
+                self._approved_correlation[intent.correlation_id] = key
                 log_context.debug(
-                    "Tracked approved BUY order for max_trades check: {market_slug}/{outcome}",
+                    "Tracked approved BUY for max_trades: "
+                    "{strategy_id}/{market_slug}/{outcome}",
+                    strategy_id=intent.strategy_id,
                     market_slug=intent.market_slug,
                     outcome=intent.outcome,
                 )
@@ -289,13 +295,20 @@ class RiskChecker:
                 try:
                     order = await orders_queue.get()
                     if order.side == "BUY":
-                        key = (order.market_slug, order.outcome)
+                        # Match via correlation_id to find the strategy_id
+                        # (OrderExecutedEvent does not carry strategy_id)
+                        approved_key = self._approved_correlation.pop(order.correlation_id, None)
+                        if approved_key is not None:
+                            key = approved_key
+                            self._approved_trades.discard(key)
+                        else:
+                            # Fallback: no approved match (e.g., restart with in-flight orders)
+                            strategy_id = getattr(order, "strategy_id", "unknown")
+                            key = (strategy_id, order.market_slug, order.outcome)
                         self._executed_trades.add(key)
-                        # Remove from approved trades since it's now executed
-                        # (prevents double-counting, though both sets are checked)
-                        self._approved_trades.discard(key)
                         logger.bind(
                             correlation_id=order.correlation_id,
+                            strategy_id=key[0],
                             market_slug=order.market_slug,
                             outcome=order.outcome,
                             event_type="RiskCheck",
@@ -351,21 +364,25 @@ class RiskChecker:
 
         # Build owned tokens from executed trades (simplified for Phase 2)
         # In Phase 3, this will come from OMS state
-        owned_tokens = self._executed_trades.copy()
+        # owned_tokens is (market_slug, outcome) — global across strategies
+        owned_tokens: set[tuple[str, Outcome]] = set()
+        for _sid, mkt, out in self._executed_trades:
+            owned_tokens.add((mkt, out))
 
         # Calculate current positions (simplified for Phase 2)
         # In Phase 3, this will come from OMS/PostTrade projections
         current_positions: dict[tuple[str, Outcome], float] = {}
-        for market_slug, outcome in self._executed_trades:
+        for _sid, market_slug, outcome in self._executed_trades:
             # Simplified: assume 1.0 USD per executed trade
             # In Phase 3, this will be accurate from OMS state
-            current_positions[(market_slug, outcome)] = 1.0
+            current_positions[(market_slug, outcome)] = (
+                current_positions.get((market_slug, outcome), 0.0) + 1.0
+            )
 
         global_position = sum(current_positions.values())
 
         # Combine executed and approved trades for max_trades_per_market check
-        # This prevents race condition where multiple orders pass risk checks
-        # before the first one executes
+        # Keyed by (strategy_id, market_slug, outcome) — per-instance scoping
         all_trades = self._executed_trades | self._approved_trades
 
         return RiskContext(

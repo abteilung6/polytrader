@@ -23,6 +23,7 @@ from polytrader.adapters import create_adapter_factory
 from polytrader.api.app import create_app
 from polytrader.config import PolymarketSecrets, get_database_url
 from polytrader.events import SYSTEM_LIFECYCLE, EventBus
+from polytrader.events.closed_trade_sink import ClosedTradeSink
 from polytrader.events.sink import EventSink
 from polytrader.events.stores import PostgreSQLEventStore
 from polytrader.events.types import SystemStartedEvent
@@ -100,6 +101,22 @@ async def platform_start_task(
         event_sink = None
         event_sink_task = None
         postgres_event_store = None
+
+    # ClosedTradeSink: project StrategyClosedTradeEvent to dedicated read-model table
+    closed_trade_sink: ClosedTradeSink | None = None
+    closed_trade_sink_task: asyncio.Task[None] | None = None
+    try:
+        closed_trade_sink = ClosedTradeSink(bus=bus, session_factory=Session)
+        closed_trade_sink_task = asyncio.create_task(closed_trade_sink.run())
+        logger.info("ClosedTradeSink started (closed trades persisted to strategy_closed_trades)")
+    except Exception as e:
+        logger.warning(
+            "ClosedTradeSink not started: {error}",
+            error=str(e),
+            error_type=type(e).__name__,
+        )
+        closed_trade_sink = None
+        closed_trade_sink_task = None
 
     # Emit system started event (will be persisted if EventSink is running)
     started_event = SystemStartedEvent()
@@ -226,6 +243,17 @@ async def platform_start_task(
                 # Stop orchestrator
                 await orchestrator.stop()
 
+                # Stop ClosedTradeSink
+                if closed_trade_sink_task is not None:
+                    if closed_trade_sink is not None:
+                        await closed_trade_sink.stop()
+                    closed_trade_sink_task.cancel()
+                    try:
+                        await asyncio.wait_for(closed_trade_sink_task, timeout=5.0)
+                    except (asyncio.CancelledError, TimeoutError):
+                        pass
+                    closed_trade_sink_task = None
+
                 # Stop EventSink and cleanup PostgreSQL event store
                 if event_sink_task is not None:
                     if event_sink is not None:
@@ -254,6 +282,17 @@ async def platform_start_task(
 
                 logger.info("Platform stopped")
         except Exception:
+            # Stop ClosedTradeSink on error
+            if closed_trade_sink_task is not None and closed_trade_sink is not None:
+                try:
+                    await closed_trade_sink.stop()
+                except Exception:
+                    pass
+                closed_trade_sink_task.cancel()
+                try:
+                    await closed_trade_sink_task
+                except asyncio.CancelledError:
+                    pass
             # Stop EventSink and cleanup on error
             if event_sink_task is not None and event_sink is not None:
                 try:

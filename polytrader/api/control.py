@@ -4,6 +4,7 @@ Per Platform_Proposal.md: Elite-style API design with separation of
 state endpoints (/state/*) and command endpoints (/commands/*).
 """
 
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
@@ -18,6 +19,7 @@ from polytrader.api.dependencies import (
     get_in_memory_strategy_registry,
     get_live_strategy_repo,
     get_orchestrator,
+    get_performance_overview_repo,
     get_strategy_registry,
 )
 from polytrader.api.models import (
@@ -35,6 +37,8 @@ from polytrader.api.models import (
     HealthGateStatus,
     HealthResponse,
     LiveStrategiesResponse,
+    PerformanceOverviewItemResponse,
+    PerformanceOverviewResponse,
     PerformanceResponse,
     PerformanceSummary,
     RunIdentityResponse,
@@ -53,6 +57,11 @@ from polytrader.api.models import (
 )
 from polytrader.db.models import ControlCommandRecord, EventRecord
 from polytrader.db.models import StrategyRecord as StrategyRecordModel
+from polytrader.db.performance_repository import (
+    MIN_TRADES_THRESHOLD,
+    PerformanceOverviewRepository,
+    SortByField,
+)
 from polytrader.db.repository import EventRepository
 from polytrader.platform.control import (
     ControlCommandRepository,
@@ -469,6 +478,80 @@ def _closed_trade_items_to_summary(
         win_rate_pct=win_rate_pct,
         current_drawdown=None,
         max_drawdown=None,
+    )
+
+
+@router.get(
+    "/state/strategies/performance/overview",
+    response_model=PerformanceOverviewResponse,
+)
+async def get_performance_overview(
+    repo: PerformanceOverviewRepository = Depends(get_performance_overview_repo),  # noqa: B008
+    since: datetime | None = None,
+    until: datetime | None = None,
+    execution_mode: Literal["paper", "live"] | None = None,
+    template_type_id: str | None = None,
+    state: str | None = None,
+    sort_by: SortByField = "total_realized_pnl",
+    limit: int = 200,
+) -> PerformanceOverviewResponse:
+    """Get aggregated performance overview for all strategy instances.
+
+    Per PERFORMANCE_OVERVIEW_PROPOSAL.md §7:
+    - DB-side aggregation on strategy_closed_trades table.
+    - LEFT JOIN to strategy_instances for registry metadata.
+    - Evidence tier (INSUFFICIENT_DATA / TRACKING) per trade count threshold.
+    - Does NOT require the trader runtime process.
+
+    Query params:
+        since: ISO 8601 UTC lower bound on exit_ts_wall (omit for all time).
+        until: ISO 8601 UTC upper bound on exit_ts_wall (default: server now()).
+        execution_mode: Filter by paper or live (omit for all).
+        template_type_id: Filter by strategy template.
+        state: Filter by lifecycle state (RUNNING, STOPPED, etc.).
+        sort_by: Sort column descending (total_realized_pnl, win_rate_pct, trade_count).
+        limit: Max rows (1-1000, default 200).
+    """
+    items = await repo.get_overview(
+        since=since,
+        until=until,
+        execution_mode=execution_mode,
+        template_type_id=template_type_id,
+        state=state,
+        sort_by=sort_by,
+        limit=limit,
+    )
+
+    # Resolve the actual "until" that was used (repo defaults None → now())
+    resolved_until = until if until is not None else datetime.now(UTC)
+
+    response_items = [
+        PerformanceOverviewItemResponse(
+            strategy_id=item.strategy_id,
+            name=item.name,
+            template_type_id=item.template_type_id,
+            template_version=item.template_version,
+            actual_state=item.actual_state,
+            trade_count=item.trade_count,
+            wins=item.wins,
+            losses=item.losses,
+            breakevens=item.breakevens,
+            total_realized_pnl=item.total_realized_pnl,
+            avg_trade_pnl=item.avg_trade_pnl,
+            win_rate_pct=item.win_rate_pct,
+            profit_factor=item.profit_factor,
+            last_trade_exit_ts_wall=item.last_trade_exit_ts_wall,
+            evidence_tier=item.evidence_tier,
+        )
+        for item in items
+    ]
+
+    return PerformanceOverviewResponse(
+        from_ts_wall=since,
+        to_ts_wall=resolved_until,
+        execution_mode=execution_mode,
+        min_trades_threshold=MIN_TRADES_THRESHOLD,
+        items=response_items,
     )
 
 

@@ -1,0 +1,80 @@
+---
+alwaysApply: true
+---
+# performance.mdc — Performance Evaluation & Promotion (Phased Model)
+
+## 1) Core Principle
+Performance tracking exists to support **selection under uncertainty**, not vanity metrics.
+All strategy instances are treated as investment candidates competing for attention and capital.
+
+## 2) Performance Phases
+The system operates in explicit phases. Each phase adds constraints and authority.
+
+### Phase 1 — Visibility & Triage
+Goal: Observe all instances and eliminate obvious losers.
+
+- All instances are visible in a single list.
+- Metrics are descriptive only.
+- No instance may be promoted based on Phase 1 alone.
+
+Mandatory metrics:
+- realized_pnl (net)
+- unrealized_pnl
+- total_pnl
+- trade_count
+- win_rate
+- max_drawdown
+- runtime_duration
+
+Instances below minimum evidence thresholds MUST be labeled `INSUFFICIENT_DATA`.
+
+---
+
+### Phase 2 — Structured Comparison & Candidate Selection
+Goal: Identify strategies with plausible, risk-aware edge.
+
+Additions:
+- `evidence_tier` ∈ {INSUFFICIENT_DATA, TRACKING, CANDIDATE}
+- Composite score (profit rewarded, drawdown and churn penalized)
+- Recent vs full-window performance comparison
+
+Promotion to `CANDIDATE` requires:
+- minimum trades and runtime met
+- positive net total_pnl
+- max_drawdown below configured limit
+- no data_quality BAD flags
+
+Promotion is manual or explicitly approved.
+
+---
+
+### Phase 3 — Shadowing & Live Readiness
+Goal: Validate behavior under real execution constraints.
+
+Additions:
+- `SHADOW` tier
+- real market data and order generation
+- fill quality, timing drift, churn metrics
+
+Rules:
+- No LIVE promotion without SHADOW validation
+- Any divergence between expected and observed behavior triggers demotion
+
+---
+
+### Phase 4 — Portfolio Optimization & Automation
+Goal: Maximize portfolio-level profit under risk constraints.
+
+Additions:
+- capital allocation per strategy
+- correlation and redundancy analysis
+- regime-aware activation
+- automated promotion/demotion within strict bounds
+
+Automation is allowed only in this phase.
+
+## 3) Non-Negotiables
+- Never promote based on PnL alone
+- Never rank strategies without minimum evidence
+- Always show drawdown next to profit
+- Costs and slippage assumptions must be explicit

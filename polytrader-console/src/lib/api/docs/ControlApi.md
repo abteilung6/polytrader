@@ -13,6 +13,7 @@ All URIs are relative to *http://localhost*
 |[**getExecutionStateApiV1StateExecutionGet**](#getexecutionstateapiv1stateexecutionget) | **GET** /api/v1/state/execution | Get Execution State|
 |[**getHealthApiV1StateHealthGet**](#gethealthapiv1statehealthget) | **GET** /api/v1/state/health | Get Health|
 |[**getLiveStrategiesApiV1StateLiveStrategiesGet**](#getlivestrategiesapiv1statelivestrategiesget) | **GET** /api/v1/state/live-strategies | Get Live Strategies|
+|[**getPerformanceOverviewApiV1StateStrategiesPerformanceOverviewGet**](#getperformanceoverviewapiv1statestrategiesperformanceoverviewget) | **GET** /api/v1/state/strategies/performance/overview | Get Performance Overview|
 |[**getStrategiesApiV1StateStrategiesGet**](#getstrategiesapiv1statestrategiesget) | **GET** /api/v1/state/strategies | Get Strategies|
 |[**getStrategyByIdApiV1StateStrategiesStrategyIdGet**](#getstrategybyidapiv1statestrategiesstrategyidget) | **GET** /api/v1/state/strategies/{strategy_id} | Get Strategy By Id|
 |[**getStrategyOrdersApiV1StateStrategiesStrategyIdOrdersGet**](#getstrategyordersapiv1statestrategiesstrategyidordersget) | **GET** /api/v1/state/strategies/{strategy_id}/orders | Get Strategy Orders|
@@ -485,6 +486,76 @@ No authorization required
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
 |**200** | Successful Response |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **getPerformanceOverviewApiV1StateStrategiesPerformanceOverviewGet**
+> PerformanceOverviewResponse getPerformanceOverviewApiV1StateStrategiesPerformanceOverviewGet()
+
+Get aggregated performance overview for all strategy instances.  Per PERFORMANCE_OVERVIEW_PROPOSAL.md §7: - DB-side aggregation on strategy_closed_trades table. - LEFT JOIN to strategy_instances for registry metadata. - Evidence tier (INSUFFICIENT_DATA / TRACKING) per trade count threshold. - Does NOT require the trader runtime process.  Query params:     since: ISO 8601 UTC lower bound on exit_ts_wall (omit for all time).     until: ISO 8601 UTC upper bound on exit_ts_wall (default: server now()).     execution_mode: Filter by paper or live (omit for all).     template_type_id: Filter by strategy template.     state: Filter by lifecycle state (RUNNING, STOPPED, etc.).     sort_by: Sort column descending (total_realized_pnl, win_rate_pct, trade_count).     limit: Max rows (1-1000, default 200).
+
+### Example
+
+```typescript
+import {
+    ControlApi,
+    Configuration
+} from '@polytrader/api-client';
+
+const configuration = new Configuration();
+const apiInstance = new ControlApi(configuration);
+
+let since: string; // (optional) (default to undefined)
+let until: string; // (optional) (default to undefined)
+let executionMode: 'paper' | 'live'; // (optional) (default to undefined)
+let templateTypeId: string; // (optional) (default to undefined)
+let state: string; // (optional) (default to undefined)
+let sortBy: 'total_realized_pnl' | 'win_rate_pct' | 'trade_count'; // (optional) (default to 'total_realized_pnl')
+let limit: number; // (optional) (default to 200)
+
+const { status, data } = await apiInstance.getPerformanceOverviewApiV1StateStrategiesPerformanceOverviewGet(
+    since,
+    until,
+    executionMode,
+    templateTypeId,
+    state,
+    sortBy,
+    limit
+);
+```
+
+### Parameters
+
+|Name | Type | Description  | Notes|
+|------------- | ------------- | ------------- | -------------|
+| **since** | [**string**] |  | (optional) defaults to undefined|
+| **until** | [**string**] |  | (optional) defaults to undefined|
+| **executionMode** | [**&#39;paper&#39; | &#39;live&#39;**]**Array<&#39;paper&#39; &#124; &#39;live&#39;>** |  | (optional) defaults to undefined|
+| **templateTypeId** | [**string**] |  | (optional) defaults to undefined|
+| **state** | [**string**] |  | (optional) defaults to undefined|
+| **sortBy** | [**&#39;total_realized_pnl&#39; | &#39;win_rate_pct&#39; | &#39;trade_count&#39;**]**Array<&#39;total_realized_pnl&#39; &#124; &#39;win_rate_pct&#39; &#124; &#39;trade_count&#39;>** |  | (optional) defaults to 'total_realized_pnl'|
+| **limit** | [**number**] |  | (optional) defaults to 200|
+
+
+### Return type
+
+**PerformanceOverviewResponse**
+
+### Authorization
+
+No authorization required
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+
+### HTTP response details
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+|**200** | Successful Response |  -  |
+|**422** | Validation Error |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 

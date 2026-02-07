@@ -27,6 +27,8 @@ docs/MarketApi.md
 docs/MarketInfoResponse.md
 docs/MarketTickResponse.md
 docs/MarketsResponse.md
+docs/PerformanceOverviewItemResponse.md
+docs/PerformanceOverviewResponse.md
 docs/PerformanceResponse.md
 docs/PerformanceSummary.md
 docs/RunIdentityResponse.md
@@ -67,6 +69,8 @@ models/location-inner.ts
 models/market-info-response.ts
 models/market-tick-response.ts
 models/markets-response.ts
+models/performance-overview-item-response.ts
+models/performance-overview-response.ts
 models/performance-response.ts
 models/performance-summary.ts
 models/run-identity-response.ts

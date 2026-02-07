@@ -125,7 +125,9 @@ class TestRiskStructuredLogging:
         context = RiskContext(
             intent=intent,
             market_data=market_data,
-            executed_trades={(intent.market_slug, intent.outcome)},  # Already traded
+            executed_trades={
+                (intent.strategy_id, intent.market_slug, intent.outcome)
+            },  # Already traded
             reconciliation_healthy=True,
         )
 
