@@ -1,0 +1,171 @@
+# ============================================================================
+# Polytrader Platform Configuration — Full Reference
+# ============================================================================
+# Controls ALL platform-owned policy: risk, execution, health, ops, infra.
+#
+# Secrets (PRIVATE_KEY, DB_PASSWORD, etc.) remain in .env — never here.
+# Strategy instance parameters are per-instance — not in this file.
+#
+# Usage:
+#   python -m cli platform start --config config/platform.paper.yaml
+#
+# If --config is omitted, safe hardcoded defaults are used.
+#
+# On load: validated atomically via Pydantic, hashed (SHA256),
+#          and emitted as ConfigLoadedEvent for audit trail.
+# ============================================================================
+
+version: "1.0"
+
+# ---------------------------------------------------------------------------
+# Venue / Exchange Connectivity
+# ---------------------------------------------------------------------------
+venue:
+  clob_api_url: "https://clob.polymarket.com"
+  chain_id: 137  # Polygon mainnet
+
+# ---------------------------------------------------------------------------
+# Control API Server
+# ---------------------------------------------------------------------------
+api:
+  host: "0.0.0.0"
+  port: 8000
+  cors_allowed_origins:
+    - "*"
+
+# ---------------------------------------------------------------------------
+# Database Connection Pools (credentials stay in .env)
+# ---------------------------------------------------------------------------
+database:
+  event_store_pool_size: 10
+  tick_store_pool_size: 5
+
+# ---------------------------------------------------------------------------
+# Metrics & Observability
+# ---------------------------------------------------------------------------
+metrics:
+  backend: "prometheus"     # "prometheus" | "memory"
+  port: 9100                # Separate from control API
+  histogram_max_size: 1000
+
+# ---------------------------------------------------------------------------
+# Pre-Trade Risk Limits (HARD GATE)
+# ---------------------------------------------------------------------------
+# Risk check runs BEFORE OMS. Denied intents never become orders.
+# All checks emit RiskCheckEvent with allow/deny + reason codes.
+risk:
+  max_position_per_market: 1.0      # USD — max net position per market
+  max_position_global: 10.0         # USD — max total exposure
+  max_notional_exposure: 100.0      # USD — max notional across portfolio
+  max_order_size: 10.0              # USD — max single order size
+  max_trades_per_market: 1          # max open trades per market
+  order_rate_limit_per_minute: 60   # max new orders per minute
+  cancel_rate_limit_per_minute: 120 # max cancels per minute
+  max_data_staleness_seconds: 5.0   # deny if market data older than this
+  price_deviation_threshold: 0.10   # deny if price deviates >10% from mid
+
+# ---------------------------------------------------------------------------
+# Health Gates (startup + runtime)
+# ---------------------------------------------------------------------------
+# execution_enabled = true ONLY when all gates pass.
+health_gates:
+  max_market_data_staleness_seconds: 60.0
+  max_reconciliation_divergences: 0
+  max_error_rate: 0.10
+  require_user_stream: true
+
+# ---------------------------------------------------------------------------
+# Circuit Breakers
+# ---------------------------------------------------------------------------
+# When triggered: execution_enabled = false, optional cancel-all.
+circuit_breakers:
+  max_phantom_orders: 3     # OMS has order, venue does not
+  max_orphan_orders: 3      # venue has order, OMS does not
+  max_fill_mismatches: 1    # fill qty/price divergence
+  require_error_severity: true
+
+# ---------------------------------------------------------------------------
+# Execution
+# ---------------------------------------------------------------------------
+execution:
+  throttle:
+    max_orders_per_second: 10.0
+    max_cancels_per_second: 20.0
+  tactics:
+    max_buy_slippage_bps: 50.0    # max 0.5% above mid for buys
+    max_sell_slippage_bps: 50.0   # max 0.5% below mid for sells
+    prefer_passive: true           # prefer post-only / maker orders
+  paper_simulation:
+    fill_probability: 1.0
+    rejection_probability: 0.0
+    latency_ms: 50.0
+    slippage_bps: 10.0
+
+# ---------------------------------------------------------------------------
+# Portfolio & Sizing
+# ---------------------------------------------------------------------------
+portfolio:
+  fixed_size_usd: 1.0
+  starting_equity: 1000.0
+
+# ---------------------------------------------------------------------------
+# Market Data
+# ---------------------------------------------------------------------------
+market_data:
+  polling_frequency_hz: 1.0
+  gap_threshold_seconds: 10.0
+  tick_store_window: 3000
+  reconnect:
+    initial_delay_s: 1.0
+    max_delay_s: 60.0
+
+# ---------------------------------------------------------------------------
+# Event Persistence
+# ---------------------------------------------------------------------------
+event_persistence:
+  event_batch_size: 100
+  event_flush_interval_s: 1.0
+  event_max_buffer_size: 10000
+  tick_batch_size: 1000
+  tick_flush_interval_s: 1.0
+  failure_threshold: 10
+  cooldown_seconds: 300.0
+
+# ---------------------------------------------------------------------------
+# Reconciliation
+# ---------------------------------------------------------------------------
+reconciliation:
+  interval_s: 60.0
+  position_sync_interval_s: 60.0
+
+# ---------------------------------------------------------------------------
+# Supervisor & Startup
+# ---------------------------------------------------------------------------
+supervisor:
+  startup_timeout_s: 30.0
+  poll_interval_s: 1.0
+  control_plane_poll_interval_s: 1.0
+  market_monitor_interval_s: 1.0
+  market_retry_delay_s: 5.0
+
+# ---------------------------------------------------------------------------
+# Performance & Evidence
+# ---------------------------------------------------------------------------
+performance:
+  min_trades_threshold: 1
+  default_query_limit: 200
+  max_query_limit: 1000
+
+# ---------------------------------------------------------------------------
+# Market Discovery
+# ---------------------------------------------------------------------------
+market_discovery:
+  max_windows_ahead: 48
+  max_windows_behind: 4
+
+# ---------------------------------------------------------------------------
+# Database Health Monitoring
+# ---------------------------------------------------------------------------
+database_health:
+  write_latency_threshold_ms: 100.0
+  read_latency_threshold_ms: 50.0
