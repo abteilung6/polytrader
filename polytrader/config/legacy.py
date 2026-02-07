@@ -12,6 +12,7 @@ Configuration is separated into:
 
 import hashlib
 import json
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,9 @@ from polytrader.events import SYSTEM_LIFECYCLE
 from polytrader.events.bus import EventBus
 from polytrader.events.types import ConfigLoadedEvent
 
+# DEPRECATED: Use PlatformConfig().venue.clob_api_url instead.
+# These constants are kept for backward compatibility and will be removed
+# in a future version. New code should use PlatformConfig.
 CLOB_API_URL = "https://clob.polymarket.com"
 CHAIN_ID = 137  # Polygon mainnet
 
@@ -208,7 +212,12 @@ async def load_config(
     config_path: str | Path | None = None,
     bus: EventBus | None = None,
 ) -> dict[str, Any]:
-    """Load and validate configuration.
+    """Load and validate configuration (DEPRECATED).
+
+    .. deprecated::
+        Use ``load_platform_config()`` from ``polytrader.config.loader`` instead.
+        This function loads untyped JSON dicts. The new loader validates YAML
+        into a typed PlatformConfig model with Pydantic constraints.
 
     Per Phase 7: Load config from file or environment, validate, calculate hash,
     and emit ConfigLoadedEvent.
@@ -224,11 +233,13 @@ async def load_config(
         FileNotFoundError: If config_path is provided but file doesn't exist
         ValueError: If configuration is invalid
         json.JSONDecodeError: If config file is not valid JSON
-
-    Example:
-        >>> config = await load_config("config.json", bus)
-        >>> assert "version" in config
     """
+    warnings.warn(
+        "load_config() is deprecated. Use load_platform_config() from "
+        "polytrader.config.loader instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     # Load config from file or environment
     if config_path is not None:
         config_path_obj = Path(config_path)
