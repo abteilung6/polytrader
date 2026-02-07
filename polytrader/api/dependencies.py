@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from polytrader.config import get_database_url
+from polytrader.db.performance_repository import PerformanceOverviewRepository
 from polytrader.db.repository import EventRepository, MarketTickRepository
 from polytrader.platform.control import (
     ControlCommandRepository,
@@ -186,6 +187,20 @@ def get_orchestrator(request: Request) -> "PlatformOrchestrator | None":
     Used to add newly created RUNNING strategies to the running orchestrator.
     """
     return getattr(request.app.state, "orchestrator", None)
+
+
+def get_performance_overview_repo(
+    session: AsyncSession = Depends(get_db_session),  # noqa: B008
+) -> PerformanceOverviewRepository:
+    """Provide PerformanceOverviewRepository.
+
+    Args:
+        session: Database session (injected via FastAPI)
+
+    Returns:
+        PerformanceOverviewRepository instance
+    """
+    return PerformanceOverviewRepository(session)
 
 
 def get_market_tick_repository(

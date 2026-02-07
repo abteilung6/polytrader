@@ -605,3 +605,62 @@ class MarketsResponse(BaseModel):
 
     markets: list[MarketInfoResponse] = Field(description="List of markets (ordered newest first)")
     count: int = Field(description="Number of markets")
+
+
+# ============================================================================
+# Performance Overview Models (per PERFORMANCE_OVERVIEW_PROPOSAL.md §7)
+# ============================================================================
+
+
+class PerformanceOverviewItemResponse(BaseModel):
+    """One row per strategy instance — aggregated closed-trade performance."""
+
+    strategy_id: str = Field(description="Strategy instance identifier")
+    name: str = Field(description="Human-readable strategy name")
+    template_type_id: str = Field(description="Strategy template type")
+    template_version: str = Field(description="Strategy template version")
+    actual_state: str = Field(description="Current lifecycle state")
+
+    # Aggregates
+    trade_count: int = Field(description="Number of closed trades in window")
+    wins: int = Field(description="Number of winning trades")
+    losses: int = Field(description="Number of losing trades")
+    breakevens: int = Field(description="Number of breakeven trades")
+    total_realized_pnl: float = Field(description="Sum of realized P&L (USD)")
+    avg_trade_pnl: float | None = Field(
+        default=None, description="Average P&L per trade (None if no trades)"
+    )
+    win_rate_pct: float | None = Field(
+        default=None, description="Win rate percentage (None if no trades)"
+    )
+    profit_factor: float | None = Field(
+        default=None, description="Sum(wins)/|Sum(losses)| (None if no losses)"
+    )
+    last_trade_exit_ts_wall: datetime | None = Field(
+        default=None, description="Most recent trade exit time (UTC)"
+    )
+
+    # Evidence
+    evidence_tier: Literal["INSUFFICIENT_DATA", "TRACKING"] = Field(
+        description="Evidence quality tier"
+    )
+
+
+class PerformanceOverviewResponse(BaseModel):
+    """Aggregated performance across all strategy instances.
+
+    Per proposal §7.3: Response includes resolved timestamps,
+    evidence threshold, and per-strategy aggregates.
+    """
+
+    from_ts_wall: datetime | None = Field(
+        description="Resolved lower bound (UTC); None if 'all time'"
+    )
+    to_ts_wall: datetime = Field(description="Resolved upper bound (UTC)")
+    execution_mode: str | None = Field(
+        default=None, description="Echoed execution_mode filter (None = all)"
+    )
+    min_trades_threshold: int = Field(description="Threshold used for evidence tier computation")
+    items: list[PerformanceOverviewItemResponse] = Field(
+        description="Per-strategy performance aggregates"
+    )
