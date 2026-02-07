@@ -7,3 +7,4 @@ pytest-xdist>=3.5.0
 ruff>=0.14.10
 mypy>=1.18.1
 types-requests>=2.31.0
+types-PyYAML>=6.0.12
