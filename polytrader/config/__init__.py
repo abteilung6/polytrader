@@ -1,46 +1,33 @@
 """Platform configuration package.
 
-Re-exports all symbols from the legacy config module for backward compatibility,
-plus new PlatformConfig model hierarchy.
+- models.py: PlatformConfig and all sub-config Pydantic models (policy)
+- loader.py: YAML loading, validation, hashing, ConfigLoadedEvent emission
+- legacy.py: Secret/infrastructure config from .env (PolymarketSecrets, DatabaseConfig, etc.)
 
-Usage (new):
-    from polytrader.config import PlatformConfig
-    config = PlatformConfig()
-
-Usage (existing — unchanged):
+Usage:
+    from polytrader.config import PlatformConfig, load_platform_config
     from polytrader.config import PolymarketSecrets, get_database_url, MetricsConfig
 """
 
-# Re-export everything from legacy module for backward compatibility.
-# All existing imports like `from polytrader.config import PolymarketSecrets` continue to work.
+# Environment-based secret/infrastructure config (from .env)
 from polytrader.config.legacy import (  # noqa: F401
-    CHAIN_ID,
-    CLOB_API_URL,
     DatabaseConfig,
     MetricsConfig,
     PolymarketSecrets,
-    calculate_config_hash,
     get_database_url,
-    load_config,
-    validate_config,
 )
 
-# New platform config models and loader
+# Platform policy config (from YAML)
 from polytrader.config.loader import load_platform_config  # noqa: F401
 from polytrader.config.models import PlatformConfig  # noqa: F401
 
 __all__ = [
-    # Legacy exports (backward compat)
-    "CHAIN_ID",
-    "CLOB_API_URL",
+    # Environment-based (.env)
     "DatabaseConfig",
     "MetricsConfig",
     "PolymarketSecrets",
-    "calculate_config_hash",
     "get_database_url",
-    "load_config",
-    "validate_config",
-    # New exports
+    # Platform policy (YAML)
     "PlatformConfig",
     "load_platform_config",
 ]

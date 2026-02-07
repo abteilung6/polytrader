@@ -1,10 +1,9 @@
 """Tests for CLI --config flag and platform_start_task config integration.
 
-Per Commit 5 of PLATFORM_CONFIGURATION_PROPOSAL.md:
-- platform_start_task accepts optional config_path
-- CLI flags override config file values
-- Risk, health, execution components receive config values
-- Backward compatible: no --config works identically to before
+Verifies that:
+- platform_start_task reads all values from PlatformConfig
+- YAML config overrides defaults
+- No CLI override parameters exist (all values from config file)
 """
 
 import tempfile
@@ -13,9 +12,7 @@ from pathlib import Path
 import yaml
 
 from polytrader.config.models import (
-    ApiConfig,
     PlatformConfig,
-    PortfolioConfig,
     RiskConfig,
     SupervisorConfig,
 )
@@ -25,11 +22,9 @@ class TestPlatformConfigIntegration:
     """platform_start_task uses PlatformConfig correctly."""
 
     def test_default_config_matches_original_defaults(self) -> None:
-        """PlatformConfig() defaults match the original hardcoded values
-        in platform_start_task (api_host=0.0.0.0, api_port=8000, etc.)."""
+        """PlatformConfig() defaults match the original hardcoded values."""
         config = PlatformConfig()
 
-        # These were the original default parameters
         assert config.api.host == "0.0.0.0"
         assert config.api.port == 8000
         assert config.market_data.polling_frequency_hz == 1.0
@@ -59,31 +54,6 @@ class TestPlatformConfigIntegration:
         finally:
             config_path.unlink()
 
-    def test_cli_override_precedence(self) -> None:
-        """CLI flags override config file values (as implemented in platform_start_task)."""
-        # Simulate the override logic from platform_start_task
-        pcfg = PlatformConfig(
-            api=ApiConfig(host="0.0.0.0", port=8000),
-            portfolio=PortfolioConfig(starting_equity=1000.0),
-        )
-
-        # CLI overrides
-        api_host_override = "127.0.0.1"
-        api_port_override = 9000
-        starting_equity_override = None  # Not specified = use config
-
-        api_host = api_host_override if api_host_override is not None else pcfg.api.host
-        api_port = api_port_override if api_port_override is not None else pcfg.api.port
-        starting_equity = (
-            starting_equity_override
-            if starting_equity_override is not None
-            else pcfg.portfolio.starting_equity
-        )
-
-        assert api_host == "127.0.0.1"  # CLI override
-        assert api_port == 9000  # CLI override
-        assert starting_equity == 1000.0  # From config (no CLI override)
-
 
 class TestRiskConfigPropagation:
     """Risk limits from config can be converted to RiskLimits for the engine."""
@@ -97,7 +67,6 @@ class TestRiskConfigPropagation:
         assert limits.max_order_size == 5.0
         assert limits.max_position_global == 25.0
         assert limits.version == "1.0"
-        # Unchanged defaults
         assert limits.max_position_per_market == 1.0
 
     def test_risk_limits_default_matches_engine_default(self) -> None:
@@ -153,23 +122,17 @@ class TestExecutionConfigPropagation:
     """Execution config values accessible for component construction."""
 
     def test_execution_throttle_values(self) -> None:
-        """Throttle config values are accessible for ExecutionThrottle construction."""
         config = PlatformConfig()
-
         assert config.execution.throttle.max_orders_per_second == 10.0
         assert config.execution.throttle.max_cancels_per_second == 20.0
 
     def test_execution_tactics_values(self) -> None:
-        """Tactics config values are accessible for ExecutionTactics construction."""
         config = PlatformConfig()
-
         assert config.execution.tactics.max_buy_slippage_bps == 50.0
         assert config.execution.tactics.prefer_passive is True
 
     def test_paper_simulation_values(self) -> None:
-        """Paper simulation values are accessible for PaperExecutionAdapter."""
         config = PlatformConfig()
-
         assert config.execution.paper_simulation.fill_probability == 1.0
         assert config.execution.paper_simulation.latency_ms == 50.0
 
@@ -178,31 +141,24 @@ class TestSupervisorConfigPropagation:
     """Supervisor config values used in platform_start_task."""
 
     def test_control_plane_poll_interval(self) -> None:
-        """Control plane poll interval accessible from config."""
         config = PlatformConfig(supervisor=SupervisorConfig(control_plane_poll_interval_s=2.5))
         assert config.supervisor.control_plane_poll_interval_s == 2.5
 
     def test_event_store_pool_size(self) -> None:
-        """Event store pool size accessible from config."""
         config = PlatformConfig()
         assert config.database.event_store_pool_size == 10
 
 
-class TestBackwardCompatibility:
-    """No --config flag produces identical behavior to before."""
+class TestAllValuesFromConfig:
+    """All platform settings come from PlatformConfig — no CLI overrides."""
 
-    def test_no_config_all_defaults(self) -> None:
+    def test_all_defaults(self) -> None:
         """PlatformConfig() produces all original defaults."""
         config = PlatformConfig()
 
-        # Original platform_start_task defaults
         assert config.api.host == "0.0.0.0"
         assert config.api.port == 8000
         assert config.market_data.polling_frequency_hz == 1.0
         assert config.portfolio.starting_equity == 1000.0
-
-        # Original EventStore pool_size=10
         assert config.database.event_store_pool_size == 10
-
-        # Original control plane poll_interval_s=1.0
         assert config.supervisor.control_plane_poll_interval_s == 1.0

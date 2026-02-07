@@ -49,10 +49,6 @@ from polytrader.store_factory import create_market_data_store
 
 async def platform_start_task(
     config_path: Path | None = None,
-    api_host_override: str | None = None,
-    api_port_override: int | None = None,
-    frequency_override: float | None = None,
-    starting_equity_override: float | None = None,
     secrets: PolymarketSecrets | None = None,
     platform_config: PlatformConfig | None = None,
 ) -> None:
@@ -64,18 +60,11 @@ async def platform_start_task(
     - Starts FastAPI control API server
     - All strategies run in paper mode
 
-    Config loading precedence (highest wins):
-    1. platform_config (if passed directly, e.g. from tests)
-    2. CLI flags (*_override params)
-    3. YAML config file (config_path)
-    4. Hardcoded defaults in PlatformConfig
+    All settings come from the YAML config file or PlatformConfig defaults.
+    No CLI override parameters — use the config file to change values.
 
     Args:
         config_path: Path to platform config YAML file (optional).
-        api_host_override: CLI override for API host.
-        api_port_override: CLI override for API port.
-        frequency_override: CLI override for polling frequency.
-        starting_equity_override: CLI override for starting equity.
         secrets: Polymarket secrets (defaults to loading from env).
         platform_config: Pre-loaded PlatformConfig (for testing; skips file loading).
     """
@@ -83,7 +72,6 @@ async def platform_start_task(
         secrets = PolymarketSecrets()
 
     # --- Load platform config ---
-    # Priority: platform_config > CLI overrides > YAML file > defaults
     bus = EventBus()
 
     if platform_config is not None:
@@ -91,24 +79,15 @@ async def platform_start_task(
     else:
         pcfg = await load_platform_config(config_path, bus=bus)
 
-    # Apply CLI overrides on top of config values
-    api_host = api_host_override if api_host_override is not None else pcfg.api.host
-    api_port = api_port_override if api_port_override is not None else pcfg.api.port
-    frequency = (
-        frequency_override
-        if frequency_override is not None
-        else pcfg.market_data.polling_frequency_hz
-    )
-    starting_equity = (
-        starting_equity_override
-        if starting_equity_override is not None
-        else pcfg.portfolio.starting_equity
-    )
+    # All values from config (no CLI overrides)
+    api_host = pcfg.api.host
+    api_port = pcfg.api.port
+    frequency = pcfg.market_data.polling_frequency_hz
+    starting_equity = pcfg.portfolio.starting_equity
 
     logger.info(
-        "Platform config loaded (version={version}, hash={hash})",
+        "Platform config loaded (version={version})",
         version=pcfg.version,
-        hash="(from config)",
     )
 
     # Initialize core infrastructure
@@ -241,14 +220,13 @@ async def platform_start_task(
             metrics_config = MetricsConfig()
             metrics_port = pcfg.metrics.port
             start_metrics_server(port=metrics_port, config=metrics_config)
-            logger.info("Metrics server started on port {port}", port=metrics_port)
 
             logger.info("🚀 Platform started")
             logger.info("Control API: http://{host}:{port}/docs", host=api_host, port=api_port)
             logger.info(
                 "Metrics server: http://{host}:{port}/metrics",
                 host="localhost",
-                port=metrics_config.metrics_port,
+                port=metrics_port,
             )
             logger.info("Press Ctrl+C to stop")
 

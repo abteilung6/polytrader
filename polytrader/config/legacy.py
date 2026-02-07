@@ -1,33 +1,18 @@
-"""Configuration module: Polymarket secrets, database config, and general config loading.
+"""Secret and infrastructure configuration loaded from .env via pydantic-settings.
 
-This module contains:
-- Polymarket-specific configuration (secrets, API URLs)
-- Database configuration (PostgreSQL connection settings)
-- General config loading and validation (Phase 7)
+This module contains ONLY items that must come from environment variables:
+- PolymarketSecrets: wallet private key, funder, signature type
+- DatabaseConfig: PostgreSQL host/port/user/password/database
+- MetricsConfig: metrics backend and port
+- get_database_url(): builds a connection string from DatabaseConfig
 
-Configuration is separated into:
-- Secrets: Sensitive values (private keys, passwords) using SecretStr
-- Config: Non-sensitive settings (hosts, ports, database names)
+All platform *policy* configuration (risk limits, health gates, execution
+settings, etc.) now lives in PlatformConfig loaded from YAML.
+See polytrader.config.models and polytrader.config.loader.
 """
-
-import hashlib
-import json
-import warnings
-from pathlib import Path
-from typing import Any
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
-from polytrader.events import SYSTEM_LIFECYCLE
-from polytrader.events.bus import EventBus
-from polytrader.events.types import ConfigLoadedEvent
-
-# DEPRECATED: Use PlatformConfig().venue.clob_api_url instead.
-# These constants are kept for backward compatibility and will be removed
-# in a future version. New code should use PlatformConfig.
-CLOB_API_URL = "https://clob.polymarket.com"
-CHAIN_ID = 137  # Polygon mainnet
 
 
 class PolymarketSecrets(BaseSettings):
@@ -113,8 +98,7 @@ class DatabaseConfig(BaseSettings):
 class MetricsConfig(BaseSettings):
     """Metrics configuration (Prometheus metrics backend and server).
 
-    Per Commit 3 & 4: Configuration for metrics backend selection and
-    dedicated metrics server port. Defaults to Prometheus backend on port 9100.
+    Reads METRICS_BACKEND and METRICS_PORT from .env.
     """
 
     model_config = SettingsConfigDict(
@@ -148,11 +132,6 @@ def get_database_url(config: DatabaseConfig | None = None) -> str:
 
     Raises:
         ValueError: If required configuration is missing
-
-    Example:
-        >>> config = DatabaseConfig()
-        >>> url = get_database_url(config)
-        >>> assert url.startswith("postgresql://")
     """
     if config is None:
         config = DatabaseConfig()
@@ -162,113 +141,3 @@ def get_database_url(config: DatabaseConfig | None = None) -> str:
 
     # Build connection URL
     return f"postgresql://{config.db_user}:{password}@{config.db_host}:{config.db_port}/{config.db_database}"
-
-
-# General config loading functions (Phase 7)
-
-
-def calculate_config_hash(config: dict[str, Any]) -> str:
-    """Calculate SHA256 hash of configuration.
-
-    Per Phase 7: Config hash is used for audit trail and verification.
-
-    Args:
-        config: Configuration dictionary
-
-    Returns:
-        SHA256 hash as hexadecimal string
-    """
-    # Serialize config to JSON (sorted keys for deterministic hashing)
-    config_json = json.dumps(config, sort_keys=True, separators=(",", ":"))
-    config_bytes = config_json.encode("utf-8")
-    return hashlib.sha256(config_bytes).hexdigest()
-
-
-def validate_config(config: dict[str, Any]) -> None:
-    """Validate configuration structure.
-
-    Per Phase 7: Config must be validated before use.
-
-    Args:
-        config: Configuration dictionary to validate
-
-    Raises:
-        ValueError: If configuration is invalid
-
-    Note:
-        This is a basic validation. More specific validation can be added
-        for different config sections (risk_limits, health_gates, etc.).
-    """
-    if not isinstance(config, dict):
-        raise ValueError(f"Config must be a dictionary, got {type(config)}")
-
-    # Config should have a version field (optional but recommended)
-    if "version" in config:
-        if not isinstance(config["version"], str):
-            raise ValueError("Config version must be a string")
-
-
-async def load_config(
-    config_path: str | Path | None = None,
-    bus: EventBus | None = None,
-) -> dict[str, Any]:
-    """Load and validate configuration (DEPRECATED).
-
-    .. deprecated::
-        Use ``load_platform_config()`` from ``polytrader.config.loader`` instead.
-        This function loads untyped JSON dicts. The new loader validates YAML
-        into a typed PlatformConfig model with Pydantic constraints.
-
-    Per Phase 7: Load config from file or environment, validate, calculate hash,
-    and emit ConfigLoadedEvent.
-
-    Args:
-        config_path: Path to config file (JSON). If None, loads from environment.
-        bus: Event bus for emitting ConfigLoadedEvent (optional)
-
-    Returns:
-        Configuration dictionary
-
-    Raises:
-        FileNotFoundError: If config_path is provided but file doesn't exist
-        ValueError: If configuration is invalid
-        json.JSONDecodeError: If config file is not valid JSON
-    """
-    warnings.warn(
-        "load_config() is deprecated. Use load_platform_config() from "
-        "polytrader.config.loader instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    # Load config from file or environment
-    if config_path is not None:
-        config_path_obj = Path(config_path)
-        if not config_path_obj.exists():
-            raise FileNotFoundError(f"Config file not found: {config_path}")
-
-        # Load JSON file
-        with open(config_path_obj, encoding="utf-8") as f:
-            config: dict[str, Any] = json.load(f)
-    else:
-        # Load from environment (for now, return empty dict - can be enhanced)
-        # In practice, this could load from environment variables or use pydantic-settings
-        config = {}
-
-    # Validate config
-    validate_config(config)
-
-    # Calculate config hash
-    config_hash = calculate_config_hash(config)
-
-    # Get config version (default to "1.0" if not present)
-    config_version = config.get("version", "1.0")
-
-    # Emit ConfigLoadedEvent
-    if bus is not None:
-        event = ConfigLoadedEvent(
-            config_hash=config_hash,
-            config_version=config_version if config_version != "1.0" else None,
-        )
-        await bus.publish(SYSTEM_LIFECYCLE, event)
-
-    return config

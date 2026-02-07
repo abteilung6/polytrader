@@ -19,33 +19,20 @@ app.add_typer(platform_app, name="platform")
 @platform_app.command("start")
 def platform_start(
     config: str | None = typer.Option(
-        None, "--config", help="Path to platform config YAML file (optional)"
-    ),
-    api_host: str | None = typer.Option(
-        None, "--api-host", help="API server host (overrides config file)"
-    ),
-    api_port: int | None = typer.Option(
-        None, "--api-port", help="API server port (overrides config file)"
-    ),
-    frequency: float | None = typer.Option(
-        None, "--frequency", "-f", help="Polling frequency in Hz (overrides config file)"
-    ),
-    starting_equity: float | None = typer.Option(
-        None, "--starting-equity", help="Starting equity for paper trading (overrides config file)"
+        None,
+        "--config",
+        help="Path to platform config YAML file (uses safe defaults if omitted)",
     ),
     log_file: str | None = typer.Option(None, "--log-file", help="Optional file path to save logs"),
 ) -> None:
     """Start the platform with orchestrator, control plane, and API server.
 
-    Starts the multi-strategy platform that:
-    - Loads all strategies from database
-    - Runs all strategies in paper mode
-    - Starts control plane service (processes control commands)
-    - Starts FastAPI control API server
+    All platform settings (API host/port, risk limits, execution params, etc.)
+    are controlled via the YAML config file. If --config is omitted, safe
+    hardcoded defaults from PlatformConfig are used.
 
-    If --config is provided, loads platform configuration from a YAML file.
-    CLI flags (--api-host, --api-port, etc.) override config file values.
-    If no --config is provided, safe hardcoded defaults are used.
+    Example:
+        python -m cli platform start --config config/platform.paper.yaml
 
     Press Ctrl+C to stop.
     """
@@ -57,17 +44,11 @@ def platform_start(
     logger.info("Starting platform orchestrator")
     if config_path:
         logger.info("Config file: {config}", config=config_path)
+    else:
+        logger.info("No config file — using safe defaults")
     logger.info("Press Ctrl+C to stop")
 
-    asyncio.run(
-        platform_start_task(
-            config_path=config_path,
-            api_host_override=api_host,
-            api_port_override=api_port,
-            frequency_override=frequency,
-            starting_equity_override=starting_equity,
-        )
-    )
+    asyncio.run(platform_start_task(config_path=config_path))
 
 
 def _setup_logging(log_file: str | None) -> None:

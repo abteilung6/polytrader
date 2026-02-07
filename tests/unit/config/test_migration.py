@@ -1,33 +1,19 @@
-"""Tests for backward compatibility and migration from legacy config.
+"""Tests for config package public API after legacy cleanup.
 
-Per Commit 7 of PLATFORM_CONFIGURATION_PROPOSAL.md:
-- Legacy imports (CLOB_API_URL, CHAIN_ID, etc.) still work
-- load_config() emits deprecation warning
-- Legacy constants match PlatformConfig.venue defaults
-- Existing test_config_loading.py tests still pass (backward compat)
+Verifies that:
+- Secret/infrastructure imports (PolymarketSecrets, DatabaseConfig, etc.) still work
+- Legacy constants and functions are removed (no CLOB_API_URL, CHAIN_ID, load_config)
+- PlatformConfig and load_platform_config are the canonical API
+- Venue config values are accessible through PlatformConfig
 """
-
-import warnings
 
 import pytest
 
 from polytrader.config.models import PlatformConfig
 
 
-class TestLegacyImportsStillWork:
-    """All existing imports from polytrader.config continue to work."""
-
-    def test_clob_api_url_importable(self) -> None:
-        """CLOB_API_URL importable from polytrader.config."""
-        from polytrader.config import CLOB_API_URL
-
-        assert CLOB_API_URL == "https://clob.polymarket.com"
-
-    def test_chain_id_importable(self) -> None:
-        """CHAIN_ID importable from polytrader.config."""
-        from polytrader.config import CHAIN_ID
-
-        assert CHAIN_ID == 137
+class TestSecretImportsWork:
+    """Secret and infrastructure imports from polytrader.config still work."""
 
     def test_polymarket_secrets_importable(self) -> None:
         """PolymarketSecrets importable from polytrader.config."""
@@ -53,77 +39,57 @@ class TestLegacyImportsStillWork:
 
         assert callable(get_database_url)
 
-    def test_calculate_config_hash_importable(self) -> None:
-        """calculate_config_hash importable from polytrader.config."""
-        from polytrader.config import calculate_config_hash
 
-        assert callable(calculate_config_hash)
+class TestLegacyItemsRemoved:
+    """Legacy constants and functions are no longer in the public API."""
 
-    def test_validate_config_importable(self) -> None:
-        """validate_config importable from polytrader.config."""
-        from polytrader.config import validate_config
+    def test_no_clob_api_url(self) -> None:
+        """CLOB_API_URL is no longer exported from polytrader.config."""
+        import polytrader.config as cfg
 
-        assert callable(validate_config)
+        assert not hasattr(cfg, "CLOB_API_URL")
 
-    def test_load_config_importable(self) -> None:
-        """load_config importable from polytrader.config."""
-        from polytrader.config import load_config
+    def test_no_chain_id(self) -> None:
+        """CHAIN_ID is no longer exported from polytrader.config."""
+        import polytrader.config as cfg
 
-        assert callable(load_config)
+        assert not hasattr(cfg, "CHAIN_ID")
 
-    def test_platform_config_importable(self) -> None:
-        """PlatformConfig importable from polytrader.config."""
-        from polytrader.config import PlatformConfig
+    def test_no_load_config(self) -> None:
+        """load_config is no longer exported from polytrader.config."""
+        import polytrader.config as cfg
 
-        assert PlatformConfig is not None
+        assert not hasattr(cfg, "load_config")
+
+    def test_no_validate_config(self) -> None:
+        """validate_config is no longer exported from polytrader.config."""
+        import polytrader.config as cfg
+
+        assert not hasattr(cfg, "validate_config")
+
+    def test_no_calculate_config_hash(self) -> None:
+        """calculate_config_hash is no longer exported from polytrader.config."""
+        import polytrader.config as cfg
+
+        assert not hasattr(cfg, "calculate_config_hash")
 
 
-class TestLegacyConstantsMatchConfig:
-    """Legacy constants match PlatformConfig.venue defaults."""
+class TestVenueConfigReplacement:
+    """CLOB_API_URL and CHAIN_ID are now in PlatformConfig.venue."""
 
-    def test_clob_api_url_matches(self) -> None:
-        """CLOB_API_URL constant matches PlatformConfig.venue.clob_api_url."""
-        from polytrader.config import CLOB_API_URL
-
+    def test_clob_api_url_in_venue_config(self) -> None:
+        """CLOB API URL accessible via PlatformConfig.venue."""
         config = PlatformConfig()
-        assert CLOB_API_URL == config.venue.clob_api_url
+        assert config.venue.clob_api_url == "https://clob.polymarket.com"
 
-    def test_chain_id_matches(self) -> None:
-        """CHAIN_ID constant matches PlatformConfig.venue.chain_id."""
-        from polytrader.config import CHAIN_ID
-
+    def test_chain_id_in_venue_config(self) -> None:
+        """Chain ID accessible via PlatformConfig.venue."""
         config = PlatformConfig()
-        assert CHAIN_ID == config.venue.chain_id
+        assert config.venue.chain_id == 137
 
 
-class TestLoadConfigDeprecation:
-    """load_config() emits deprecation warning."""
-
-    @pytest.mark.asyncio
-    async def test_load_config_emits_deprecation_warning(self) -> None:
-        """load_config() emits DeprecationWarning."""
-        from polytrader.config import load_config
-
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            await load_config()
-            assert len(w) == 1
-            assert issubclass(w[0].category, DeprecationWarning)
-            assert "load_platform_config" in str(w[0].message)
-
-    @pytest.mark.asyncio
-    async def test_load_config_still_works(self) -> None:
-        """load_config() still returns a dict despite deprecation."""
-        from polytrader.config import load_config
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
-            result = await load_config()
-            assert isinstance(result, dict)
-
-
-class TestNewConfigAvailable:
-    """New config system is available alongside legacy."""
+class TestCanonicalConfigAPI:
+    """PlatformConfig and load_platform_config are the canonical API."""
 
     def test_platform_config_from_config_package(self) -> None:
         """PlatformConfig importable from polytrader.config."""

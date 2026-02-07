@@ -11,7 +11,8 @@ from py_clob_client.exceptions import PolyApiException  # type: ignore[import-un
 from polytrader.adapters import IMarketDataAdapter
 from polytrader.adapters.polymarket.market_data import GammaClient
 from polytrader.adapters.prices import unmarshall_token_prices
-from polytrader.config import CHAIN_ID, CLOB_API_URL, PolymarketSecrets
+from polytrader.config import PolymarketSecrets
+from polytrader.config.models import PlatformConfig
 from polytrader.events.types import MarketDataEvent
 from polytrader.logging_config import logger
 from polytrader.types import Outcome
@@ -23,6 +24,7 @@ class PolymarketAdapterConfig:
     secrets: PolymarketSecrets
     outcomes: list[Outcome] = field(default_factory=lambda: ["UP", "DOWN"])
     polling_frequency_hz: float = 1.0
+    platform_config: PlatformConfig = field(default_factory=PlatformConfig)
 
 
 class PolymarketMarketDataAdapter(IMarketDataAdapter):
@@ -42,10 +44,11 @@ class PolymarketMarketDataAdapter(IMarketDataAdapter):
         self._consecutive_failures = 0
         self._max_failures = 5  # Emit warning after 5 consecutive 404s
 
+        pcfg = config.platform_config
         self.client = ClobClient(
-            host=CLOB_API_URL,
+            host=pcfg.venue.clob_api_url,
             key=config.secrets.private_key.get_secret_value(),
-            chain_id=CHAIN_ID,
+            chain_id=pcfg.venue.chain_id,
             signature_type=config.secrets.signature_type,
             funder=config.secrets.funder,
         )
