@@ -46,6 +46,8 @@ import type { HealthResponse } from '../models';
 // @ts-ignore
 import type { LiveStrategiesResponse } from '../models';
 // @ts-ignore
+import type { PerformanceOverviewResponse } from '../models';
+// @ts-ignore
 import type { PerformanceResponse } from '../models';
 // @ts-ignore
 import type { StrategiesResponse } from '../models';
@@ -367,6 +369,75 @@ export const ControlApiAxiosParamCreator = function (configuration?: Configurati
             const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Get aggregated performance overview for all strategy instances.  Per PERFORMANCE_OVERVIEW_PROPOSAL.md §7: - DB-side aggregation on strategy_closed_trades table. - LEFT JOIN to strategy_instances for registry metadata. - Evidence tier (INSUFFICIENT_DATA / TRACKING) per trade count threshold. - Does NOT require the trader runtime process.  Query params:     since: ISO 8601 UTC lower bound on exit_ts_wall (omit for all time).     until: ISO 8601 UTC upper bound on exit_ts_wall (default: server now()).     execution_mode: Filter by paper or live (omit for all).     template_type_id: Filter by strategy template.     state: Filter by lifecycle state (RUNNING, STOPPED, etc.).     sort_by: Sort column descending (total_realized_pnl, win_rate_pct, trade_count).     limit: Max rows (1-1000, default 200).
+         * @summary Get Performance Overview
+         * @param {string | null} [since] 
+         * @param {string | null} [until] 
+         * @param {GetPerformanceOverviewApiV1StateStrategiesPerformanceOverviewGetExecutionModeEnum} [executionMode] 
+         * @param {string | null} [templateTypeId] 
+         * @param {string | null} [state] 
+         * @param {GetPerformanceOverviewApiV1StateStrategiesPerformanceOverviewGetSortByEnum} [sortBy] 
+         * @param {number} [limit] 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getPerformanceOverviewApiV1StateStrategiesPerformanceOverviewGet: async (since?: string | null, until?: string | null, executionMode?: GetPerformanceOverviewApiV1StateStrategiesPerformanceOverviewGetExecutionModeEnum, templateTypeId?: string | null, state?: string | null, sortBy?: GetPerformanceOverviewApiV1StateStrategiesPerformanceOverviewGetSortByEnum, limit?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/v1/state/strategies/performance/overview`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (since !== undefined) {
+                localVarQueryParameter['since'] = (since as any instanceof Date) ?
+                    (since as any).toISOString() :
+                    since;
+            }
+
+            if (until !== undefined) {
+                localVarQueryParameter['until'] = (until as any instanceof Date) ?
+                    (until as any).toISOString() :
+                    until;
+            }
+
+            if (executionMode !== undefined) {
+                localVarQueryParameter['execution_mode'] = executionMode;
+            }
+
+            if (templateTypeId !== undefined) {
+                localVarQueryParameter['template_type_id'] = templateTypeId;
+            }
+
+            if (state !== undefined) {
+                localVarQueryParameter['state'] = state;
+            }
+
+            if (sortBy !== undefined) {
+                localVarQueryParameter['sort_by'] = sortBy;
+            }
+
+            if (limit !== undefined) {
+                localVarQueryParameter['limit'] = limit;
+            }
 
             localVarHeaderParameter['Accept'] = 'application/json';
 
@@ -892,6 +963,25 @@ export const ControlApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         * Get aggregated performance overview for all strategy instances.  Per PERFORMANCE_OVERVIEW_PROPOSAL.md §7: - DB-side aggregation on strategy_closed_trades table. - LEFT JOIN to strategy_instances for registry metadata. - Evidence tier (INSUFFICIENT_DATA / TRACKING) per trade count threshold. - Does NOT require the trader runtime process.  Query params:     since: ISO 8601 UTC lower bound on exit_ts_wall (omit for all time).     until: ISO 8601 UTC upper bound on exit_ts_wall (default: server now()).     execution_mode: Filter by paper or live (omit for all).     template_type_id: Filter by strategy template.     state: Filter by lifecycle state (RUNNING, STOPPED, etc.).     sort_by: Sort column descending (total_realized_pnl, win_rate_pct, trade_count).     limit: Max rows (1-1000, default 200).
+         * @summary Get Performance Overview
+         * @param {string | null} [since] 
+         * @param {string | null} [until] 
+         * @param {GetPerformanceOverviewApiV1StateStrategiesPerformanceOverviewGetExecutionModeEnum} [executionMode] 
+         * @param {string | null} [templateTypeId] 
+         * @param {string | null} [state] 
+         * @param {GetPerformanceOverviewApiV1StateStrategiesPerformanceOverviewGetSortByEnum} [sortBy] 
+         * @param {number} [limit] 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async getPerformanceOverviewApiV1StateStrategiesPerformanceOverviewGet(since?: string | null, until?: string | null, executionMode?: GetPerformanceOverviewApiV1StateStrategiesPerformanceOverviewGetExecutionModeEnum, templateTypeId?: string | null, state?: string | null, sortBy?: GetPerformanceOverviewApiV1StateStrategiesPerformanceOverviewGetSortByEnum, limit?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PerformanceOverviewResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.getPerformanceOverviewApiV1StateStrategiesPerformanceOverviewGet(since, until, executionMode, templateTypeId, state, sortBy, limit, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ControlApi.getPerformanceOverviewApiV1StateStrategiesPerformanceOverviewGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Get all strategies in registry.
          * @summary Get Strategies
          * @param {*} [options] Override http request option.
@@ -1127,6 +1217,16 @@ export const ControlApiFactory = function (configuration?: Configuration, basePa
             return localVarFp.getLiveStrategiesApiV1StateLiveStrategiesGet(options).then((request) => request(axios, basePath));
         },
         /**
+         * Get aggregated performance overview for all strategy instances.  Per PERFORMANCE_OVERVIEW_PROPOSAL.md §7: - DB-side aggregation on strategy_closed_trades table. - LEFT JOIN to strategy_instances for registry metadata. - Evidence tier (INSUFFICIENT_DATA / TRACKING) per trade count threshold. - Does NOT require the trader runtime process.  Query params:     since: ISO 8601 UTC lower bound on exit_ts_wall (omit for all time).     until: ISO 8601 UTC upper bound on exit_ts_wall (default: server now()).     execution_mode: Filter by paper or live (omit for all).     template_type_id: Filter by strategy template.     state: Filter by lifecycle state (RUNNING, STOPPED, etc.).     sort_by: Sort column descending (total_realized_pnl, win_rate_pct, trade_count).     limit: Max rows (1-1000, default 200).
+         * @summary Get Performance Overview
+         * @param {ControlApiGetPerformanceOverviewApiV1StateStrategiesPerformanceOverviewGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getPerformanceOverviewApiV1StateStrategiesPerformanceOverviewGet(requestParameters: ControlApiGetPerformanceOverviewApiV1StateStrategiesPerformanceOverviewGetRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<PerformanceOverviewResponse> {
+            return localVarFp.getPerformanceOverviewApiV1StateStrategiesPerformanceOverviewGet(requestParameters.since, requestParameters.until, requestParameters.executionMode, requestParameters.templateTypeId, requestParameters.state, requestParameters.sortBy, requestParameters.limit, options).then((request) => request(axios, basePath));
+        },
+        /**
          * Get all strategies in registry.
          * @summary Get Strategies
          * @param {*} [options] Override http request option.
@@ -1271,6 +1371,25 @@ export interface ControlApiEnableExecutionApiV1CommandsExecutionEnablePostReques
  */
 export interface ControlApiGetCommandStatusApiV1StateCommandsCommandIdGetRequest {
     readonly commandId: string
+}
+
+/**
+ * Request parameters for getPerformanceOverviewApiV1StateStrategiesPerformanceOverviewGet operation in ControlApi.
+ */
+export interface ControlApiGetPerformanceOverviewApiV1StateStrategiesPerformanceOverviewGetRequest {
+    readonly since?: string | null
+
+    readonly until?: string | null
+
+    readonly executionMode?: GetPerformanceOverviewApiV1StateStrategiesPerformanceOverviewGetExecutionModeEnum
+
+    readonly templateTypeId?: string | null
+
+    readonly state?: string | null
+
+    readonly sortBy?: GetPerformanceOverviewApiV1StateStrategiesPerformanceOverviewGetSortByEnum
+
+    readonly limit?: number
 }
 
 /**
@@ -1452,6 +1571,17 @@ export class ControlApi extends BaseAPI {
     }
 
     /**
+     * Get aggregated performance overview for all strategy instances.  Per PERFORMANCE_OVERVIEW_PROPOSAL.md §7: - DB-side aggregation on strategy_closed_trades table. - LEFT JOIN to strategy_instances for registry metadata. - Evidence tier (INSUFFICIENT_DATA / TRACKING) per trade count threshold. - Does NOT require the trader runtime process.  Query params:     since: ISO 8601 UTC lower bound on exit_ts_wall (omit for all time).     until: ISO 8601 UTC upper bound on exit_ts_wall (default: server now()).     execution_mode: Filter by paper or live (omit for all).     template_type_id: Filter by strategy template.     state: Filter by lifecycle state (RUNNING, STOPPED, etc.).     sort_by: Sort column descending (total_realized_pnl, win_rate_pct, trade_count).     limit: Max rows (1-1000, default 200).
+     * @summary Get Performance Overview
+     * @param {ControlApiGetPerformanceOverviewApiV1StateStrategiesPerformanceOverviewGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public getPerformanceOverviewApiV1StateStrategiesPerformanceOverviewGet(requestParameters: ControlApiGetPerformanceOverviewApiV1StateStrategiesPerformanceOverviewGetRequest = {}, options?: RawAxiosRequestConfig) {
+        return ControlApiFp(this.configuration).getPerformanceOverviewApiV1StateStrategiesPerformanceOverviewGet(requestParameters.since, requestParameters.until, requestParameters.executionMode, requestParameters.templateTypeId, requestParameters.state, requestParameters.sortBy, requestParameters.limit, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
      * Get all strategies in registry.
      * @summary Get Strategies
      * @param {*} [options] Override http request option.
@@ -1560,6 +1690,17 @@ export class ControlApi extends BaseAPI {
     }
 }
 
+export const GetPerformanceOverviewApiV1StateStrategiesPerformanceOverviewGetExecutionModeEnum = {
+    Paper: 'paper',
+    Live: 'live'
+} as const;
+export type GetPerformanceOverviewApiV1StateStrategiesPerformanceOverviewGetExecutionModeEnum = typeof GetPerformanceOverviewApiV1StateStrategiesPerformanceOverviewGetExecutionModeEnum[keyof typeof GetPerformanceOverviewApiV1StateStrategiesPerformanceOverviewGetExecutionModeEnum];
+export const GetPerformanceOverviewApiV1StateStrategiesPerformanceOverviewGetSortByEnum = {
+    TotalRealizedPnl: 'total_realized_pnl',
+    WinRatePct: 'win_rate_pct',
+    TradeCount: 'trade_count'
+} as const;
+export type GetPerformanceOverviewApiV1StateStrategiesPerformanceOverviewGetSortByEnum = typeof GetPerformanceOverviewApiV1StateStrategiesPerformanceOverviewGetSortByEnum[keyof typeof GetPerformanceOverviewApiV1StateStrategiesPerformanceOverviewGetSortByEnum];
 export const GetStrategyPerformanceApiV1StateStrategiesStrategyIdPerformanceGetExecutionModeEnum = {
     Paper: 'paper',
     Live: 'live'

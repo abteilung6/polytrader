@@ -369,6 +369,151 @@
         }
       }
     },
+    "/api/v1/state/strategies/performance/overview": {
+      "get": {
+        "tags": [
+          "control"
+        ],
+        "summary": "Get Performance Overview",
+        "description": "Get aggregated performance overview for all strategy instances.\n\nPer PERFORMANCE_OVERVIEW_PROPOSAL.md \u00a77:\n- DB-side aggregation on strategy_closed_trades table.\n- LEFT JOIN to strategy_instances for registry metadata.\n- Evidence tier (INSUFFICIENT_DATA / TRACKING) per trade count threshold.\n- Does NOT require the trader runtime process.\n\nQuery params:\n    since: ISO 8601 UTC lower bound on exit_ts_wall (omit for all time).\n    until: ISO 8601 UTC upper bound on exit_ts_wall (default: server now()).\n    execution_mode: Filter by paper or live (omit for all).\n    template_type_id: Filter by strategy template.\n    state: Filter by lifecycle state (RUNNING, STOPPED, etc.).\n    sort_by: Sort column descending (total_realized_pnl, win_rate_pct, trade_count).\n    limit: Max rows (1-1000, default 200).",
+        "operationId": "get_performance_overview_api_v1_state_strategies_performance_overview_get",
+        "parameters": [
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Since"
+            }
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Until"
+            }
+          },
+          {
+            "name": "execution_mode",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "paper",
+                    "live"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Execution Mode"
+            }
+          },
+          {
+            "name": "template_type_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Template Type Id"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "State"
+            }
+          },
+          {
+            "name": "sort_by",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "total_realized_pnl",
+                "win_rate_pct",
+                "trade_count"
+              ],
+              "type": "string",
+              "default": "total_realized_pnl",
+              "title": "Sort By"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 200,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PerformanceOverviewResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/state/strategies/{strategy_id}/performance": {
       "get": {
         "tags": [
@@ -1385,8 +1530,8 @@
           },
           "exit_price": {
             "type": "number",
-            "minimum": 0.0,
             "maximum": 1.0,
+            "minimum": 0.0,
             "title": "Exit Price",
             "description": "Exit fill/settlement price (0 allowed for binary settlement)"
           },
@@ -2142,6 +2287,191 @@
         ],
         "title": "MarketsResponse",
         "description": "Markets list response.\n\nMarkets are ordered by latest_tick_ts descending (newest first).\nMarkets with null latest_tick_ts appear last."
+      },
+      "PerformanceOverviewItemResponse": {
+        "properties": {
+          "strategy_id": {
+            "type": "string",
+            "title": "Strategy Id",
+            "description": "Strategy instance identifier"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Human-readable strategy name"
+          },
+          "template_type_id": {
+            "type": "string",
+            "title": "Template Type Id",
+            "description": "Strategy template type"
+          },
+          "template_version": {
+            "type": "string",
+            "title": "Template Version",
+            "description": "Strategy template version"
+          },
+          "actual_state": {
+            "type": "string",
+            "title": "Actual State",
+            "description": "Current lifecycle state"
+          },
+          "trade_count": {
+            "type": "integer",
+            "title": "Trade Count",
+            "description": "Number of closed trades in window"
+          },
+          "wins": {
+            "type": "integer",
+            "title": "Wins",
+            "description": "Number of winning trades"
+          },
+          "losses": {
+            "type": "integer",
+            "title": "Losses",
+            "description": "Number of losing trades"
+          },
+          "breakevens": {
+            "type": "integer",
+            "title": "Breakevens",
+            "description": "Number of breakeven trades"
+          },
+          "total_realized_pnl": {
+            "type": "number",
+            "title": "Total Realized Pnl",
+            "description": "Sum of realized P&L (USD)"
+          },
+          "avg_trade_pnl": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Trade Pnl",
+            "description": "Average P&L per trade (None if no trades)"
+          },
+          "win_rate_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Win Rate Pct",
+            "description": "Win rate percentage (None if no trades)"
+          },
+          "profit_factor": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profit Factor",
+            "description": "Sum(wins)/|Sum(losses)| (None if no losses)"
+          },
+          "last_trade_exit_ts_wall": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Trade Exit Ts Wall",
+            "description": "Most recent trade exit time (UTC)"
+          },
+          "evidence_tier": {
+            "type": "string",
+            "enum": [
+              "INSUFFICIENT_DATA",
+              "TRACKING"
+            ],
+            "title": "Evidence Tier",
+            "description": "Evidence quality tier"
+          }
+        },
+        "type": "object",
+        "required": [
+          "strategy_id",
+          "name",
+          "template_type_id",
+          "template_version",
+          "actual_state",
+          "trade_count",
+          "wins",
+          "losses",
+          "breakevens",
+          "total_realized_pnl",
+          "evidence_tier"
+        ],
+        "title": "PerformanceOverviewItemResponse",
+        "description": "One row per strategy instance \u2014 aggregated closed-trade performance."
+      },
+      "PerformanceOverviewResponse": {
+        "properties": {
+          "from_ts_wall": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Ts Wall",
+            "description": "Resolved lower bound (UTC); None if 'all time'"
+          },
+          "to_ts_wall": {
+            "type": "string",
+            "format": "date-time",
+            "title": "To Ts Wall",
+            "description": "Resolved upper bound (UTC)"
+          },
+          "execution_mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execution Mode",
+            "description": "Echoed execution_mode filter (None = all)"
+          },
+          "min_trades_threshold": {
+            "type": "integer",
+            "title": "Min Trades Threshold",
+            "description": "Threshold used for evidence tier computation"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PerformanceOverviewItemResponse"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "Per-strategy performance aggregates"
+          }
+        },
+        "type": "object",
+        "required": [
+          "from_ts_wall",
+          "to_ts_wall",
+          "min_trades_threshold",
+          "items"
+        ],
+        "title": "PerformanceOverviewResponse",
+        "description": "Aggregated performance across all strategy instances.\n\nPer proposal \u00a77.3: Response includes resolved timestamps,\nevidence threshold, and per-strategy aggregates."
       },
       "PerformanceResponse": {
         "properties": {

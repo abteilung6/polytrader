@@ -2,6 +2,8 @@ import type { ClosedTradeItem } from '../lib/api/models/closed-trade-item'
 import type { MarketInfoResponse } from '../lib/api/models/market-info-response'
 import type { MarketsResponse } from '../lib/api/models/markets-response'
 import type { MarketTickResponse } from '../lib/api/models/market-tick-response'
+import type { PerformanceOverviewItemResponse } from '../lib/api/models/performance-overview-item-response'
+import type { PerformanceOverviewResponse } from '../lib/api/models/performance-overview-response'
 import type { PerformanceResponse } from '../lib/api/models/performance-response'
 import type { PerformanceSummary } from '../lib/api/models/performance-summary'
 import type { StrategyOrderItem } from '../lib/api/models/strategy-order-item'
@@ -206,5 +208,40 @@ export const createMockPerformanceResponse = (
   summary: overrides.summary ?? defaultPerformanceSummary,
   items: overrides.items ?? [],
   next_cursor: overrides.next_cursor ?? null,
+  ...overrides,
+})
+
+const defaultPerformanceOverviewItem: PerformanceOverviewItemResponse = {
+  strategy_id: 'strat-001',
+  name: 'My threshold strategy',
+  template_type_id: 'simple_threshold',
+  template_version: '1.1.0',
+  actual_state: 'RUNNING',
+  trade_count: 10,
+  wins: 6,
+  losses: 3,
+  breakevens: 1,
+  total_realized_pnl: 15.5,
+  avg_trade_pnl: 1.55,
+  win_rate_pct: 60.0,
+  profit_factor: 2.1,
+  last_trade_exit_ts_wall: '2026-02-01T12:00:00Z',
+  evidence_tier: 'TRACKING',
+}
+
+export const createMockPerformanceOverviewItem = (
+  overrides: Partial<PerformanceOverviewItemResponse> = {},
+): PerformanceOverviewItemResponse => ({
+  ...defaultPerformanceOverviewItem,
+  ...overrides,
+})
+
+export const createMockPerformanceOverviewResponse = (
+  overrides: Partial<PerformanceOverviewResponse> = {},
+): PerformanceOverviewResponse => ({
+  from_ts_wall: overrides.from_ts_wall ?? null,
+  to_ts_wall: overrides.to_ts_wall ?? '2026-02-01T12:00:00Z',
+  min_trades_threshold: overrides.min_trades_threshold ?? 5,
+  items: overrides.items ?? [],
   ...overrides,
 })

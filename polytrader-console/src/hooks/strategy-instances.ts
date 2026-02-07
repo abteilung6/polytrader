@@ -29,7 +29,7 @@ export function useActivateStrategy(strategyId: string) {
       })
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: QUERY_KEY_STRATEGY_INSTANCES })
+      void queryClient.invalidateQueries({ queryKey: QUERY_KEY_STRATEGY_INSTANCES })
     },
   })
 }
@@ -49,7 +49,7 @@ export function useDeactivateStrategy(strategyId: string) {
       })
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: QUERY_KEY_STRATEGY_INSTANCES })
+      void queryClient.invalidateQueries({ queryKey: QUERY_KEY_STRATEGY_INSTANCES })
     },
   })
 }

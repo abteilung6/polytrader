@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- column definitions co-located with cell components */
 import type { ColumnDef } from '@tanstack/react-table'
 import { Link } from '@tanstack/react-router'
 import { ArrowUpDown, MoreVertical } from 'lucide-react'
@@ -38,17 +39,11 @@ function StrategyInstanceActionsCell({ strategy }: { strategy: StrategyResponse 
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-32">
         {strategy.enabled ? (
-          <DropdownMenuItem
-            onClick={() => deactivateMutation.mutate()}
-            disabled={isPending}
-          >
+          <DropdownMenuItem onClick={() => deactivateMutation.mutate()} disabled={isPending}>
             {deactivateMutation.isPending ? 'Disabling…' : 'Disable'}
           </DropdownMenuItem>
         ) : (
-          <DropdownMenuItem
-            onClick={() => activateMutation.mutate()}
-            disabled={isPending}
-          >
+          <DropdownMenuItem onClick={() => activateMutation.mutate()} disabled={isPending}>
             {activateMutation.isPending ? 'Enabling…' : 'Enable'}
           </DropdownMenuItem>
         )}
