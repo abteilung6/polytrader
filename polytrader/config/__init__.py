@@ -25,7 +25,8 @@ from polytrader.config.legacy import (  # noqa: F401
     validate_config,
 )
 
-# New platform config models
+# New platform config models and loader
+from polytrader.config.loader import load_platform_config  # noqa: F401
 from polytrader.config.models import PlatformConfig  # noqa: F401
 
 __all__ = [
@@ -41,4 +42,5 @@ __all__ = [
     "validate_config",
     # New exports
     "PlatformConfig",
+    "load_platform_config",
 ]
