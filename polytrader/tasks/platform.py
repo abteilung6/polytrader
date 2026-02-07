@@ -192,6 +192,7 @@ async def platform_start_task(
             observer_factory=observer_factory,
             position_manager=position_manager,
             paper_oms_store=oms_store_paper,
+            platform_config=pcfg,
         )
 
         # Start orchestrator (loads strategies, creates runners)
@@ -238,8 +239,9 @@ async def platform_start_task(
             from polytrader.obs.metrics_server import start_metrics_server
 
             metrics_config = MetricsConfig()
-            start_metrics_server(port=metrics_config.metrics_port, config=metrics_config)
-            logger.info("Metrics server started on port {port}", port=metrics_config.metrics_port)
+            metrics_port = pcfg.metrics.port
+            start_metrics_server(port=metrics_port, config=metrics_config)
+            logger.info("Metrics server started on port {port}", port=metrics_port)
 
             logger.info("🚀 Platform started")
             logger.info("Control API: http://{host}:{port}/docs", host=api_host, port=api_port)
