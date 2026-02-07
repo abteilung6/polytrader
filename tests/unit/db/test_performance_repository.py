@@ -251,3 +251,26 @@ class TestPerformanceOverviewRepository:
         items = await repo.get_overview(until=datetime(2026, 2, 1, tzinfo=UTC))
 
         assert items == []
+
+    @pytest.mark.asyncio
+    async def test_sql_does_not_contain_conflicting_cast_syntax(self) -> None:
+        """Regression: :param::type cast syntax conflicts with SQLAlchemy text().
+
+        psycopg interprets :since as a bind parameter, so :since::timestamptz
+        produces a syntax error. The SQL must use :since IS NULL instead.
+        See: psycopg.errors.SyntaxError at `:since::timestamptz`.
+        """
+        session = _mock_session([])
+        repo = PerformanceOverviewRepository(session)
+
+        await repo.get_overview(since=None, until=datetime(2026, 2, 1, tzinfo=UTC))
+
+        # Extract the SQL text that was passed to session.execute
+        sql_clause = session.execute.call_args[0][0]
+        sql_text = sql_clause.text
+
+        # Must NOT contain :param::type (bind param followed by PG cast)
+        assert "::timestamptz" not in sql_text, (
+            "SQL contains ::timestamptz cast on a bind parameter — "
+            "this conflicts with SQLAlchemy text() parameter syntax"
+        )

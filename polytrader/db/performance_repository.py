@@ -86,7 +86,7 @@ LEFT JOIN (
         SUM(CASE WHEN ct.pnl > 0 THEN ct.pnl ELSE 0 END)           AS sum_positive_pnl,
         SUM(CASE WHEN ct.pnl < 0 THEN ct.pnl ELSE 0 END)           AS sum_negative_pnl
     FROM strategy_closed_trades ct
-    WHERE (:since::timestamptz IS NULL OR ct.exit_ts_wall >= :since)
+    WHERE (:since IS NULL OR ct.exit_ts_wall >= :since)
       AND ct.exit_ts_wall <= :until
       AND (:execution_mode IS NULL OR ct.execution_mode = :execution_mode)
     GROUP BY ct.strategy_id
@@ -144,7 +144,7 @@ LEFT JOIN (
         SUM(CASE WHEN ct.pnl > 0 THEN ct.pnl ELSE 0 END)           AS sum_positive_pnl,
         SUM(CASE WHEN ct.pnl < 0 THEN ct.pnl ELSE 0 END)           AS sum_negative_pnl
     FROM strategy_closed_trades ct
-    WHERE (:since::timestamptz IS NULL OR ct.exit_ts_wall >= :since)
+    WHERE (:since IS NULL OR ct.exit_ts_wall >= :since)
       AND ct.exit_ts_wall <= :until
       AND (:execution_mode IS NULL OR ct.execution_mode = :execution_mode)
     GROUP BY ct.strategy_id
