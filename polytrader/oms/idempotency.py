@@ -54,6 +54,7 @@ def _hash_intent(intent: "OrderIntentEvent") -> str:
     """Generate deterministic hash from intent key fields.
 
     Hashes the fields that define the order intent:
+    - strategy_id (so different strategy instances get distinct orders)
     - market_slug
     - outcome
     - side
@@ -73,9 +74,10 @@ def _hash_intent(intent: "OrderIntentEvent") -> str:
     Returns:
         Hex digest of the hash (first 16 characters for brevity)
     """
-    # Create a deterministic string representation
+    # Include strategy_id so multiple strategy instances can have independent
+    # orders for the same market/outcome (per-instance idempotency).
     intent_str = (
-        f"{intent.market_slug}:{intent.outcome}:{intent.side}:"
+        f"{intent.strategy_id}:{intent.market_slug}:{intent.outcome}:{intent.side}:"
         f"{intent.target_price}:{intent.limit_price}:{intent.size}"
     )
 

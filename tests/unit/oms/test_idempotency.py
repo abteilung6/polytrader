@@ -113,6 +113,17 @@ class TestGenerateClientOrderId:
 
         assert client_id1 != client_id2
 
+    def test_generate_client_order_id_different_strategy_ids(self) -> None:
+        """Different strategy instances (same market/side/size) get different client_order_ids."""
+        intent1 = create_test_intent(strategy_id="vfmr-instance-1")
+        intent2 = create_test_intent(strategy_id="vfmr-instance-2")
+        run_id = get_run_id()
+
+        client_id1 = generate_client_order_id(intent1, run_id=run_id)
+        client_id2 = generate_client_order_id(intent2, run_id=run_id)
+
+        assert client_id1 != client_id2
+
     def test_generate_client_order_id_different_run_ids(self) -> None:
         """Test that different run_ids produce different client_order_ids."""
         intent = create_test_intent()
