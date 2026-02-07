@@ -94,8 +94,8 @@ def test_cli_platform_start_help() -> None:
 
     assert result.returncode == 0
     assert "Start the platform" in result.stdout
-    assert "--api-host" in result.stdout
-    assert "--api-port" in result.stdout
+    assert "--config" in result.stdout
+    assert "--log-file" in result.stdout
 
 
 @pytest.mark.integration

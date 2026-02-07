@@ -89,7 +89,7 @@ alembic upgrade head
 make test
 
 # Or start the platform for testing
-python -m cli platform start --api-host 0.0.0.0 --api-port 8000
+python -m cli platform start
 ```
 
 ## Development Workflow
@@ -127,9 +127,16 @@ make test-db-down          # Stop test PostgreSQL
 Start the platform with multi-strategy support:
 
 ```bash
-# Start platform (paper trading by default)
-python -m cli platform start --api-host 0.0.0.0 --api-port 8000 > platform.log 2>&1
+# Start platform with safe defaults (paper trading)
+python -m cli platform start
+
+# Start with a config file (all settings in YAML)
+python -m cli platform start --config config/platform.paper.yaml
 ```
+
+All platform settings (API host/port, risk limits, execution parameters, etc.)
+are controlled via the YAML config file. See `config/platform.yaml.example` for
+all available options. If `--config` is omitted, safe defaults are used.
 
 The platform provides:
 - **Control API**: `http://localhost:8000/docs` - Manage strategies via REST API

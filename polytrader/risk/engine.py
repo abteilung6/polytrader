@@ -262,8 +262,7 @@ class RiskChecker:
                 self._approved_trades.add(key)
                 self._approved_correlation[intent.correlation_id] = key
                 log_context.debug(
-                    "Tracked approved BUY for max_trades: "
-                    "{strategy_id}/{market_slug}/{outcome}",
+                    "Tracked approved BUY for max_trades: {strategy_id}/{market_slug}/{outcome}",
                     strategy_id=intent.strategy_id,
                     market_slug=intent.market_slug,
                     outcome=intent.outcome,

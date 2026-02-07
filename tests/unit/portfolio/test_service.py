@@ -14,26 +14,52 @@ from polytrader.types import Outcome, Position
 
 
 class FakePositionManager(IPositionManager):
-    """Fake position manager for testing."""
+    """Fake position manager for testing.
 
-    def __init__(self, positions: dict[tuple[str, str], Position] | None = None) -> None:
+    Supports optional per-strategy position tracking via strategy_positions.
+    When strategy_positions is provided, get_positions_for_strategy() filters
+    by strategy_id.  Otherwise it returns the global positions dict.
+    """
+
+    def __init__(
+        self,
+        positions: dict[tuple[str, str], Position] | None = None,
+        strategy_positions: dict[str, dict[tuple[str, str], Position]] | None = None,
+    ) -> None:
         self._positions = positions or {}
+        # strategy_id → { (market_slug, outcome) → Position }
+        self._strategy_positions = strategy_positions
 
-    def get_positions(self) -> dict[tuple[str, Outcome], Position] | None:
-        """Return positions."""
-        # Convert keys from (str, str) to (str, Outcome) for protocol compliance
-        from polytrader.types import Outcome
-
+    def _to_typed(
+        self, raw: dict[tuple[str, str], Position]
+    ) -> dict[tuple[str, Outcome], Position]:
+        """Convert (str, str) keys to (str, Outcome)."""
         result: dict[tuple[str, Outcome], Position] = {}
-        for (market_slug, outcome_str), position in self._positions.items():
+        for (market_slug, outcome_str), position in raw.items():
             outcome: Outcome = outcome_str  # type: ignore[assignment]
             result[(market_slug, outcome)] = position
+        return result
+
+    def get_positions(self) -> dict[tuple[str, Outcome], Position] | None:
+        """Return all positions (global aggregate)."""
+        result = self._to_typed(self._positions)
         return result if result else None
 
     def get_positions_for_strategy(
         self, strategy_id: str
     ) -> dict[tuple[str, Outcome], Position] | None:
-        """Return positions (fake does not filter by strategy)."""
+        """Return positions for the given strategy only.
+
+        Matches PaperPositionManager behaviour:
+        - Returns {} (empty dict) when the strategy has no positions
+          (this is NOT None — it means "zero positions", not "unsupported").
+        - Returns None only when per-strategy tracking is not configured,
+          signalling the caller to fall back to global positions.
+        """
+        if self._strategy_positions is not None:
+            raw = self._strategy_positions.get(strategy_id, {})
+            return self._to_typed(raw)
+        # Per-strategy tracking not configured → fall back to global
         return self.get_positions()
 
     def get_position(self, market_slug: str, outcome: Outcome) -> Position | None:
@@ -419,5 +445,171 @@ class TestPortfolioService:
         # Should not generate OrderIntentEvent (size = 0)
         with pytest.raises(asyncio.TimeoutError):
             await asyncio.wait_for(proposals_queue.get(), timeout=0.5)
+
+        await portfolio_service.stop()
+
+    @pytest.mark.asyncio
+    async def test_portfolio_service_per_strategy_sizing_isolation(self) -> None:
+        """Test that strategy B is not blocked by strategy A's position.
+
+        Regression test: the old code used global get_positions(), so once
+        strategy A bought (market, UP), the portfolio saw "target already met"
+        for all other strategies and produced size=0.
+
+        The fix uses get_positions_for_strategy(strategy_id) so each instance
+        sizes independently.
+        """
+        bus = EventBus()
+        store = MemoryMarketDataStore()
+
+        market_data = MarketDataEvent(
+            market_slug="test-market",
+            outcome="UP",
+            best_bid=0.25,
+            best_ask=0.30,
+        )
+        store.add(market_data)
+
+        # Strategy A already has a full position ($1.00).
+        # Strategy B has NO position.
+        strategy_a_position = Position(
+            market_slug="test-market",
+            outcome="UP",
+            size=1.0,
+            target_price=0.60,
+            entry_price=0.30,
+            entry_time=1000.0,
+        )
+        position_manager = FakePositionManager(
+            # Global positions (aggregate): $1.00 from A
+            positions={("test-market", "UP"): strategy_a_position},
+            # Per-strategy breakdown
+            strategy_positions={
+                "strategy_A": {("test-market", "UP"): strategy_a_position},
+                "strategy_B": {},  # B has no position
+            },
+        )
+
+        portfolio_service = PortfolioService(
+            bus=bus,
+            store=store,
+            position_manager=position_manager,
+            fixed_size_usd=1.0,
+        )
+        proposals_queue = bus.subscribe(PROPOSALS)
+
+        await portfolio_service.start()
+        await asyncio.sleep(0.01)
+
+        # --- Signal from strategy A (target already met) ---
+        signal_a = SignalEvent(
+            market_slug="test-market",
+            outcome="UP",
+            p_up=0.7,
+            p_down=0.3,
+            edge=0.4,
+            confidence=0.8,
+            model_id="strategy_A",
+            model_version="1.0.0",
+            rationale="Signal from A",
+            correlation_id=generate_correlation_id(),
+        )
+        await bus.publish(SIGNALS, signal_a)
+        await asyncio.sleep(0.05)
+
+        # Strategy A should NOT produce an intent (position already at target)
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(proposals_queue.get(), timeout=0.2)
+
+        # --- Signal from strategy B (no position, should produce intent) ---
+        signal_b = SignalEvent(
+            market_slug="test-market",
+            outcome="UP",
+            p_up=0.7,
+            p_down=0.3,
+            edge=0.4,
+            confidence=0.8,
+            model_id="strategy_B",
+            model_version="1.0.0",
+            rationale="Signal from B",
+            correlation_id=generate_correlation_id(),
+        )
+        await bus.publish(SIGNALS, signal_b)
+
+        # Strategy B should get a full-size intent ($1.00)
+        intent_b = await asyncio.wait_for(proposals_queue.get(), timeout=1.0)
+        assert isinstance(intent_b, OrderIntentEvent)
+        assert intent_b.strategy_id == "strategy_B"
+        assert intent_b.size == 1.0
+        assert intent_b.market_slug == "test-market"
+        assert intent_b.side == "BUY"
+
+        await portfolio_service.stop()
+
+    @pytest.mark.asyncio
+    async def test_portfolio_service_two_strategies_both_get_intents(self) -> None:
+        """Test that two strategies with no positions both get full-size intents.
+
+        Verifies that the per-strategy sizing does not accidentally block
+        the second signal processed from a different strategy.
+        """
+        bus = EventBus()
+        store = MemoryMarketDataStore()
+
+        market_data = MarketDataEvent(
+            market_slug="test-market",
+            outcome="UP",
+            best_bid=0.25,
+            best_ask=0.30,
+        )
+        store.add(market_data)
+
+        # Neither strategy has a position
+        position_manager = FakePositionManager(
+            positions={},
+            strategy_positions={
+                "strategy_X": {},
+                "strategy_Y": {},
+            },
+        )
+
+        portfolio_service = PortfolioService(
+            bus=bus,
+            store=store,
+            position_manager=position_manager,
+            fixed_size_usd=1.0,
+        )
+        proposals_queue = bus.subscribe(PROPOSALS)
+
+        await portfolio_service.start()
+        await asyncio.sleep(0.01)
+
+        # Publish two signals from different strategies
+        for strategy_id in ("strategy_X", "strategy_Y"):
+            signal = SignalEvent(
+                market_slug="test-market",
+                outcome="UP",
+                p_up=0.7,
+                p_down=0.3,
+                edge=0.4,
+                confidence=0.8,
+                model_id=strategy_id,
+                model_version="1.0.0",
+                rationale=f"Signal from {strategy_id}",
+                correlation_id=generate_correlation_id(),
+            )
+            await bus.publish(SIGNALS, signal)
+
+        # Both strategies should get full-size intents
+        intent_1 = await asyncio.wait_for(proposals_queue.get(), timeout=1.0)
+        intent_2 = await asyncio.wait_for(proposals_queue.get(), timeout=1.0)
+
+        assert isinstance(intent_1, OrderIntentEvent)
+        assert isinstance(intent_2, OrderIntentEvent)
+        assert intent_1.size == 1.0
+        assert intent_2.size == 1.0
+
+        strategy_ids = {intent_1.strategy_id, intent_2.strategy_id}
+        assert strategy_ids == {"strategy_X", "strategy_Y"}
 
         await portfolio_service.stop()

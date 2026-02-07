@@ -15,6 +15,7 @@ to subscribers).
 
 import asyncio
 import signal
+from pathlib import Path
 
 import uvicorn
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -22,6 +23,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from polytrader.adapters import create_adapter_factory
 from polytrader.api.app import create_app
 from polytrader.config import PolymarketSecrets, get_database_url
+from polytrader.config.loader import load_platform_config
+from polytrader.config.models import PlatformConfig
 from polytrader.events import SYSTEM_LIFECYCLE, EventBus
 from polytrader.events.closed_trade_sink import ClosedTradeSink
 from polytrader.events.sink import EventSink
@@ -45,11 +48,9 @@ from polytrader.store_factory import create_market_data_store
 
 
 async def platform_start_task(
-    api_host: str = "0.0.0.0",
-    api_port: int = 8000,
-    frequency: float = 1.0,
-    starting_equity: float = 1000.0,
+    config_path: Path | None = None,
     secrets: PolymarketSecrets | None = None,
+    platform_config: PlatformConfig | None = None,
 ) -> None:
     """Start the platform with orchestrator, control plane, and API server.
 
@@ -59,19 +60,38 @@ async def platform_start_task(
     - Starts FastAPI control API server
     - All strategies run in paper mode
 
+    All settings come from the YAML config file or PlatformConfig defaults.
+    No CLI override parameters — use the config file to change values.
+
     Args:
-        api_host: API server host (default: "0.0.0.0")
-        api_port: API server port (default: 8000)
-        frequency: Market data polling frequency in Hz (default: 1.0)
-        starting_equity: Starting equity for paper trading (default: 1000.0)
-        secrets: Polymarket secrets (defaults to loading from env)
+        config_path: Path to platform config YAML file (optional).
+        secrets: Polymarket secrets (defaults to loading from env).
+        platform_config: Pre-loaded PlatformConfig (for testing; skips file loading).
     """
     if secrets is None:
         secrets = PolymarketSecrets()
 
+    # --- Load platform config ---
+    bus = EventBus()
+
+    if platform_config is not None:
+        pcfg = platform_config
+    else:
+        pcfg = await load_platform_config(config_path, bus=bus)
+
+    # All values from config (no CLI overrides)
+    api_host = pcfg.api.host
+    api_port = pcfg.api.port
+    frequency = pcfg.market_data.polling_frequency_hz
+    starting_equity = pcfg.portfolio.starting_equity
+
+    logger.info(
+        "Platform config loaded (version={version})",
+        version=pcfg.version,
+    )
+
     # Initialize core infrastructure
     store = create_market_data_store(enable_postgres=True)
-    bus = EventBus()
     discovery = MarketDiscoveryService(bus=bus)
 
     # Create database engine and session factory
@@ -87,7 +107,9 @@ async def platform_start_task(
     event_sink_task: asyncio.Task[None] | None = None
     postgres_event_store: PostgreSQLEventStore | None = None
     try:
-        postgres_event_store = PostgreSQLEventStore(connection_url=db_url, pool_size=10)
+        postgres_event_store = PostgreSQLEventStore(
+            connection_url=db_url, pool_size=pcfg.database.event_store_pool_size
+        )
         await postgres_event_store.initialize()
         event_sink = EventSink(bus=bus, store=postgres_event_store)
         event_sink_task = asyncio.create_task(event_sink.run())
@@ -149,6 +171,7 @@ async def platform_start_task(
             observer_factory=observer_factory,
             position_manager=position_manager,
             paper_oms_store=oms_store_paper,
+            platform_config=pcfg,
         )
 
         # Start orchestrator (loads strategies, creates runners)
@@ -170,7 +193,7 @@ async def platform_start_task(
                 strategy_registry=strategy_registry,
                 execution_control=execution_control,
                 bus=bus,
-                poll_interval_s=1.0,
+                poll_interval_s=pcfg.supervisor.control_plane_poll_interval_s,
             )
 
             # Start control plane service
@@ -195,15 +218,15 @@ async def platform_start_task(
             from polytrader.obs.metrics_server import start_metrics_server
 
             metrics_config = MetricsConfig()
-            start_metrics_server(port=metrics_config.metrics_port, config=metrics_config)
-            logger.info("Metrics server started on port {port}", port=metrics_config.metrics_port)
+            metrics_port = pcfg.metrics.port
+            start_metrics_server(port=metrics_port, config=metrics_config)
 
             logger.info("🚀 Platform started")
             logger.info("Control API: http://{host}:{port}/docs", host=api_host, port=api_port)
             logger.info(
                 "Metrics server: http://{host}:{port}/metrics",
                 host="localhost",
-                port=metrics_config.metrics_port,
+                port=metrics_port,
             )
             logger.info("Press Ctrl+C to stop")
 

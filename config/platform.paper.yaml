@@ -1,0 +1,59 @@
+# ============================================================================
+# Polytrader Platform Configuration — Paper Trading Profile
+# ============================================================================
+# Safe defaults for paper trading. All risk limits are conservative.
+# No real orders will be placed; execution uses simulated fills.
+#
+# Usage:
+#   python -m cli platform start --config config/platform.paper.yaml
+# ============================================================================
+
+version: "1.0"
+
+# Conservative risk limits for paper trading
+risk:
+  max_position_per_market: 1.0
+  max_position_global: 10.0
+  max_notional_exposure: 100.0
+  max_order_size: 10.0
+  max_trades_per_market: 1
+  order_rate_limit_per_minute: 60
+  cancel_rate_limit_per_minute: 120
+  max_data_staleness_seconds: 5.0
+  price_deviation_threshold: 0.10
+
+# Health gates — all active
+health_gates:
+  max_market_data_staleness_seconds: 60.0
+  max_reconciliation_divergences: 0
+  max_error_rate: 0.10
+  require_user_stream: true
+
+# Circuit breakers — strict
+circuit_breakers:
+  max_phantom_orders: 3
+  max_orphan_orders: 3
+  max_fill_mismatches: 1
+  require_error_severity: true
+
+# Execution — paper simulation active
+execution:
+  tactics:
+    max_buy_slippage_bps: 50.0
+    max_sell_slippage_bps: 50.0
+    prefer_passive: true
+  paper_simulation:
+    fill_probability: 1.0
+    rejection_probability: 0.0
+    latency_ms: 50.0
+    slippage_bps: 10.0
+
+# Paper trading portfolio
+portfolio:
+  fixed_size_usd: 1.0
+  starting_equity: 1000.0
+
+# Standard reconciliation
+reconciliation:
+  interval_s: 60.0
+  position_sync_interval_s: 60.0

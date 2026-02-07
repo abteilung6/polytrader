@@ -18,43 +18,37 @@ app.add_typer(platform_app, name="platform")
 
 @platform_app.command("start")
 def platform_start(
-    api_host: str = typer.Option(
-        "0.0.0.0", "--api-host", help="API server host (default: 0.0.0.0)"
-    ),
-    api_port: int = typer.Option(8000, "--api-port", help="API server port (default: 8000)"),
-    frequency: float = typer.Option(1.0, "--frequency", "-f", help="Polling frequency in Hz"),
-    starting_equity: float = typer.Option(
-        1000.0, "--starting-equity", help="Starting equity for paper trading"
+    config: str | None = typer.Option(
+        None,
+        "--config",
+        help="Path to platform config YAML file (uses safe defaults if omitted)",
     ),
     log_file: str | None = typer.Option(None, "--log-file", help="Optional file path to save logs"),
 ) -> None:
     """Start the platform with orchestrator, control plane, and API server.
 
-    Starts the multi-strategy platform that:
-    - Loads all strategies from database
-    - Runs all strategies in paper mode
-    - Starts control plane service (processes control commands)
-    - Starts FastAPI control API server
+    All platform settings (API host/port, risk limits, execution params, etc.)
+    are controlled via the YAML config file. If --config is omitted, safe
+    hardcoded defaults from PlatformConfig are used.
+
+    Example:
+        python -m cli platform start --config config/platform.paper.yaml
 
     Press Ctrl+C to stop.
     """
     _setup_logging(log_file)
 
+    config_path = Path(config) if config else None
+
     logger.info("🚀 PLATFORM MODE")
     logger.info("Starting platform orchestrator")
-    logger.info("API server: http://{host}:{port}/docs", host=api_host, port=api_port)
-    logger.info("Frequency: {frequency} Hz", frequency=frequency)
-    logger.info("Starting equity: ${equity:.2f}", equity=starting_equity)
+    if config_path:
+        logger.info("Config file: {config}", config=config_path)
+    else:
+        logger.info("No config file — using safe defaults")
     logger.info("Press Ctrl+C to stop")
 
-    asyncio.run(
-        platform_start_task(
-            api_host=api_host,
-            api_port=api_port,
-            frequency=frequency,
-            starting_equity=starting_equity,
-        )
-    )
+    asyncio.run(platform_start_task(config_path=config_path))
 
 
 def _setup_logging(log_file: str | None) -> None:

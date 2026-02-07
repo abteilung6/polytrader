@@ -8,6 +8,7 @@ import asyncio
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
+from polytrader.config.models import PlatformConfig
 from polytrader.db.models import StrategyRecord
 from polytrader.events import EventBus
 from polytrader.execution import ExecutionRouter
@@ -21,7 +22,6 @@ from polytrader.platform.strategy_runner import StrategyRunner
 from polytrader.platform.supervisor_registry import MarketSupervisorRegistry
 from polytrader.portfolio.service import PortfolioService
 from polytrader.risk.engine import RiskChecker, RiskEngine
-from polytrader.risk.limits_store import get_default_limits
 from polytrader.store import IMarketDataStore, resolve_store_view
 from polytrader.strategies.lifecycle_models import StrategyLifecycleState
 from polytrader.strategies.registration import register_all_strategies
@@ -133,6 +133,7 @@ class PlatformOrchestrator:
         position_manager: "IPositionManager | None" = None,
         live_execution_router_factory: Callable[[], ExecutionRouter] | None = None,
         paper_oms_store: "IEventHandlingOrderStore | None" = None,
+        platform_config: PlatformConfig | None = None,
     ) -> None:
         """Initialize platform orchestrator.
 
@@ -146,6 +147,7 @@ class PlatformOrchestrator:
             position_manager: Position manager (optional)
             live_execution_router_factory: Factory for live execution router (optional)
             paper_oms_store: Order store for paper OMS (must match position_manager's store)
+            platform_config: Platform configuration (optional, defaults to PlatformConfig())
         """
         self._bus = bus
         self._store = store
@@ -156,6 +158,7 @@ class PlatformOrchestrator:
         self._position_manager = position_manager
         self._live_execution_router_factory = live_execution_router_factory
         self._paper_oms_store = paper_oms_store
+        self._platform_config = platform_config or PlatformConfig()
 
         # MarketSupervisorRegistry for shared supervisors (Commit 1.4)
         self._supervisor_registry = MarketSupervisorRegistry(
@@ -172,11 +175,13 @@ class PlatformOrchestrator:
             bus=bus,
             store=store,
             position_manager=position_manager,
-            fixed_size_usd=1.0,  # Default fixed size
+            fixed_size_usd=self._platform_config.portfolio.fixed_size_usd,
         )
 
         # RiskChecker to check order intents and publish approved proposals
-        risk_limits = get_default_limits()
+        risk_limits = self._platform_config.risk.to_risk_limits(
+            version=self._platform_config.version
+        )
         risk_engine = RiskEngine(limits=risk_limits)
         self._risk_checker = RiskChecker(
             bus=bus,

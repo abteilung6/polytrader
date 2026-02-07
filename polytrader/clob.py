@@ -3,7 +3,8 @@ from typing import Any, Literal, Protocol, cast
 from py_clob_client.client import ClobClient  # type: ignore[import-untyped]
 from pydantic import BaseModel, Field, field_validator
 
-from polytrader.config import CHAIN_ID, CLOB_API_URL, PolymarketSecrets
+from polytrader.config import PolymarketSecrets
+from polytrader.config.models import PlatformConfig
 
 OrderStatus = Literal["FILLED", "CANCELLED", "OPEN", "PENDING", "UNKNOWN"]
 OrderSide = Literal["BUY", "SELL"]
@@ -148,14 +149,24 @@ class IClobClientFactory(Protocol):
     def __call__(self) -> IClobClient: ...
 
 
-def create_clob_client_factory(secrets: PolymarketSecrets) -> IClobClientFactory:
-    """Create a factory function for ClobClient instances."""
+def create_clob_client_factory(
+    secrets: PolymarketSecrets,
+    platform_config: PlatformConfig | None = None,
+) -> IClobClientFactory:
+    """Create a factory function for ClobClient instances.
+
+    Args:
+        secrets: Polymarket wallet secrets (.env).
+        platform_config: Platform config for venue URL/chain_id.
+            Defaults to PlatformConfig() safe defaults.
+    """
+    pcfg = platform_config or PlatformConfig()
 
     def factory() -> ClobClient:
         client = ClobClient(
-            host=CLOB_API_URL,
+            host=pcfg.venue.clob_api_url,
             key=secrets.private_key.get_secret_value(),
-            chain_id=CHAIN_ID,
+            chain_id=pcfg.venue.chain_id,
             signature_type=secrets.signature_type,
             funder=secrets.funder,
         )

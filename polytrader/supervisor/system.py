@@ -14,7 +14,8 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from polytrader.ops.health import HealthStatus
 
-from polytrader.config import get_database_url, load_config
+from polytrader.config import get_database_url
+from polytrader.config.loader import load_platform_config
 from polytrader.events import SYSTEM_LIFECYCLE, EventBus
 from polytrader.events.sink import EventSink
 from polytrader.events.stores import PostgreSQLEventStore
@@ -300,6 +301,8 @@ class SystemSupervisor:
         Returns:
             Configuration dictionary (empty dict if no config path provided)
         """
+        from pathlib import Path
+
         if self.config_path is None:
             # Paper trading mode - config loading is optional
             logger.debug("Config loading skipped (no config_path provided)")
@@ -307,9 +310,9 @@ class SystemSupervisor:
 
         try:
             logger.info("Loading configuration from {path}", path=self.config_path)
-            config = await load_config(config_path=self.config_path, bus=self.bus)
+            config = await load_platform_config(config_path=Path(self.config_path), bus=self.bus)
             logger.info("Configuration loaded successfully")
-            return config
+            return config.model_dump(mode="json")
         except Exception as e:
             logger.exception(
                 "Error loading configuration: {error}",
