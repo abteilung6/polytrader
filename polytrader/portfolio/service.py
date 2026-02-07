@@ -150,8 +150,13 @@ class PortfolioService:
                 ).warning("No market data available for signal")
                 return
 
-            # Step 4: Get current position (for portfolio-aware sizing)
-            current_position = self._get_current_position(signal.market_slug, signal.outcome)
+            # Step 4: Get current position for THIS strategy (per-instance sizing)
+            # Uses get_positions_for_strategy so each instance sees only its own
+            # positions — prevents instance A's position from blocking instance B's
+            # sizing.
+            current_position = self._get_current_position(
+                signal.market_slug, signal.outcome, strategy_id=signal.model_id
+            )
 
             # Step 5: Calculate order size (portfolio-aware)
             size = calculate_size(target, current_position)
@@ -238,15 +243,32 @@ class PortfolioService:
             return None
         return history[-1]  # Most recent
 
-    def _get_current_position(self, market_slug: str, outcome: str) -> Position | None:
+    def _get_current_position(
+        self,
+        market_slug: str,
+        outcome: str,
+        strategy_id: str | None = None,
+    ) -> Position | None:
         """Get current position from position manager.
 
-        Returns the current Position for the given market/outcome, or None if no position.
+        When strategy_id is provided, returns only positions opened by that
+        strategy (per-instance isolation).  Falls back to global positions if
+        the position manager does not support per-strategy lookup.
+
+        Returns the current Position for the given market/outcome, or None.
         """
         if self.position_manager is None:
             return None
 
-        positions = self.position_manager.get_positions()
+        # Prefer per-strategy positions so each instance sizes independently
+        positions = None
+        if strategy_id is not None:
+            positions = self.position_manager.get_positions_for_strategy(strategy_id)
+
+        # Fallback to global positions
+        if positions is None:
+            positions = self.position_manager.get_positions()
+
         if positions is None:
             return None
 
