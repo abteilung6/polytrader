@@ -18,13 +18,20 @@ app.add_typer(platform_app, name="platform")
 
 @platform_app.command("start")
 def platform_start(
-    api_host: str = typer.Option(
-        "0.0.0.0", "--api-host", help="API server host (default: 0.0.0.0)"
+    config: str | None = typer.Option(
+        None, "--config", help="Path to platform config YAML file (optional)"
     ),
-    api_port: int = typer.Option(8000, "--api-port", help="API server port (default: 8000)"),
-    frequency: float = typer.Option(1.0, "--frequency", "-f", help="Polling frequency in Hz"),
-    starting_equity: float = typer.Option(
-        1000.0, "--starting-equity", help="Starting equity for paper trading"
+    api_host: str | None = typer.Option(
+        None, "--api-host", help="API server host (overrides config file)"
+    ),
+    api_port: int | None = typer.Option(
+        None, "--api-port", help="API server port (overrides config file)"
+    ),
+    frequency: float | None = typer.Option(
+        None, "--frequency", "-f", help="Polling frequency in Hz (overrides config file)"
+    ),
+    starting_equity: float | None = typer.Option(
+        None, "--starting-equity", help="Starting equity for paper trading (overrides config file)"
     ),
     log_file: str | None = typer.Option(None, "--log-file", help="Optional file path to save logs"),
 ) -> None:
@@ -36,23 +43,29 @@ def platform_start(
     - Starts control plane service (processes control commands)
     - Starts FastAPI control API server
 
+    If --config is provided, loads platform configuration from a YAML file.
+    CLI flags (--api-host, --api-port, etc.) override config file values.
+    If no --config is provided, safe hardcoded defaults are used.
+
     Press Ctrl+C to stop.
     """
     _setup_logging(log_file)
 
+    config_path = Path(config) if config else None
+
     logger.info("🚀 PLATFORM MODE")
     logger.info("Starting platform orchestrator")
-    logger.info("API server: http://{host}:{port}/docs", host=api_host, port=api_port)
-    logger.info("Frequency: {frequency} Hz", frequency=frequency)
-    logger.info("Starting equity: ${equity:.2f}", equity=starting_equity)
+    if config_path:
+        logger.info("Config file: {config}", config=config_path)
     logger.info("Press Ctrl+C to stop")
 
     asyncio.run(
         platform_start_task(
-            api_host=api_host,
-            api_port=api_port,
-            frequency=frequency,
-            starting_equity=starting_equity,
+            config_path=config_path,
+            api_host_override=api_host,
+            api_port_override=api_port,
+            frequency_override=frequency,
+            starting_equity_override=starting_equity,
         )
     )
 

@@ -15,6 +15,7 @@ to subscribers).
 
 import asyncio
 import signal
+from pathlib import Path
 
 import uvicorn
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -22,6 +23,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from polytrader.adapters import create_adapter_factory
 from polytrader.api.app import create_app
 from polytrader.config import PolymarketSecrets, get_database_url
+from polytrader.config.loader import load_platform_config
+from polytrader.config.models import PlatformConfig
 from polytrader.events import SYSTEM_LIFECYCLE, EventBus
 from polytrader.events.closed_trade_sink import ClosedTradeSink
 from polytrader.events.sink import EventSink
@@ -45,11 +48,13 @@ from polytrader.store_factory import create_market_data_store
 
 
 async def platform_start_task(
-    api_host: str = "0.0.0.0",
-    api_port: int = 8000,
-    frequency: float = 1.0,
-    starting_equity: float = 1000.0,
+    config_path: Path | None = None,
+    api_host_override: str | None = None,
+    api_port_override: int | None = None,
+    frequency_override: float | None = None,
+    starting_equity_override: float | None = None,
     secrets: PolymarketSecrets | None = None,
+    platform_config: PlatformConfig | None = None,
 ) -> None:
     """Start the platform with orchestrator, control plane, and API server.
 
@@ -59,19 +64,55 @@ async def platform_start_task(
     - Starts FastAPI control API server
     - All strategies run in paper mode
 
+    Config loading precedence (highest wins):
+    1. platform_config (if passed directly, e.g. from tests)
+    2. CLI flags (*_override params)
+    3. YAML config file (config_path)
+    4. Hardcoded defaults in PlatformConfig
+
     Args:
-        api_host: API server host (default: "0.0.0.0")
-        api_port: API server port (default: 8000)
-        frequency: Market data polling frequency in Hz (default: 1.0)
-        starting_equity: Starting equity for paper trading (default: 1000.0)
-        secrets: Polymarket secrets (defaults to loading from env)
+        config_path: Path to platform config YAML file (optional).
+        api_host_override: CLI override for API host.
+        api_port_override: CLI override for API port.
+        frequency_override: CLI override for polling frequency.
+        starting_equity_override: CLI override for starting equity.
+        secrets: Polymarket secrets (defaults to loading from env).
+        platform_config: Pre-loaded PlatformConfig (for testing; skips file loading).
     """
     if secrets is None:
         secrets = PolymarketSecrets()
 
+    # --- Load platform config ---
+    # Priority: platform_config > CLI overrides > YAML file > defaults
+    bus = EventBus()
+
+    if platform_config is not None:
+        pcfg = platform_config
+    else:
+        pcfg = await load_platform_config(config_path, bus=bus)
+
+    # Apply CLI overrides on top of config values
+    api_host = api_host_override if api_host_override is not None else pcfg.api.host
+    api_port = api_port_override if api_port_override is not None else pcfg.api.port
+    frequency = (
+        frequency_override
+        if frequency_override is not None
+        else pcfg.market_data.polling_frequency_hz
+    )
+    starting_equity = (
+        starting_equity_override
+        if starting_equity_override is not None
+        else pcfg.portfolio.starting_equity
+    )
+
+    logger.info(
+        "Platform config loaded (version={version}, hash={hash})",
+        version=pcfg.version,
+        hash="(from config)",
+    )
+
     # Initialize core infrastructure
     store = create_market_data_store(enable_postgres=True)
-    bus = EventBus()
     discovery = MarketDiscoveryService(bus=bus)
 
     # Create database engine and session factory
@@ -87,7 +128,9 @@ async def platform_start_task(
     event_sink_task: asyncio.Task[None] | None = None
     postgres_event_store: PostgreSQLEventStore | None = None
     try:
-        postgres_event_store = PostgreSQLEventStore(connection_url=db_url, pool_size=10)
+        postgres_event_store = PostgreSQLEventStore(
+            connection_url=db_url, pool_size=pcfg.database.event_store_pool_size
+        )
         await postgres_event_store.initialize()
         event_sink = EventSink(bus=bus, store=postgres_event_store)
         event_sink_task = asyncio.create_task(event_sink.run())
@@ -170,7 +213,7 @@ async def platform_start_task(
                 strategy_registry=strategy_registry,
                 execution_control=execution_control,
                 bus=bus,
-                poll_interval_s=1.0,
+                poll_interval_s=pcfg.supervisor.control_plane_poll_interval_s,
             )
 
             # Start control plane service
