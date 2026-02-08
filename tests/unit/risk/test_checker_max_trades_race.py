@@ -356,9 +356,11 @@ class TestRiskCheckerMaxTradesRaceCondition:
         )
         store.add(market_data)
 
-        # Create risk checker with max_trades_per_market=1
+        # Create risk checker with max_trades_per_market=1 (per strategy)
+        # max_position_per_market=2 so two strategies can each have one trade in same market
         limits = get_default_limits()
         limits.max_trades_per_market = 1
+        limits.max_position_per_market = 2.0
         engine = RiskEngine(limits=limits)
         checker = RiskChecker(bus=bus, engine=engine, store=store)
 
