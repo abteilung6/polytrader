@@ -163,6 +163,8 @@ Flow:
 
 Rule: Risk never lives in strategy/portfolio.
 
+**Paper/live routing (implementation):** Risk publishes approved intents to a single topic. An ApprovedProposalRouter subscribes and forwards each intent to lane-specific topics (paper or live) based on execution_enabled and active_strategies. Paper and live OMS subscribe to their respective topics; no new flow stage — router is an implementation detail between §6 and §7. See ADR docs/adr/2026-02-08-live-execution-lane-routing.md.
+
 ---
 
 ## 7) OMS (Authoritative Order Lifecycle)
