@@ -76,6 +76,19 @@ class TestMigrationRunner:
         self, postgres_connection: AsyncConnection, postgres_test_url: str
     ):
         """Test that applied migrations are recorded in alembic_version."""
+        from pathlib import Path
+
+        from alembic.config import Config
+        from alembic.script import ScriptDirectory
+
+        # Get current HEAD revision from Alembic (so test survives new migrations)
+        repo_root = Path(__file__).resolve().parents[2]
+        alembic_ini = repo_root / "alembic.ini"
+        cfg = Config(str(alembic_ini))
+        script_dir = ScriptDirectory.from_config(cfg)
+        head = script_dir.get_current_head()
+        assert head is not None, "Alembic must have a head revision"
+
         # Run migrations
         await run_migrations(postgres_test_url)
 
@@ -87,13 +100,7 @@ class TestMigrationRunner:
 
             # Alembic stores only the HEAD revision (latest applied migration)
             assert len(versions) > 0
-            # Check that a valid migration revision is present
-            # Note: Alembic only stores the latest revision, not the full history
-            # Current HEAD should be a065833f01c0 (strategy_closed_trades)
-            # Previous migrations: d156ab13dab9 (strategy lifecycle),
-            # 669d44032370 (platform tables),
-            # 2544c4bd05f5 (market_ticks), 21bc6d880faf (events)
-            assert "a065833f01c0" in versions
+            assert head in versions
 
     @pytest.mark.asyncio
     async def test_run_migrations_idempotent(

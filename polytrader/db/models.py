@@ -611,7 +611,8 @@ class ControlCommandRecord(Base):
     __table_args__ = (
         CheckConstraint(
             "command_type IN ('enable_execution', 'disable_execution', "
-            "'add_active_strategy', 'remove_active_strategy')",
+            "'add_active_strategy', 'remove_active_strategy', "
+            "'kill_switch_activate', 'kill_switch_reset')",
             name="control_commands_command_type_check",
         ),
         CheckConstraint(
