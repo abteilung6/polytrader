@@ -1,0 +1,89 @@
+# ============================================================================
+# Polytrader Platform Configuration — Live Pilot Profile
+# ============================================================================
+# Infrastructure validation mode. Ultra-conservative limits for the first
+# real trade. The goal is NOT profit — it is to verify that money moves
+# exactly when expected, orders land exactly as specified, and failures
+# fail safe.
+#
+# This config is used for Phase L1 (Infrastructure Validation) and
+# Phase L2 (Pilot Live). Risk limits are intentionally tiny.
+#
+# Usage:
+#   python -m cli platform start --config config/platform.live-pilot.yaml
+#
+# Prerequisites:
+#   - API credentials in .env (PRIVATE_KEY, FUNDER, SIGNATURE_TYPE)
+#   - Wallet funded with small amount ($10-50 USDC)
+#   - Database running and migrated
+#   - All tests passing (make test && make lint && make type-check)
+#
+# IMPORTANT: execution_enabled defaults to false at startup.
+# The operator must explicitly enable execution via the Control API
+# after verifying health gates and activating a strategy for live trading.
+# ============================================================================
+
+version: "1.0"
+
+# ---------------------------------------------------------------------------
+# Ultra-Conservative Risk Limits (Infrastructure Validation)
+# ---------------------------------------------------------------------------
+# These limits are intentionally tiny. The goal is to validate plumbing,
+# not generate alpha. $1 max position, $1 max order, $5 global exposure.
+risk:
+  max_position_per_market: 1.0      # $1 max per market — trivial size
+  max_position_global: 5.0          # $5 max total exposure
+  max_notional_exposure: 10.0       # $10 max notional
+  max_order_size: 1.0               # $1 max per order — minimum viable
+  max_trades_per_market: 1          # 1 trade per market per strategy
+  order_rate_limit_per_minute: 10   # 10 orders/min — very conservative
+  cancel_rate_limit_per_minute: 20  # 20 cancels/min
+  max_data_staleness_seconds: 5.0   # deny if data older than 5s
+  price_deviation_threshold: 0.05   # 5% max deviation from mid (tighter than paper)
+
+# ---------------------------------------------------------------------------
+# Health Gates — Strict (same as paper, all active)
+# ---------------------------------------------------------------------------
+health_gates:
+  max_market_data_staleness_seconds: 60.0
+  max_reconciliation_divergences: 0
+  max_error_rate: 0.10
+  require_user_stream: true
+
+# ---------------------------------------------------------------------------
+# Circuit Breakers — Strict (same as paper)
+# ---------------------------------------------------------------------------
+circuit_breakers:
+  max_phantom_orders: 3
+  max_orphan_orders: 3
+  max_fill_mismatches: 1
+  require_error_severity: true
+
+# ---------------------------------------------------------------------------
+# Execution — Live Venue (paper simulation values retained for paper lane)
+# ---------------------------------------------------------------------------
+# Tighter slippage bounds than paper for live execution.
+execution:
+  tactics:
+    max_buy_slippage_bps: 30.0      # 0.3% max slippage (tighter than paper)
+    max_sell_slippage_bps: 30.0     # 0.3% max slippage (tighter than paper)
+    prefer_passive: true
+  paper_simulation:
+    fill_probability: 1.0
+    rejection_probability: 0.0
+    latency_ms: 50.0
+    slippage_bps: 10.0
+
+# ---------------------------------------------------------------------------
+# Portfolio — Minimal Capital
+# ---------------------------------------------------------------------------
+portfolio:
+  fixed_size_usd: 1.0              # $1 fixed order size
+  starting_equity: 50.0            # $50 starting equity (small for pilot)
+
+# ---------------------------------------------------------------------------
+# Reconciliation — Frequent (validate state continuously)
+# ---------------------------------------------------------------------------
+reconciliation:
+  interval_s: 30.0                 # Every 30s (more frequent than paper)
+  position_sync_interval_s: 30.0   # Every 30s
