@@ -41,6 +41,16 @@ function useHeaderTitle(): { segments: { label: string; href?: string }[] } {
   if (pathname === '/control') {
     return { segments: [{ label: 'Control' }] }
   }
+  if (pathname === '/performance/paper') {
+    return {
+      segments: [{ label: 'Performance', href: '/performance/paper' }, { label: 'Paper Trading' }],
+    }
+  }
+  if (pathname === '/performance/live') {
+    return {
+      segments: [{ label: 'Performance', href: '/performance/paper' }, { label: 'Live Trading' }],
+    }
+  }
   if (pathname === '/strategies/templates') {
     return { segments: [{ label: 'Strategy templates' }] }
   }

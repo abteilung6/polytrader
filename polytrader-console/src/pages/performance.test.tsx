@@ -11,7 +11,7 @@ import { mockAxiosResponse, renderWithRouter } from '@/test/utils'
 const defaultItem = createMockPerformanceOverviewItem()
 
 describe('PerformancePage', () => {
-  it('renders Performance Overview heading when navigated to /performance', async () => {
+  it('redirects /performance to /performance/paper and shows Performance Overview', async () => {
     vi.spyOn(
       controlApi,
       'getPerformanceOverviewApiV1StateStrategiesPerformanceOverviewGet',
@@ -24,6 +24,19 @@ describe('PerformancePage', () => {
     expect(await screen.findByText('Performance Overview')).toBeInTheDocument()
   })
 
+  it('renders Performance Overview when navigated to /performance/paper', async () => {
+    vi.spyOn(
+      controlApi,
+      'getPerformanceOverviewApiV1StateStrategiesPerformanceOverviewGet',
+    ).mockResolvedValue(
+      mockAxiosResponse({
+        data: createMockPerformanceOverviewResponse({ items: [] }),
+      }),
+    )
+    renderWithRouter({ initialEntries: ['/performance/paper'] })
+    expect(await screen.findByText('Performance Overview')).toBeInTheDocument()
+  })
+
   it('renders window selector with all preset tabs', async () => {
     vi.spyOn(
       controlApi,
@@ -33,7 +46,7 @@ describe('PerformancePage', () => {
         data: createMockPerformanceOverviewResponse({ items: [] }),
       }),
     )
-    renderWithRouter({ initialEntries: ['/performance'] })
+    renderWithRouter({ initialEntries: ['/performance/paper'] })
     await screen.findByText('Performance Overview')
 
     expect(screen.getByRole('tab', { name: '1d' })).toBeInTheDocument()
@@ -51,7 +64,7 @@ describe('PerformancePage', () => {
         data: createMockPerformanceOverviewResponse({ items: [] }),
       }),
     )
-    renderWithRouter({ initialEntries: ['/performance'] })
+    renderWithRouter({ initialEntries: ['/performance/paper'] })
     await screen.findByText('Performance Overview')
 
     const tab1d = screen.getByRole('tab', { name: '1d' })
@@ -70,7 +83,7 @@ describe('PerformancePage', () => {
         }),
       }),
     )
-    renderWithRouter({ initialEntries: ['/performance'] })
+    renderWithRouter({ initialEntries: ['/performance/paper'] })
 
     // Wait for the strategy name to appear (data loaded into table)
     expect(await screen.findByText(defaultItem.name)).toBeInTheDocument()
@@ -96,7 +109,7 @@ describe('PerformancePage', () => {
         data: createMockPerformanceOverviewResponse({ items: [] }),
       }),
     )
-    renderWithRouter({ initialEntries: ['/performance'] })
+    renderWithRouter({ initialEntries: ['/performance/paper'] })
     await screen.findByRole('table')
     expect(screen.getByText('No results.')).toBeInTheDocument()
   })
@@ -106,7 +119,7 @@ describe('PerformancePage', () => {
       controlApi,
       'getPerformanceOverviewApiV1StateStrategiesPerformanceOverviewGet',
     ).mockReturnValue(new Promise(() => {}))
-    renderWithRouter({ initialEntries: ['/performance'] })
+    renderWithRouter({ initialEntries: ['/performance/paper'] })
     expect(await screen.findByText('Loading…')).toBeInTheDocument()
   })
 
@@ -115,7 +128,7 @@ describe('PerformancePage', () => {
       controlApi,
       'getPerformanceOverviewApiV1StateStrategiesPerformanceOverviewGet',
     ).mockRejectedValue(new Error('Network error'))
-    renderWithRouter({ initialEntries: ['/performance'] })
+    renderWithRouter({ initialEntries: ['/performance/paper'] })
     expect(await screen.findByText(/Error: Network error/)).toBeInTheDocument()
   })
 })

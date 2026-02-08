@@ -26,6 +26,7 @@ interface AppSidebarProps {
 
 export function AppSidebar({ variant = 'inset' }: AppSidebarProps) {
   const [strategiesOpen, setStrategiesOpen] = useState(true)
+  const [performanceOpen, setPerformanceOpen] = useState(true)
 
   return (
     <Sidebar collapsible="icon" variant={variant}>
@@ -53,12 +54,39 @@ export function AppSidebar({ variant = 'inset' }: AppSidebarProps) {
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
-                <SidebarMenuButton asChild tooltip="Performance">
-                  <Link to="/performance">
-                    <TrendingUp />
-                    <span>Performance</span>
-                  </Link>
+                <SidebarMenuButton
+                  tooltip="Performance"
+                  className="cursor-pointer"
+                  onClick={() => setPerformanceOpen((open) => !open)}
+                >
+                  <TrendingUp />
+                  <span>Performance</span>
+                  <ChevronDown
+                    className={cn(
+                      'ml-auto size-4 shrink-0 transition-transform',
+                      !performanceOpen && '-rotate-90',
+                    )}
+                    aria-hidden
+                  />
                 </SidebarMenuButton>
+                {performanceOpen && (
+                  <SidebarMenuSub>
+                    <SidebarMenuSubItem>
+                      <SidebarMenuSubButton asChild>
+                        <Link to="/performance/live">
+                          <span>Live Trading</span>
+                        </Link>
+                      </SidebarMenuSubButton>
+                    </SidebarMenuSubItem>
+                    <SidebarMenuSubItem>
+                      <SidebarMenuSubButton asChild>
+                        <Link to="/performance/paper">
+                          <span>Paper Trading</span>
+                        </Link>
+                      </SidebarMenuSubButton>
+                    </SidebarMenuSubItem>
+                  </SidebarMenuSub>
+                )}
               </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton asChild tooltip="Markets">
