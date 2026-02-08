@@ -41,6 +41,20 @@ risk:
   max_data_staleness_seconds: 5.0   # deny if data older than 5s
   price_deviation_threshold: 0.05   # 5% max deviation from mid (tighter than paper)
 
+# Optional: separate limits for paper vs live (uncomment to use).
+# When both paper and live are present, paper activity no longer consumes live budget.
+# risk:
+#   paper:
+#     max_position_per_market: 10.0
+#     max_position_global: 50.0
+#     order_rate_limit_per_minute: 60
+#     # ... same fields as risk above
+#   live:
+#     max_position_per_market: 1.0
+#     max_position_global: 5.0
+#     order_rate_limit_per_minute: 10
+#     # ... same fields as risk above
+
 # ---------------------------------------------------------------------------
 # Health Gates — Strict (same as paper, all active)
 # ---------------------------------------------------------------------------
@@ -62,8 +76,11 @@ circuit_breakers:
 # ---------------------------------------------------------------------------
 # Execution — Live Venue (paper simulation values retained for paper lane)
 # ---------------------------------------------------------------------------
+# Set live_lane_enabled: true so the platform creates the live OMS + execution
+# path at startup when PRIVATE_KEY and FUNDER are present in .env.
 # Tighter slippage bounds than paper for live execution.
 execution:
+  live_lane_enabled: true
   tactics:
     max_buy_slippage_bps: 30.0      # 0.3% max slippage (tighter than paper)
     max_sell_slippage_bps: 30.0     # 0.3% max slippage (tighter than paper)
