@@ -51,12 +51,22 @@ class TestRiskCheckerMetrics:
             reconciliation_healthy=True,
         )
 
-        # Check should emit metrics
-        await checker.check(intent, context)
+        # Check should emit metrics (default lane=paper)
+        await checker.check(intent, context, lane="paper")
 
-        # Verify metrics were emitted
-        assert collector.get_counter("risk_checks_total", labels={"allowed": "true"}) == 1
-        assert collector.get_counter("risk_checks_total", labels={"allowed": "false"}) == 0
+        # Verify metrics were emitted (Commit 5: labels include lane)
+        assert (
+            collector.get_counter(
+                "risk_checks_total", labels={"allowed": "true", "lane": "paper"}
+            )
+            == 1
+        )
+        assert (
+            collector.get_counter(
+                "risk_checks_total", labels={"allowed": "false", "lane": "paper"}
+            )
+            == 0
+        )
 
     @pytest.mark.asyncio
     async def test_risk_checker_emits_denied_metric(self) -> None:
@@ -82,16 +92,30 @@ class TestRiskCheckerMetrics:
 
         context = RiskContext(intent=intent)
 
-        # Check should emit metrics
-        await checker.check(intent, context)
+        # Check should emit metrics (default lane=paper)
+        await checker.check(intent, context, lane="paper")
 
-        # Verify metrics were emitted
-        assert collector.get_counter("risk_checks_total", labels={"allowed": "false"}) == 1
-        assert collector.get_counter("risk_checks_total", labels={"allowed": "true"}) == 0
+        # Verify metrics were emitted (Commit 5: labels include lane)
+        assert (
+            collector.get_counter(
+                "risk_checks_total", labels={"allowed": "false", "lane": "paper"}
+            )
+            == 1
+        )
+        assert (
+            collector.get_counter(
+                "risk_checks_total", labels={"allowed": "true", "lane": "paper"}
+            )
+            == 0
+        )
         # Should have recorded denial reason
         assert (
             collector.get_counter(
-                "risk_denials_total", labels={"reason": RiskReasonCode.RISK_ORDER_TOO_LARGE.value}
+                "risk_denials_total",
+                labels={
+                    "reason": RiskReasonCode.RISK_ORDER_TOO_LARGE.value,
+                    "lane": "paper",
+                },
             )
             == 1
         )

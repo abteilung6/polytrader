@@ -14,6 +14,7 @@ Per observability.mdc §2, §3:
 """
 
 import asyncio
+import time
 from collections.abc import Callable
 from typing import Any, Literal
 
@@ -201,6 +202,8 @@ class RiskChecker:
         get_active_strategies: Callable[[], set[str]] | None = None,
         limits_paper: RiskLimits | None = None,
         limits_live: RiskLimits | None = None,
+        clock: Clock | None = None,
+        rate_reset_interval_s: float = 60.0,
     ) -> None:
         """Initialize risk checker.
 
@@ -212,6 +215,8 @@ class RiskChecker:
             get_active_strategies: Optional callable returning active strategy IDs for live
             limits_paper: Optional risk limits for paper lane (when split config)
             limits_live: Optional risk limits for live lane (when split config)
+            clock: Optional clock for rate-limit reset (for determinism in tests)
+            rate_reset_interval_s: Interval in seconds after which order_count per lane is reset
         """
         self.bus = bus
         self.engine = engine
@@ -220,6 +225,8 @@ class RiskChecker:
         self._get_active_strategies = get_active_strategies
         self._limits_paper = limits_paper
         self._limits_live = limits_live
+        self._clock = clock
+        self._rate_reset_interval_s = rate_reset_interval_s
         self._approved_trades_paper: set[tuple[str, str, Outcome]] = set()
         self._approved_trades_live: set[tuple[str, str, Outcome]] = set()
         self._executed_trades_paper: set[tuple[str, str, Outcome]] = set()
@@ -230,6 +237,7 @@ class RiskChecker:
         ] = {}
         self._order_count_last_minute_paper = 0
         self._order_count_last_minute_live = 0
+        self._last_reset_monotonic: float = 0.0
         self._running = False
 
     def _limits_for_lane(self, lane: Literal["paper", "live"]) -> RiskLimits:
@@ -239,6 +247,18 @@ class RiskChecker:
         if lane == "live" and self._limits_live is not None:
             return self._limits_live
         return self.engine.limits
+
+    def _maybe_reset_rate_counters(self) -> None:
+        """If rate_reset_interval_s has elapsed, reset both lane order counters."""
+        now = (
+            self._clock.monotonic()
+            if self._clock is not None
+            else time.monotonic()
+        )
+        if now - self._last_reset_monotonic >= self._rate_reset_interval_s:
+            self._order_count_last_minute_paper = 0
+            self._order_count_last_minute_live = 0
+            self._last_reset_monotonic = now
 
     async def check(
         self,
@@ -389,8 +409,14 @@ class RiskChecker:
         orders_task = asyncio.create_task(track_orders())
 
         try:
+            self._last_reset_monotonic = (
+                self._clock.monotonic() if self._clock else time.monotonic()
+            )
             while self._running:
                 proposal = await proposal_queue.get()
+
+                # Reset per-lane order count every rate_reset_interval_s
+                self._maybe_reset_rate_counters()
 
                 # Resolve lane then build context from that lane's state
                 lane = resolve_lane(
