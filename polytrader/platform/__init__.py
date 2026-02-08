@@ -14,10 +14,12 @@ from polytrader.platform.orchestrator import (
     create_strategy_factory_from_config,
 )
 from polytrader.platform.performance import PerStrategyPerformanceTracker
+from polytrader.platform.proposal_router import ApprovedProposalRouter
 from polytrader.platform.registry import StrategyRegistry
 from polytrader.platform.strategy_runner import StrategyRunner
 
 __all__ = [
+    "ApprovedProposalRouter",
     "ControlPlaneService",
     "ExecutionControlRepository",
     "LiveStrategyRepository",
