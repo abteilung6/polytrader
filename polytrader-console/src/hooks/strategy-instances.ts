@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { controlApi } from '@/lib/api-client'
+import { QUERY_KEY_LIVE_STRATEGIES } from '@/hooks/use-live-strategies'
 import type { StrategiesResponse } from '@/lib/api'
 
 export const QUERY_KEY_STRATEGY_INSTANCES = ['strategy-instances'] as const
@@ -30,6 +31,7 @@ export function useActivateStrategy(strategyId: string) {
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: QUERY_KEY_STRATEGY_INSTANCES })
+      void queryClient.invalidateQueries({ queryKey: QUERY_KEY_LIVE_STRATEGIES })
     },
   })
 }
@@ -50,6 +52,7 @@ export function useDeactivateStrategy(strategyId: string) {
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: QUERY_KEY_STRATEGY_INSTANCES })
+      void queryClient.invalidateQueries({ queryKey: QUERY_KEY_LIVE_STRATEGIES })
     },
   })
 }

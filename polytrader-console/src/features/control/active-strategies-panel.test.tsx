@@ -192,6 +192,28 @@ describe('ActiveStrategiesPanel', () => {
     expect(screen.queryByTestId('active-strategy-strat-5')).not.toBeInTheDocument()
   })
 
+  it('shows Remove from active in row dropdown and opens confirmation dialog', async () => {
+    const user = userEvent.setup()
+    mockLiveStrategies(['strat-001'])
+    mockInstances([makeStrategy({ strategy_id: 'strat-001', name: 'Alpha Momentum' })])
+
+    renderWithQueryAndRouter(<ActiveStrategiesPanel />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('active-strategy-strat-001')).toBeInTheDocument()
+    })
+
+    const actionsButton = screen.getByTestId('active-strategy-actions-strat-001')
+    await user.click(actionsButton)
+    const removeItem = screen.getByTestId('active-strategy-remove')
+    expect(removeItem).toHaveTextContent('Remove from active')
+    await user.click(removeItem)
+
+    const dialog = screen.getByRole('alertdialog')
+    expect(dialog).toHaveTextContent('Remove from active live strategies')
+    expect(dialog).toHaveTextContent('Alpha Momentum')
+  })
+
   it('navigates to next and previous pages', async () => {
     const user = userEvent.setup()
     const ids = Array.from({ length: 8 }, (_, i) => `strat-${i}`)

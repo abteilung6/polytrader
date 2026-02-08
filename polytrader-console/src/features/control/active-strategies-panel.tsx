@@ -1,19 +1,22 @@
 /**
  * Active strategies panel — lists strategies activated for live trading.
- *
- * Per PILOT_LIVE.md §5.2: The operator needs to see which strategies
- * are live-activated. Cross-references live strategy IDs with the
- * strategy instances list for full details.
- *
- * Paginated: max 10 rows per page.
+ * Single place to see and manage the live pool: remove via row dropdown.
+ * Add to pool from Strategies → Instances ("Activate for Live").
  */
 
 import { useState } from 'react'
 import { Link } from '@tanstack/react-router'
+import { MoreVertical } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   Table,
@@ -23,8 +26,10 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { TypedAlertDialog } from '@/components/shared/typed-alert-dialog'
+import { useDeactivateStrategy, useStrategyInstancesQuery } from '@/hooks/strategy-instances'
 import { useLiveStrategiesQuery } from '@/hooks/use-live-strategies'
-import { useStrategyInstancesQuery } from '@/hooks/strategy-instances'
+import type { StrategyResponse } from '@/lib/api'
 
 const PAGE_SIZE = 5
 
@@ -81,35 +86,12 @@ export function ActiveStrategiesPanel() {
                   <TableHead>Name</TableHead>
                   <TableHead>Template</TableHead>
                   <TableHead>State</TableHead>
+                  <TableHead className="w-[70px]">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {pagedStrategies.map((strategy) => (
-                  <TableRow
-                    key={strategy.strategy_id}
-                    data-testid={`active-strategy-${strategy.strategy_id}`}
-                  >
-                    <TableCell>
-                      <Link
-                        to="/strategies/instances/$strategyId"
-                        params={{ strategyId: strategy.strategy_id }}
-                        className="text-primary hover:underline"
-                      >
-                        {strategy.name}
-                      </Link>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground text-xs">
-                      {strategy.template_type_id} v{strategy.template_version}
-                    </TableCell>
-                    <TableCell>
-                      <Badge
-                        variant={strategy.actual_state === 'RUNNING' ? 'secondary' : 'outline'}
-                        className="text-xs"
-                      >
-                        {strategy.actual_state}
-                      </Badge>
-                    </TableCell>
-                  </TableRow>
+                  <ActiveStrategyRow key={strategy.strategy_id} strategy={strategy} />
                 ))}
               </TableBody>
             </Table>
@@ -157,5 +139,72 @@ export function ActiveStrategiesPanel() {
         )}
       </CardContent>
     </Card>
+  )
+}
+
+function ActiveStrategyRow({ strategy }: { strategy: StrategyResponse }) {
+  const deactivateMutation = useDeactivateStrategy(strategy.strategy_id)
+  const [dialogOpen, setDialogOpen] = useState(false)
+
+  return (
+    <>
+      <TableRow data-testid={`active-strategy-${strategy.strategy_id}`}>
+        <TableCell>
+          <Link
+            to="/strategies/instances/$strategyId"
+            params={{ strategyId: strategy.strategy_id }}
+            className="text-primary hover:underline"
+          >
+            {strategy.name}
+          </Link>
+        </TableCell>
+        <TableCell className="text-muted-foreground text-xs">
+          {strategy.template_type_id} v{strategy.template_version}
+        </TableCell>
+        <TableCell>
+          <Badge
+            variant={strategy.actual_state === 'RUNNING' ? 'secondary' : 'outline'}
+            className="text-xs"
+          >
+            {strategy.actual_state}
+          </Badge>
+        </TableCell>
+        <TableCell>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-8"
+                aria-label="Actions"
+                data-testid={`active-strategy-actions-${strategy.strategy_id}`}
+              >
+                <MoreVertical className="size-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem
+                onClick={() => setDialogOpen(true)}
+                disabled={deactivateMutation.isPending}
+                data-testid="active-strategy-remove"
+              >
+                {deactivateMutation.isPending ? 'Removing…' : 'Remove from active'}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </TableCell>
+      </TableRow>
+      <TypedAlertDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        title="Remove from active live strategies"
+        description={`Remove "${strategy.name}" from the live pool? It will no longer be eligible for live execution. You can re-add it from Strategy instances.`}
+        confirmLabel="Remove"
+        isPending={deactivateMutation.isPending}
+        onConfirm={() => {
+          deactivateMutation.mutate(undefined, { onSuccess: () => setDialogOpen(false) })
+        }}
+      />
+    </>
   )
 }

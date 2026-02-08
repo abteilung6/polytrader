@@ -1,5 +1,4 @@
 import { screen } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
 import { vi } from 'vitest'
 
 import { controlApi } from '@/lib/api-client'
@@ -91,12 +90,12 @@ function mockLiveDashboardApis(
 }
 
 describe('LiveTradingPage', () => {
-  it('renders Live Trading dashboard with summary cards and tabs at /performance/live', async () => {
+  it('renders Live Trading dashboard with summary cards and Orders tab', async () => {
     mockLiveDashboardApis()
     renderWithRouter({ initialEntries: ['/performance/live'] })
     expect(await screen.findByTestId('live-summary-cards')).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: 'Live strategies' })).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: 'Recent orders' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Orders' })).toBeInTheDocument()
+    expect(await screen.findByTestId('live-orders-table')).toBeInTheDocument()
   })
 
   it('renders summary cards with correct counts', async () => {
@@ -113,39 +112,9 @@ describe('LiveTradingPage', () => {
     expect(await screen.findByTestId('total-live-pnl')).toBeInTheDocument()
   })
 
-  it('live strategies table shows empty state when no strategies trading live', async () => {
-    mockLiveDashboardApis({ activeStrategies: [] })
-    renderWithRouter({ initialEntries: ['/performance/live'] })
-    expect(await screen.findByTestId('live-strategies-empty')).toHaveTextContent(
-      'No strategies currently trading live',
-    )
-  })
-
-  it('live strategies table filters to active and running only', async () => {
-    mockLiveDashboardApis({
-      activeStrategies: ['live-1'],
-      strategies: [
-        createMockStrategyResponse({
-          strategy_id: 'live-1',
-          name: 'VFMR Live',
-          enabled: true,
-          actual_state: 'RUNNING',
-        }),
-      ],
-    })
-    renderWithRouter({ initialEntries: ['/performance/live'] })
-    expect(await screen.findByTestId('live-strategy-row-live-1')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'VFMR Live' })).toHaveAttribute(
-      'href',
-      '/strategies/instances/live-1',
-    )
-  })
-
   it('live orders table shows empty state when no live orders', async () => {
     mockLiveDashboardApis({ activeStrategies: ['s1'] })
     renderWithRouter({ initialEntries: ['/performance/live'] })
-    const ordersTab = await screen.findByRole('tab', { name: 'Recent orders' })
-    await userEvent.click(ordersTab)
     expect(await screen.findByTestId('live-orders-empty')).toHaveTextContent('No live orders yet')
   })
 
@@ -175,8 +144,6 @@ describe('LiveTradingPage', () => {
       ],
     })
     renderWithRouter({ initialEntries: ['/performance/live'] })
-    const ordersTab = await screen.findByRole('tab', { name: 'Recent orders' })
-    await userEvent.click(ordersTab)
     expect(await screen.findByTestId('live-order-row-ord-1')).toBeInTheDocument()
     expect(screen.getByText('FILLED')).toBeInTheDocument()
   })
