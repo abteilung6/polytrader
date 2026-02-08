@@ -11,6 +11,7 @@ Responsibilities:
 - Update in-memory ExecutionControl state
 - Emit ControlCommandEvent for audit trail
 - Handle validation and errors
+- Boot reconciliation: reset DB execution state to match runtime default (disabled)
 """
 
 import asyncio
@@ -96,10 +97,21 @@ class ControlPlaneService:
         self._task: asyncio.Task[None] | None = None
 
     async def start(self) -> None:
-        """Start the control plane service (begin polling for commands)."""
+        """Start the control plane service (begin polling for commands).
+
+        Per flows.mdc §2 / troubleshooting_foundational.mdc §0:
+        On boot, execution is ALWAYS disabled. The DB state is reset to match
+        the runtime default (execution_enabled=false). This prevents stale DB
+        state from causing unintended live execution after a restart.
+
+        The operator must explicitly re-enable execution after verifying
+        health gates — this is an institutional safety requirement.
+        """
         if self._running:
             logger.warning("ControlPlaneService is already running")
             return
+
+        await self._reconcile_boot_state()
 
         self._running = True
         self._task = asyncio.create_task(self._run())
@@ -115,6 +127,53 @@ class ControlPlaneService:
             except asyncio.CancelledError:
                 pass
         logger.info("ControlPlaneService stopped")
+
+    async def _reconcile_boot_state(self) -> None:
+        """Reconcile DB execution state with runtime default on boot.
+
+        Per flows.mdc §2: Default safe state is **no trading**.
+        On every platform boot, the DB execution state is reset to disabled.
+        This prevents stale DB state (e.g. from a previous session or test)
+        from accidentally enabling live execution without explicit operator
+        action.
+
+        The in-memory ExecutionControl already defaults to disabled; this
+        method ensures the DB matches, so the API reports a consistent view.
+        """
+        try:
+            db_state = await self._execution_repo.get_control()
+            if db_state.execution_enabled:
+                logger.warning(
+                    "Boot reconciliation: DB had execution_enabled=true "
+                    "(version={version}, set by={updated_by}, reason={reason}). "
+                    "Resetting to false for safety.",
+                    version=db_state.version,
+                    updated_by=db_state.updated_by,
+                    reason=db_state.reason,
+                )
+                await self._execution_repo.update_control(
+                    execution_enabled=False,
+                    updated_by="system",
+                    reason="Boot reconciliation: execution disabled on startup (safety default)",
+                )
+            else:
+                logger.info(
+                    "Boot reconciliation: DB execution state already disabled (version={version})",
+                    version=db_state.version,
+                )
+
+            # Ensure in-memory state is consistent (should already be False)
+            self._execution_control.execution_enabled = False
+            self._execution_control.kill_switch_active = False
+
+        except Exception as e:
+            logger.exception(
+                "Boot reconciliation failed: {error}. "
+                "In-memory execution remains disabled (safe default).",
+                error=str(e),
+            )
+            # Even on failure, in-memory state stays disabled — fail-safe
+            self._execution_control.execution_enabled = False
 
     async def _run(self) -> None:
         """Main loop: poll for pending commands and process them."""

@@ -561,6 +561,140 @@ class TestExecutionStateWithKillSwitch:
 
 
 # ============================================================================
+# Execution State — Runtime Truth Tests (Boot Reconciliation Fix)
+# ============================================================================
+
+
+class TestExecutionStateRuntimeTruth:
+    """Tests for GET /state/execution reading from runtime, not DB.
+
+    Per boot reconciliation fix (2026-02-08): The API must report the
+    in-memory ExecutionControl state for execution_enabled, not the DB
+    value. This prevents state divergence where the UI shows 'ON' but
+    the execution router rejects all orders.
+    """
+
+    def test_api_returns_runtime_state_not_db(
+        self,
+        client: TestClient,
+        execution_control: ExecutionControl,
+        mock_execution_repo: MagicMock,
+    ) -> None:
+        """API returns in-memory execution_enabled, even if DB disagrees.
+
+        This is the exact bug scenario: DB says enabled (stale from previous
+        session), but runtime says disabled. The API must return disabled.
+        """
+        # DB says enabled (stale state)
+        db_record = MagicMock()
+        db_record.execution_enabled = True
+        db_record.version = 5
+        db_record.updated_at = datetime(2026, 1, 23, tzinfo=UTC)
+        db_record.updated_by = "operator"
+        db_record.reason = "Test envelope structure"
+        mock_execution_repo.get_control = AsyncMock(return_value=db_record)
+
+        # Runtime says disabled (default on boot)
+        execution_control.execution_enabled = False
+
+        response = client.get("/api/v1/state/execution")
+
+        assert response.status_code == 200
+        data = response.json()
+        # Must follow runtime truth, not DB
+        assert data["execution_enabled"] is False
+
+    def test_api_returns_runtime_enabled_when_truly_enabled(
+        self,
+        client: TestClient,
+        execution_control: ExecutionControl,
+        mock_execution_repo: MagicMock,
+    ) -> None:
+        """API returns enabled when runtime is actually enabled.
+
+        When the operator explicitly enables execution during this session,
+        both DB and runtime should agree, and the API returns True.
+        """
+        db_record = MagicMock()
+        db_record.execution_enabled = True
+        db_record.version = 6
+        db_record.updated_at = datetime(2026, 2, 8, tzinfo=UTC)
+        db_record.updated_by = "operator"
+        db_record.reason = "Enabled from control page"
+        mock_execution_repo.get_control = AsyncMock(return_value=db_record)
+
+        # Runtime enabled (operator enabled this session)
+        execution_control.execution_enabled = True
+
+        response = client.get("/api/v1/state/execution")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["execution_enabled"] is True
+
+    def test_api_falls_back_to_db_when_no_platform(
+        self,
+        client_no_platform: TestClient,
+        mock_execution_repo: MagicMock,
+    ) -> None:
+        """When platform is not running, API falls back to DB state.
+
+        exec_control is None (platform not started), so the API reads
+        execution_enabled from the DB as a fallback. This is acceptable
+        because no execution router is running to gate orders anyway.
+        """
+        db_record = MagicMock()
+        db_record.execution_enabled = True
+        db_record.version = 5
+        db_record.updated_at = datetime(2026, 1, 23, tzinfo=UTC)
+        db_record.updated_by = "operator"
+        db_record.reason = "Previous session"
+        mock_execution_repo.get_control = AsyncMock(return_value=db_record)
+
+        response = client_no_platform.get("/api/v1/state/execution")
+
+        assert response.status_code == 200
+        data = response.json()
+        # Falls back to DB since no runtime
+        assert data["execution_enabled"] is True
+        # kill_switch defaults to False when no runtime
+        assert data["kill_switch_active"] is False
+
+    def test_api_metadata_still_from_db(
+        self,
+        client: TestClient,
+        execution_control: ExecutionControl,
+        mock_execution_repo: MagicMock,
+    ) -> None:
+        """Version, updated_at, updated_by, reason come from DB (metadata).
+
+        The runtime state determines execution_enabled and kill_switch_active,
+        but audit metadata (version, timestamps, author) still comes from
+        the DB as the persistent record.
+        """
+        db_record = MagicMock()
+        db_record.execution_enabled = True  # Irrelevant — runtime overrides
+        db_record.version = 7
+        db_record.updated_at = datetime(2026, 2, 8, 14, 14, 28, tzinfo=UTC)
+        db_record.updated_by = "operator"
+        db_record.reason = "Execution disabled from control page"
+        mock_execution_repo.get_control = AsyncMock(return_value=db_record)
+
+        execution_control.execution_enabled = False
+
+        response = client.get("/api/v1/state/execution")
+
+        assert response.status_code == 200
+        data = response.json()
+        # Runtime truth for execution
+        assert data["execution_enabled"] is False
+        # DB metadata preserved
+        assert data["version"] == 7
+        assert data["updated_by"] == "operator"
+        assert data["reason"] == "Execution disabled from control page"
+
+
+# ============================================================================
 # Full Lifecycle Tests
 # ============================================================================
 

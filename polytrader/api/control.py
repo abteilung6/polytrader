@@ -145,14 +145,27 @@ async def get_execution_state(
 ) -> ExecutionStateResponse:
     """Get execution control state (with version for optimistic concurrency).
 
-    Includes kill_switch_active from in-memory state (not persisted in DB).
-    When the platform is not running (exec_control is None), kill_switch_active
-    defaults to False.
+    Per boot reconciliation fix: execution_enabled is read from the **in-memory
+    runtime** state when the platform is running. This ensures the UI always
+    shows what the execution router will actually do. The DB is used for
+    metadata (version, updated_at, updated_by, reason) and as fallback when
+    the platform is not running (exec_control is None).
+
+    kill_switch_active is always in-memory only (not persisted in DB).
     """
     control = await execution_repo.get_control()
-    kill_switch_active = exec_control.kill_switch_active if exec_control is not None else False
+
+    # Runtime state is the source of truth for execution gating.
+    # Fall back to DB state only when platform is not running.
+    if exec_control is not None:
+        execution_enabled = exec_control.execution_enabled
+        kill_switch_active = exec_control.kill_switch_active
+    else:
+        execution_enabled = control.execution_enabled
+        kill_switch_active = False
+
     return ExecutionStateResponse(
-        execution_enabled=control.execution_enabled,
+        execution_enabled=execution_enabled,
         kill_switch_active=kill_switch_active,
         version=control.version,
         updated_at=control.updated_at,
