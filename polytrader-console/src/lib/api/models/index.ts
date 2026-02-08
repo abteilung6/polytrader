@@ -13,6 +13,8 @@ export * from './health-gate-status';
 export * from './health-gates';
 export * from './health-response';
 export * from './historical-ticks-response';
+export * from './kill-switch-request';
+export * from './kill-switch-reset-request';
 export * from './live-strategies-response';
 export * from './location-inner';
 export * from './market-info-response';

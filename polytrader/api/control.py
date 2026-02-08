@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from polytrader.api.dependencies import (
     get_control_command_repo,
     get_event_repository,
+    get_execution_control,
     get_execution_control_repo,
     get_in_memory_strategy_registry,
     get_live_strategy_repo,
@@ -36,6 +37,8 @@ from polytrader.api.models import (
     HealthGates,
     HealthGateStatus,
     HealthResponse,
+    KillSwitchRequest,
+    KillSwitchResetRequest,
     LiveStrategiesResponse,
     PerformanceOverviewItemResponse,
     PerformanceOverviewResponse,
@@ -63,6 +66,7 @@ from polytrader.db.performance_repository import (
     SortByField,
 )
 from polytrader.db.repository import EventRepository
+from polytrader.ops.control import ExecutionControl
 from polytrader.platform.control import (
     ControlCommandRepository,
     ExecutionControlRepository,
@@ -137,11 +141,19 @@ async def get_health() -> HealthResponse:
 @router.get("/state/execution", response_model=ExecutionStateResponse)
 async def get_execution_state(
     execution_repo: ExecutionControlRepository = Depends(get_execution_control_repo),  # noqa: B008
+    exec_control: ExecutionControl | None = Depends(get_execution_control),  # noqa: B008
 ) -> ExecutionStateResponse:
-    """Get execution control state (with version for optimistic concurrency)."""
+    """Get execution control state (with version for optimistic concurrency).
+
+    Includes kill_switch_active from in-memory state (not persisted in DB).
+    When the platform is not running (exec_control is None), kill_switch_active
+    defaults to False.
+    """
     control = await execution_repo.get_control()
+    kill_switch_active = exec_control.kill_switch_active if exec_control is not None else False
     return ExecutionStateResponse(
         execution_enabled=control.execution_enabled,
+        kill_switch_active=kill_switch_active,
         version=control.version,
         updated_at=control.updated_at,
         updated_by=control.updated_by,
@@ -868,6 +880,143 @@ async def disable_execution(
         command_id=command_id,
         status="pending",
         submitted_at=cmd.created_at,
+        links={"status": f"/api/v1/state/commands/{command_id}"},
+    )
+
+
+@router.post(
+    "/commands/execution/kill-switch",
+    response_model=CommandEnvelopeResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        400: {"model": ErrorResponse, "description": "Validation error"},
+        503: {"model": ErrorResponse, "description": "Platform not running"},
+    },
+)
+async def activate_kill_switch(
+    request: KillSwitchRequest,
+    exec_control: ExecutionControl | None = Depends(get_execution_control),  # noqa: B008
+    command_repo: ControlCommandRepository = Depends(get_control_command_repo),  # noqa: B008
+    execution_repo: ExecutionControlRepository = Depends(get_execution_control_repo),  # noqa: B008
+) -> CommandEnvelopeResponse:
+    """Activate kill switch (emergency stop — immediate, not queued).
+
+    Per flows.mdc §13: Kill switch provides immediate stop-trading policy.
+    This endpoint directly applies the kill switch to in-memory state,
+    disables execution in the DB, and creates an audit command record.
+
+    Unlike enable/disable which go through the command queue, the kill switch
+    is applied immediately because it is a safety-critical emergency action.
+
+    After activation:
+    - execution_enabled = false
+    - kill_switch_active = true
+    - KillSwitchEvent emitted
+    - All pending orders will be rejected by execution router
+
+    Reset requires a separate call to /commands/execution/kill-switch/reset
+    followed by /commands/execution/enable.
+    """
+    if exec_control is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=ErrorResponse(
+                error="Platform not running",
+                detail="Kill switch requires the platform runtime to be active. "
+                "ExecutionControl is not available.",
+            ).model_dump(),
+        )
+
+    # Apply immediately to in-memory state (not queued)
+    await exec_control.set_kill_switch(
+        active=True,
+        reason=request.reason,
+        cancel_open_orders=request.cancel_open_orders,
+        triggered_by="operator",
+    )
+
+    # Persist execution_enabled=false in DB for consistency
+    await execution_repo.update_control(
+        execution_enabled=False,
+        updated_by=request.issued_by,
+        reason=f"Kill switch activated: {request.reason}",
+    )
+
+    # Create audit command record (marked as applied immediately)
+    now = datetime.now(UTC)
+    cmd = ControlCommandRecord(
+        command_type="kill_switch_activate",
+        reason=request.reason,
+        issued_by=request.issued_by,
+    )
+    command_id = await command_repo.create_command(cmd)
+    await command_repo.mark_applied(command_id)
+
+    return CommandEnvelopeResponse(
+        command_id=command_id,
+        status="applied",
+        submitted_at=now,
+        links={"status": f"/api/v1/state/commands/{command_id}"},
+    )
+
+
+@router.post(
+    "/commands/execution/kill-switch/reset",
+    response_model=CommandEnvelopeResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        400: {"model": ErrorResponse, "description": "Validation error"},
+        503: {"model": ErrorResponse, "description": "Platform not running"},
+    },
+)
+async def reset_kill_switch(
+    request: KillSwitchResetRequest,
+    exec_control: ExecutionControl | None = Depends(get_execution_control),  # noqa: B008
+    command_repo: ControlCommandRepository = Depends(get_control_command_repo),  # noqa: B008
+) -> CommandEnvelopeResponse:
+    """Reset (deactivate) the kill switch.
+
+    Resetting the kill switch does NOT re-enable execution. The operator must
+    separately call /commands/execution/enable to resume trading. This is a
+    deliberate safety measure to prevent accidental re-enablement.
+
+    After reset:
+    - kill_switch_active = false
+    - execution_enabled remains false (unchanged)
+    - KillSwitchEvent emitted (triggered=false)
+    """
+    if exec_control is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=ErrorResponse(
+                error="Platform not running",
+                detail="Kill switch reset requires the platform runtime to be active. "
+                "ExecutionControl is not available.",
+            ).model_dump(),
+        )
+
+    # Apply immediately to in-memory state
+    await exec_control.set_kill_switch(
+        active=False,
+        reason=request.reason,
+        cancel_open_orders=False,
+        triggered_by="operator",
+    )
+
+    # Create audit command record (marked as applied immediately)
+    now = datetime.now(UTC)
+    cmd = ControlCommandRecord(
+        command_type="kill_switch_reset",
+        reason=request.reason,
+        issued_by=request.issued_by,
+    )
+    command_id = await command_repo.create_command(cmd)
+    await command_repo.mark_applied(command_id)
+
+    return CommandEnvelopeResponse(
+        command_id=command_id,
+        status="applied",
+        submitted_at=now,
         links={"status": f"/api/v1/state/commands/{command_id}"},
     )
 

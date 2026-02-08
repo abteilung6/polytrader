@@ -44,6 +44,10 @@ import type { HTTPValidationError } from '../models';
 // @ts-ignore
 import type { HealthResponse } from '../models';
 // @ts-ignore
+import type { KillSwitchRequest } from '../models';
+// @ts-ignore
+import type { KillSwitchResetRequest } from '../models';
+// @ts-ignore
 import type { LiveStrategiesResponse } from '../models';
 // @ts-ignore
 import type { PerformanceOverviewResponse } from '../models';
@@ -74,6 +78,41 @@ import type { VersionConflictResponse } from '../models';
  */
 export const ControlApiAxiosParamCreator = function (configuration?: Configuration) {
     return {
+        /**
+         * Activate kill switch (emergency stop — immediate, not queued).  Per flows.mdc §13: Kill switch provides immediate stop-trading policy. This endpoint directly applies the kill switch to in-memory state, disables execution in the DB, and creates an audit command record.  Unlike enable/disable which go through the command queue, the kill switch is applied immediately because it is a safety-critical emergency action.  After activation: - execution_enabled = false - kill_switch_active = true - KillSwitchEvent emitted - All pending orders will be rejected by execution router  Reset requires a separate call to /commands/execution/kill-switch/reset followed by /commands/execution/enable.
+         * @summary Activate Kill Switch
+         * @param {KillSwitchRequest} killSwitchRequest 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        activateKillSwitchApiV1CommandsExecutionKillSwitchPost: async (killSwitchRequest: KillSwitchRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'killSwitchRequest' is not null or undefined
+            assertParamExists('activateKillSwitchApiV1CommandsExecutionKillSwitchPost', 'killSwitchRequest', killSwitchRequest)
+            const localVarPath = `/api/v1/commands/execution/kill-switch`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(killSwitchRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
         /**
          * Activate strategy for live trading (creates command in queue).  Idempotent: If client_request_id already exists, returns existing command_id.
          * @summary Activate Strategy
@@ -292,7 +331,7 @@ export const ControlApiAxiosParamCreator = function (configuration?: Configurati
             };
         },
         /**
-         * Get execution control state (with version for optimistic concurrency).
+         * Get execution control state (with version for optimistic concurrency).  Includes kill_switch_active from in-memory state (not persisted in DB). When the platform is not running (exec_control is None), kill_switch_active defaults to False.
          * @summary Get Execution State
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -764,6 +803,41 @@ export const ControlApiAxiosParamCreator = function (configuration?: Configurati
             };
         },
         /**
+         * Reset (deactivate) the kill switch.  Resetting the kill switch does NOT re-enable execution. The operator must separately call /commands/execution/enable to resume trading. This is a deliberate safety measure to prevent accidental re-enablement.  After reset: - kill_switch_active = false - execution_enabled remains false (unchanged) - KillSwitchEvent emitted (triggered=false)
+         * @summary Reset Kill Switch
+         * @param {KillSwitchResetRequest} killSwitchResetRequest 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        resetKillSwitchApiV1CommandsExecutionKillSwitchResetPost: async (killSwitchResetRequest: KillSwitchResetRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'killSwitchResetRequest' is not null or undefined
+            assertParamExists('resetKillSwitchApiV1CommandsExecutionKillSwitchResetPost', 'killSwitchResetRequest', killSwitchResetRequest)
+            const localVarPath = `/api/v1/commands/execution/kill-switch/reset`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(killSwitchResetRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
          * Update an existing strategy in registry.
          * @summary Update Strategy
          * @param {string} strategyId 
@@ -847,6 +921,19 @@ export const ControlApiFp = function(configuration?: Configuration) {
     const localVarAxiosParamCreator = ControlApiAxiosParamCreator(configuration)
     return {
         /**
+         * Activate kill switch (emergency stop — immediate, not queued).  Per flows.mdc §13: Kill switch provides immediate stop-trading policy. This endpoint directly applies the kill switch to in-memory state, disables execution in the DB, and creates an audit command record.  Unlike enable/disable which go through the command queue, the kill switch is applied immediately because it is a safety-critical emergency action.  After activation: - execution_enabled = false - kill_switch_active = true - KillSwitchEvent emitted - All pending orders will be rejected by execution router  Reset requires a separate call to /commands/execution/kill-switch/reset followed by /commands/execution/enable.
+         * @summary Activate Kill Switch
+         * @param {KillSwitchRequest} killSwitchRequest 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async activateKillSwitchApiV1CommandsExecutionKillSwitchPost(killSwitchRequest: KillSwitchRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CommandEnvelopeResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.activateKillSwitchApiV1CommandsExecutionKillSwitchPost(killSwitchRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ControlApi.activateKillSwitchApiV1CommandsExecutionKillSwitchPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Activate strategy for live trading (creates command in queue).  Idempotent: If client_request_id already exists, returns existing command_id.
          * @summary Activate Strategy
          * @param {string} strategyId 
@@ -927,7 +1014,7 @@ export const ControlApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Get execution control state (with version for optimistic concurrency).
+         * Get execution control state (with version for optimistic concurrency).  Includes kill_switch_active from in-memory state (not persisted in DB). When the platform is not running (exec_control is None), kill_switch_active defaults to False.
          * @summary Get Execution State
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -1094,6 +1181,19 @@ export const ControlApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         * Reset (deactivate) the kill switch.  Resetting the kill switch does NOT re-enable execution. The operator must separately call /commands/execution/enable to resume trading. This is a deliberate safety measure to prevent accidental re-enablement.  After reset: - kill_switch_active = false - execution_enabled remains false (unchanged) - KillSwitchEvent emitted (triggered=false)
+         * @summary Reset Kill Switch
+         * @param {KillSwitchResetRequest} killSwitchResetRequest 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async resetKillSwitchApiV1CommandsExecutionKillSwitchResetPost(killSwitchResetRequest: KillSwitchResetRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CommandEnvelopeResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.resetKillSwitchApiV1CommandsExecutionKillSwitchResetPost(killSwitchResetRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ControlApi.resetKillSwitchApiV1CommandsExecutionKillSwitchResetPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Update an existing strategy in registry.
          * @summary Update Strategy
          * @param {string} strategyId 
@@ -1129,6 +1229,16 @@ export const ControlApiFp = function(configuration?: Configuration) {
 export const ControlApiFactory = function (configuration?: Configuration, basePath?: string, axios?: AxiosInstance) {
     const localVarFp = ControlApiFp(configuration)
     return {
+        /**
+         * Activate kill switch (emergency stop — immediate, not queued).  Per flows.mdc §13: Kill switch provides immediate stop-trading policy. This endpoint directly applies the kill switch to in-memory state, disables execution in the DB, and creates an audit command record.  Unlike enable/disable which go through the command queue, the kill switch is applied immediately because it is a safety-critical emergency action.  After activation: - execution_enabled = false - kill_switch_active = true - KillSwitchEvent emitted - All pending orders will be rejected by execution router  Reset requires a separate call to /commands/execution/kill-switch/reset followed by /commands/execution/enable.
+         * @summary Activate Kill Switch
+         * @param {ControlApiActivateKillSwitchApiV1CommandsExecutionKillSwitchPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        activateKillSwitchApiV1CommandsExecutionKillSwitchPost(requestParameters: ControlApiActivateKillSwitchApiV1CommandsExecutionKillSwitchPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<CommandEnvelopeResponse> {
+            return localVarFp.activateKillSwitchApiV1CommandsExecutionKillSwitchPost(requestParameters.killSwitchRequest, options).then((request) => request(axios, basePath));
+        },
         /**
          * Activate strategy for live trading (creates command in queue).  Idempotent: If client_request_id already exists, returns existing command_id.
          * @summary Activate Strategy
@@ -1190,7 +1300,7 @@ export const ControlApiFactory = function (configuration?: Configuration, basePa
             return localVarFp.getCommandStatusApiV1StateCommandsCommandIdGet(requestParameters.commandId, options).then((request) => request(axios, basePath));
         },
         /**
-         * Get execution control state (with version for optimistic concurrency).
+         * Get execution control state (with version for optimistic concurrency).  Includes kill_switch_active from in-memory state (not persisted in DB). When the platform is not running (exec_control is None), kill_switch_active defaults to False.
          * @summary Get Execution State
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -1305,6 +1415,16 @@ export const ControlApiFactory = function (configuration?: Configuration, basePa
             return localVarFp.listStrategyTemplatesApiV1StateStrategiesTemplatesGet(options).then((request) => request(axios, basePath));
         },
         /**
+         * Reset (deactivate) the kill switch.  Resetting the kill switch does NOT re-enable execution. The operator must separately call /commands/execution/enable to resume trading. This is a deliberate safety measure to prevent accidental re-enablement.  After reset: - kill_switch_active = false - execution_enabled remains false (unchanged) - KillSwitchEvent emitted (triggered=false)
+         * @summary Reset Kill Switch
+         * @param {ControlApiResetKillSwitchApiV1CommandsExecutionKillSwitchResetPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        resetKillSwitchApiV1CommandsExecutionKillSwitchResetPost(requestParameters: ControlApiResetKillSwitchApiV1CommandsExecutionKillSwitchResetPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<CommandEnvelopeResponse> {
+            return localVarFp.resetKillSwitchApiV1CommandsExecutionKillSwitchResetPost(requestParameters.killSwitchResetRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
          * Update an existing strategy in registry.
          * @summary Update Strategy
          * @param {ControlApiUpdateStrategyApiV1CommandsStrategiesStrategyIdPatchRequest} requestParameters Request parameters.
@@ -1326,6 +1446,13 @@ export const ControlApiFactory = function (configuration?: Configuration, basePa
         },
     };
 };
+
+/**
+ * Request parameters for activateKillSwitchApiV1CommandsExecutionKillSwitchPost operation in ControlApi.
+ */
+export interface ControlApiActivateKillSwitchApiV1CommandsExecutionKillSwitchPostRequest {
+    readonly killSwitchRequest: KillSwitchRequest
+}
 
 /**
  * Request parameters for activateStrategyApiV1CommandsLiveStrategiesStrategyIdActivatePost operation in ControlApi.
@@ -1455,6 +1582,13 @@ export interface ControlApiGetStrategyTemplateVersionApiV1StateStrategiesTemplat
 }
 
 /**
+ * Request parameters for resetKillSwitchApiV1CommandsExecutionKillSwitchResetPost operation in ControlApi.
+ */
+export interface ControlApiResetKillSwitchApiV1CommandsExecutionKillSwitchResetPostRequest {
+    readonly killSwitchResetRequest: KillSwitchResetRequest
+}
+
+/**
  * Request parameters for updateStrategyApiV1CommandsStrategiesStrategyIdPatch operation in ControlApi.
  */
 export interface ControlApiUpdateStrategyApiV1CommandsStrategiesStrategyIdPatchRequest {
@@ -1474,6 +1608,17 @@ export interface ControlApiValidateStrategyConfigApiV1StateStrategiesValidatePos
  * ControlApi - object-oriented interface
  */
 export class ControlApi extends BaseAPI {
+    /**
+     * Activate kill switch (emergency stop — immediate, not queued).  Per flows.mdc §13: Kill switch provides immediate stop-trading policy. This endpoint directly applies the kill switch to in-memory state, disables execution in the DB, and creates an audit command record.  Unlike enable/disable which go through the command queue, the kill switch is applied immediately because it is a safety-critical emergency action.  After activation: - execution_enabled = false - kill_switch_active = true - KillSwitchEvent emitted - All pending orders will be rejected by execution router  Reset requires a separate call to /commands/execution/kill-switch/reset followed by /commands/execution/enable.
+     * @summary Activate Kill Switch
+     * @param {ControlApiActivateKillSwitchApiV1CommandsExecutionKillSwitchPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public activateKillSwitchApiV1CommandsExecutionKillSwitchPost(requestParameters: ControlApiActivateKillSwitchApiV1CommandsExecutionKillSwitchPostRequest, options?: RawAxiosRequestConfig) {
+        return ControlApiFp(this.configuration).activateKillSwitchApiV1CommandsExecutionKillSwitchPost(requestParameters.killSwitchRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
     /**
      * Activate strategy for live trading (creates command in queue).  Idempotent: If client_request_id already exists, returns existing command_id.
      * @summary Activate Strategy
@@ -1541,7 +1686,7 @@ export class ControlApi extends BaseAPI {
     }
 
     /**
-     * Get execution control state (with version for optimistic concurrency).
+     * Get execution control state (with version for optimistic concurrency).  Includes kill_switch_active from in-memory state (not persisted in DB). When the platform is not running (exec_control is None), kill_switch_active defaults to False.
      * @summary Get Execution State
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
@@ -1665,6 +1810,17 @@ export class ControlApi extends BaseAPI {
      */
     public listStrategyTemplatesApiV1StateStrategiesTemplatesGet(options?: RawAxiosRequestConfig) {
         return ControlApiFp(this.configuration).listStrategyTemplatesApiV1StateStrategiesTemplatesGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Reset (deactivate) the kill switch.  Resetting the kill switch does NOT re-enable execution. The operator must separately call /commands/execution/enable to resume trading. This is a deliberate safety measure to prevent accidental re-enablement.  After reset: - kill_switch_active = false - execution_enabled remains false (unchanged) - KillSwitchEvent emitted (triggered=false)
+     * @summary Reset Kill Switch
+     * @param {ControlApiResetKillSwitchApiV1CommandsExecutionKillSwitchResetPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public resetKillSwitchApiV1CommandsExecutionKillSwitchResetPost(requestParameters: ControlApiResetKillSwitchApiV1CommandsExecutionKillSwitchResetPostRequest, options?: RawAxiosRequestConfig) {
+        return ControlApiFp(this.configuration).resetKillSwitchApiV1CommandsExecutionKillSwitchResetPost(requestParameters.killSwitchResetRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

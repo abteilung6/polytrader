@@ -3,13 +3,44 @@
 This file provides shared fixtures and utilities for all tests.
 """
 
+from collections.abc import Generator
+
 import pytest
 
 from polytrader.db.models import StrategyRecord
 from polytrader.events.bus import EventBus
+from polytrader.obs.metrics import MemoryMetricsCollector, set_metrics_collector
 from polytrader.oms.idempotency import IdempotencyStore
 from polytrader.oms.store import InMemoryOrderStore
 from polytrader.strategies.lifecycle_models import StrategyLifecycleState
+
+
+@pytest.fixture(autouse=True)
+def _use_memory_metrics() -> Generator[None, None, None]:
+    """Set MemoryMetricsCollector as global metrics backend for all tests.
+
+    This prevents Prometheus CollectorRegistry duplication errors when
+    multiple create_app() or ExecutionControl instances are created
+    across tests. The ObservabilityMiddleware and all metrics helper
+    functions (set_execution_enabled, set_kill_switch, etc.) call
+    get_metrics_collector() which would otherwise create a singleton
+    PrometheusMetricsCollector that registers in the global registry.
+
+    By setting MemoryMetricsCollector here, we ensure:
+    - No Prometheus registry conflicts across test files
+    - No side effects from metric registration in production code
+    - Each test gets a clean metrics state
+
+    Tests that specifically need Prometheus (e.g. tests/unit/obs/) can
+    override by using the isolated_registry fixture from their conftest.
+
+    Per unit_testing_technical.mdc: Unit tests must be isolated and
+    free of external I/O.
+    """
+    collector = MemoryMetricsCollector()
+    set_metrics_collector(collector)
+    yield
+    set_metrics_collector(None)
 
 
 @pytest.fixture

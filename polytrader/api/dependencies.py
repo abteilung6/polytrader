@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import (
 from polytrader.config import get_database_url
 from polytrader.db.performance_repository import PerformanceOverviewRepository
 from polytrader.db.repository import EventRepository, MarketTickRepository
+from polytrader.ops.control import ExecutionControl
 from polytrader.platform.control import (
     ControlCommandRepository,
     ExecutionControlRepository,
@@ -178,6 +179,17 @@ def get_in_memory_strategy_registry() -> InMemoryStrategyRegistry:
         _in_memory_registry = InMemoryStrategyRegistry()
         register_all_strategies(_in_memory_registry)
     return _in_memory_registry
+
+
+def get_execution_control(request: Request) -> ExecutionControl | None:
+    """Provide in-memory ExecutionControl from app state.
+
+    Returns None when not set (e.g. in tests or when API is run standalone).
+    Used for kill switch and execution state queries that need in-memory state.
+
+    The ExecutionControl is set on app.state by the platform task at startup.
+    """
+    return getattr(request.app.state, "execution_control", None)
 
 
 def get_orchestrator(request: Request) -> "PlatformOrchestrator | None":

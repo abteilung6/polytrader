@@ -199,9 +199,10 @@ async def platform_start_task(
             # Start control plane service
             await control_plane_service.start()
 
-            # Start FastAPI server in background; inject orchestrator for runtime add
+            # Start FastAPI server in background; inject runtime state for API endpoints
             app = create_app()
             app.state.orchestrator = orchestrator
+            app.state.execution_control = execution_control
             config = uvicorn.Config(
                 app=app,
                 host=api_host,

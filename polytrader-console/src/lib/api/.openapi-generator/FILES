@@ -21,6 +21,8 @@ docs/HealthGateStatus.md
 docs/HealthGates.md
 docs/HealthResponse.md
 docs/HistoricalTicksResponse.md
+docs/KillSwitchRequest.md
+docs/KillSwitchResetRequest.md
 docs/LiveStrategiesResponse.md
 docs/LocationInner.md
 docs/MarketApi.md
@@ -64,6 +66,8 @@ models/health-response.ts
 models/historical-ticks-response.ts
 models/httpvalidation-error.ts
 models/index.ts
+models/kill-switch-request.ts
+models/kill-switch-reset-request.ts
 models/live-strategies-response.ts
 models/location-inner.ts
 models/market-info-response.ts

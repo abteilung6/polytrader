@@ -15,13 +15,17 @@
 
 
 /**
- * Execution control state response.
+ * Execution control state response.  Includes both DB-persisted execution_enabled state and in-memory kill_switch_active state for the frontend control page.
  */
 export interface ExecutionStateResponse {
     /**
      * Whether execution is enabled
      */
     'execution_enabled': boolean;
+    /**
+     * Whether kill switch is active (in-memory state)
+     */
+    'kill_switch_active'?: boolean;
     /**
      * Version for optimistic concurrency
      */

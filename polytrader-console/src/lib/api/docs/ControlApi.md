@@ -4,6 +4,7 @@ All URIs are relative to *http://localhost*
 
 |Method | HTTP request | Description|
 |------------- | ------------- | -------------|
+|[**activateKillSwitchApiV1CommandsExecutionKillSwitchPost**](#activatekillswitchapiv1commandsexecutionkillswitchpost) | **POST** /api/v1/commands/execution/kill-switch | Activate Kill Switch|
 |[**activateStrategyApiV1CommandsLiveStrategiesStrategyIdActivatePost**](#activatestrategyapiv1commandslivestrategiesstrategyidactivatepost) | **POST** /api/v1/commands/live-strategies/{strategy_id}/activate | Activate Strategy|
 |[**createStrategyApiV1CommandsStrategiesPost**](#createstrategyapiv1commandsstrategiespost) | **POST** /api/v1/commands/strategies | Create Strategy|
 |[**deactivateStrategyApiV1CommandsLiveStrategiesStrategyIdDeactivatePost**](#deactivatestrategyapiv1commandslivestrategiesstrategyiddeactivatepost) | **POST** /api/v1/commands/live-strategies/{strategy_id}/deactivate | Deactivate Strategy|
@@ -22,8 +23,64 @@ All URIs are relative to *http://localhost*
 |[**getStrategyTemplateApiV1StateStrategiesTemplatesTypeIdGet**](#getstrategytemplateapiv1statestrategiestemplatestypeidget) | **GET** /api/v1/state/strategies/templates/{type_id} | Get Strategy Template|
 |[**getStrategyTemplateVersionApiV1StateStrategiesTemplatesTypeIdVersionsVersionGet**](#getstrategytemplateversionapiv1statestrategiestemplatestypeidversionsversionget) | **GET** /api/v1/state/strategies/templates/{type_id}/versions/{version} | Get Strategy Template Version|
 |[**listStrategyTemplatesApiV1StateStrategiesTemplatesGet**](#liststrategytemplatesapiv1statestrategiestemplatesget) | **GET** /api/v1/state/strategies/templates | List Strategy Templates|
+|[**resetKillSwitchApiV1CommandsExecutionKillSwitchResetPost**](#resetkillswitchapiv1commandsexecutionkillswitchresetpost) | **POST** /api/v1/commands/execution/kill-switch/reset | Reset Kill Switch|
 |[**updateStrategyApiV1CommandsStrategiesStrategyIdPatch**](#updatestrategyapiv1commandsstrategiesstrategyidpatch) | **PATCH** /api/v1/commands/strategies/{strategy_id} | Update Strategy|
 |[**validateStrategyConfigApiV1StateStrategiesValidatePost**](#validatestrategyconfigapiv1statestrategiesvalidatepost) | **POST** /api/v1/state/strategies/validate | Validate Strategy Config|
+
+# **activateKillSwitchApiV1CommandsExecutionKillSwitchPost**
+> CommandEnvelopeResponse activateKillSwitchApiV1CommandsExecutionKillSwitchPost(killSwitchRequest)
+
+Activate kill switch (emergency stop — immediate, not queued).  Per flows.mdc §13: Kill switch provides immediate stop-trading policy. This endpoint directly applies the kill switch to in-memory state, disables execution in the DB, and creates an audit command record.  Unlike enable/disable which go through the command queue, the kill switch is applied immediately because it is a safety-critical emergency action.  After activation: - execution_enabled = false - kill_switch_active = true - KillSwitchEvent emitted - All pending orders will be rejected by execution router  Reset requires a separate call to /commands/execution/kill-switch/reset followed by /commands/execution/enable.
+
+### Example
+
+```typescript
+import {
+    ControlApi,
+    Configuration,
+    KillSwitchRequest
+} from '@polytrader/api-client';
+
+const configuration = new Configuration();
+const apiInstance = new ControlApi(configuration);
+
+let killSwitchRequest: KillSwitchRequest; //
+
+const { status, data } = await apiInstance.activateKillSwitchApiV1CommandsExecutionKillSwitchPost(
+    killSwitchRequest
+);
+```
+
+### Parameters
+
+|Name | Type | Description  | Notes|
+|------------- | ------------- | ------------- | -------------|
+| **killSwitchRequest** | **KillSwitchRequest**|  | |
+
+
+### Return type
+
+**CommandEnvelopeResponse**
+
+### Authorization
+
+No authorization required
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
+ - **Accept**: application/json
+
+
+### HTTP response details
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+|**200** | Successful Response |  -  |
+|**400** | Validation error |  -  |
+|**503** | Platform not running |  -  |
+|**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **activateStrategyApiV1CommandsLiveStrategiesStrategyIdActivatePost**
 > CommandEnvelopeResponse activateStrategyApiV1CommandsLiveStrategiesStrategyIdActivatePost(activateStrategyRequest)
@@ -360,7 +417,7 @@ No authorization required
 # **getExecutionStateApiV1StateExecutionGet**
 > ExecutionStateResponse getExecutionStateApiV1StateExecutionGet()
 
-Get execution control state (with version for optimistic concurrency).
+Get execution control state (with version for optimistic concurrency).  Includes kill_switch_active from in-memory state (not persisted in DB). When the platform is not running (exec_control is None), kill_switch_active defaults to False.
 
 ### Example
 
@@ -989,6 +1046,61 @@ No authorization required
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
 |**200** | Successful Response |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **resetKillSwitchApiV1CommandsExecutionKillSwitchResetPost**
+> CommandEnvelopeResponse resetKillSwitchApiV1CommandsExecutionKillSwitchResetPost(killSwitchResetRequest)
+
+Reset (deactivate) the kill switch.  Resetting the kill switch does NOT re-enable execution. The operator must separately call /commands/execution/enable to resume trading. This is a deliberate safety measure to prevent accidental re-enablement.  After reset: - kill_switch_active = false - execution_enabled remains false (unchanged) - KillSwitchEvent emitted (triggered=false)
+
+### Example
+
+```typescript
+import {
+    ControlApi,
+    Configuration,
+    KillSwitchResetRequest
+} from '@polytrader/api-client';
+
+const configuration = new Configuration();
+const apiInstance = new ControlApi(configuration);
+
+let killSwitchResetRequest: KillSwitchResetRequest; //
+
+const { status, data } = await apiInstance.resetKillSwitchApiV1CommandsExecutionKillSwitchResetPost(
+    killSwitchResetRequest
+);
+```
+
+### Parameters
+
+|Name | Type | Description  | Notes|
+|------------- | ------------- | ------------- | -------------|
+| **killSwitchResetRequest** | **KillSwitchResetRequest**|  | |
+
+
+### Return type
+
+**CommandEnvelopeResponse**
+
+### Authorization
+
+No authorization required
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
+ - **Accept**: application/json
+
+
+### HTTP response details
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+|**200** | Successful Response |  -  |
+|**400** | Validation error |  -  |
+|**503** | Platform not running |  -  |
+|**422** | Validation Error |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
