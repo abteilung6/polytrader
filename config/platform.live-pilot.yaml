@@ -26,34 +26,31 @@
 version: "1.0"
 
 # ---------------------------------------------------------------------------
-# Ultra-Conservative Risk Limits (Infrastructure Validation)
+# Risk Limits — Separate for Paper vs Live (per ADR 2026-02-08-paper-live-risk-limits)
 # ---------------------------------------------------------------------------
-# These limits are intentionally tiny. The goal is to validate plumbing,
-# not generate alpha. $1 max position, $1 max order, $5 global exposure.
+# Paper: more permissive so many strategies can run without starving live.
+# Live: ultra-conservative for infrastructure validation ($1 max, 10 orders/min).
 risk:
-  max_position_per_market: 1.0      # $1 max per market — trivial size
-  max_position_global: 5.0          # $5 max total exposure
-  max_notional_exposure: 10.0       # $10 max notional
-  max_order_size: 1.0               # $1 max per order — minimum viable
-  max_trades_per_market: 1          # 1 trade per market per strategy
-  order_rate_limit_per_minute: 10   # 10 orders/min — very conservative
-  cancel_rate_limit_per_minute: 20  # 20 cancels/min
-  max_data_staleness_seconds: 5.0   # deny if data older than 5s
-  price_deviation_threshold: 0.05   # 5% max deviation from mid (tighter than paper)
-
-# Optional: separate limits for paper vs live (uncomment to use).
-# When both paper and live are present, paper activity no longer consumes live budget.
-# risk:
-#   paper:
-#     max_position_per_market: 10.0
-#     max_position_global: 50.0
-#     order_rate_limit_per_minute: 60
-#     # ... same fields as risk above
-#   live:
-#     max_position_per_market: 1.0
-#     max_position_global: 5.0
-#     order_rate_limit_per_minute: 10
-#     # ... same fields as risk above
+  paper:
+    max_position_per_market: 10.0   # allow multiple paper positions per market
+    max_position_global: 50.0       # $50 total paper exposure
+    max_notional_exposure: 100.0
+    max_order_size: 10.0
+    max_trades_per_market: 5
+    order_rate_limit_per_minute: 60 # paper can run many strategies
+    cancel_rate_limit_per_minute: 120
+    max_data_staleness_seconds: 5.0
+    price_deviation_threshold: 0.1  # 10% for paper
+  live:
+    max_position_per_market: 1.0    # $1 max per market — trivial size
+    max_position_global: 5.0        # $5 max total exposure
+    max_notional_exposure: 10.0     # $10 max notional
+    max_order_size: 1.0             # $1 max per order — minimum viable
+    max_trades_per_market: 1        # 1 trade per market per strategy
+    order_rate_limit_per_minute: 10 # 10 orders/min — very conservative
+    cancel_rate_limit_per_minute: 20
+    max_data_staleness_seconds: 5.0
+    price_deviation_threshold: 0.05 # 5% max deviation from mid (tighter than paper)
 
 # ---------------------------------------------------------------------------
 # Health Gates — Strict (same as paper, all active)
