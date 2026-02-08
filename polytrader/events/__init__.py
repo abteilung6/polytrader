@@ -49,7 +49,11 @@ from polytrader.events.types import (
 
 __all__ = [
     "APPROVED_PROPOSALS",
+    "APPROVED_PROPOSALS_PAPER",
+    "APPROVED_PROPOSALS_LIVE",
     "CANCEL_ORDER_COMMANDS",
+    "CANCEL_ORDER_COMMANDS_PAPER",
+    "CANCEL_ORDER_COMMANDS_LIVE",
     "CancelRequestedEvent",
     "CircuitBreakerEvent",
     "ConfigLoadedEvent",
@@ -109,6 +113,8 @@ __all__ = [
     "STRATEGY_CLOSED_TRADES",
     "StrategyStateTransitionEvent",
     "SUBMIT_ORDER_COMMANDS",
+    "SUBMIT_ORDER_COMMANDS_PAPER",
+    "SUBMIT_ORDER_COMMANDS_LIVE",
     "SYSTEM_LIFECYCLE",
     "SystemStartedEvent",
     "SystemStoppedEvent",
@@ -169,6 +175,14 @@ def __getattr__(name: str):
         from polytrader.events.topics import get_approved_proposals_topic
 
         return get_approved_proposals_topic()
+    elif name == "APPROVED_PROPOSALS_PAPER":
+        from polytrader.events.topics import get_approved_proposals_paper_topic
+
+        return get_approved_proposals_paper_topic()
+    elif name == "APPROVED_PROPOSALS_LIVE":
+        from polytrader.events.topics import get_approved_proposals_live_topic
+
+        return get_approved_proposals_live_topic()
     elif name == "ORDER_CREATED":
         from polytrader.events.topics import get_order_created_topic
 
@@ -197,10 +211,26 @@ def __getattr__(name: str):
         from polytrader.events.topics import get_submit_order_commands_topic
 
         return get_submit_order_commands_topic()
+    elif name == "SUBMIT_ORDER_COMMANDS_PAPER":
+        from polytrader.events.topics import get_submit_order_commands_paper_topic
+
+        return get_submit_order_commands_paper_topic()
+    elif name == "SUBMIT_ORDER_COMMANDS_LIVE":
+        from polytrader.events.topics import get_submit_order_commands_live_topic
+
+        return get_submit_order_commands_live_topic()
     elif name == "CANCEL_ORDER_COMMANDS":
         from polytrader.events.topics import get_cancel_order_commands_topic
 
         return get_cancel_order_commands_topic()
+    elif name == "CANCEL_ORDER_COMMANDS_PAPER":
+        from polytrader.events.topics import get_cancel_order_commands_paper_topic
+
+        return get_cancel_order_commands_paper_topic()
+    elif name == "CANCEL_ORDER_COMMANDS_LIVE":
+        from polytrader.events.topics import get_cancel_order_commands_live_topic
+
+        return get_cancel_order_commands_live_topic()
     elif name == "EXECUTION_REQUESTS":
         from polytrader.events.topics import get_execution_requests_topic
 
