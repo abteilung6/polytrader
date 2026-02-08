@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from polytrader.db.models import StrategyRecord
 from polytrader.events import (
-    APPROVED_PROPOSALS,
+    APPROVED_PROPOSALS_PAPER,
     ORDER_CREATED,
     SIGNALS,
     EventBus,
@@ -106,9 +106,9 @@ async def test_strategy_execution_simple_threshold_e2e(
 
     await orchestrator.start()
 
-    # Subscribe to events
+    # Subscribe to events (proposal router forwards to PAPER topic)
     signals_queue = bus.subscribe(SIGNALS)
-    approved_proposals_queue = bus.subscribe(APPROVED_PROPOSALS)
+    approved_proposals_queue = bus.subscribe(APPROVED_PROPOSALS_PAPER)
     order_created_queue = bus.subscribe(ORDER_CREATED)
 
     signals: list[SignalEvent] = []

@@ -10,13 +10,23 @@ from typing import TYPE_CHECKING
 
 from polytrader.config.models import PlatformConfig
 from polytrader.db.models import StrategyRecord
-from polytrader.events import EventBus
+from polytrader.events import (
+    APPROVED_PROPOSALS_LIVE,
+    APPROVED_PROPOSALS_PAPER,
+    CANCEL_ORDER_COMMANDS_LIVE,
+    CANCEL_ORDER_COMMANDS_PAPER,
+    SUBMIT_ORDER_COMMANDS_LIVE,
+    SUBMIT_ORDER_COMMANDS_PAPER,
+    EventBus,
+)
 from polytrader.execution import ExecutionRouter
 from polytrader.execution.paper import PaperExecutionAdapter
 from polytrader.logging_config import logger
 from polytrader.oms import OMSCore
 from polytrader.oms.idempotency import IdempotencyStore
 from polytrader.oms.store import InMemoryOrderStore
+from polytrader.ops.control import ExecutionControl
+from polytrader.platform.proposal_router import ApprovedProposalRouter
 from polytrader.platform.registry import StrategyRegistry
 from polytrader.platform.strategy_runner import StrategyRunner
 from polytrader.platform.supervisor_registry import MarketSupervisorRegistry
@@ -134,6 +144,8 @@ class PlatformOrchestrator:
         live_execution_router_factory: Callable[[], ExecutionRouter] | None = None,
         paper_oms_store: "IEventHandlingOrderStore | None" = None,
         platform_config: PlatformConfig | None = None,
+        execution_control: ExecutionControl | None = None,
+        get_active_strategies: Callable[[], set[str]] | None = None,
     ) -> None:
         """Initialize platform orchestrator.
 
@@ -148,8 +160,16 @@ class PlatformOrchestrator:
             live_execution_router_factory: Factory for live execution router (optional)
             paper_oms_store: Order store for paper OMS (must match position_manager's store)
             platform_config: Platform configuration (optional, defaults to PlatformConfig())
+            execution_control: Execution control for proposal router (default: new instance)
+            get_active_strategies: Callable returning active strategy IDs (default: empty set)
         """
         self._bus = bus
+        self._execution_control = (
+            execution_control if execution_control is not None else ExecutionControl()
+        )
+        self._get_active_strategies = (
+            get_active_strategies if get_active_strategies is not None else (lambda: set())
+        )
         self._store = store
         self._session = session
         self._discovery_service = discovery_service
@@ -194,6 +214,9 @@ class PlatformOrchestrator:
 
         # Pattern to strategies mapping (for supervisor sharing)
         self._pattern_to_strategies: dict[str, list[str]] = {}
+
+        # Proposal router (routes approved intents to paper/live topics)
+        self._proposal_router: ApprovedProposalRouter | None = None
 
         # Paper OMS and execution (always created)
         self._paper_oms: OMSCore | None = None
@@ -265,7 +288,17 @@ class PlatformOrchestrator:
                 self._oms_tasks.append(position_task)  # Track for cleanup
                 logger.info("PositionManager started")
 
-            # Step 5: Create paper OMS and execution
+            # Step 4b: Start ApprovedProposalRouter (routes approved intents to paper/live)
+            self._proposal_router = ApprovedProposalRouter(
+                bus=self._bus,
+                execution_control=self._execution_control,
+                get_active_strategies=self._get_active_strategies,
+            )
+            proposal_router_task = asyncio.create_task(self._proposal_router.run())
+            self._oms_tasks.append(proposal_router_task)
+            logger.info("ApprovedProposalRouter started")
+
+            # Step 5: Create paper OMS and execution (lane topics)
             await self._create_paper_lane()
 
             # Step 5: Create live OMS and execution (if factory provided)
@@ -385,9 +418,11 @@ class PlatformOrchestrator:
             # Stop PortfolioService
             await self._portfolio_service.stop()
 
-            # Stop RiskChecker
-            self._risk_checker._running = False  # Stop the run loop
-            # RiskChecker task is in _oms_tasks, will be cancelled below
+            # Stop RiskChecker and proposal router
+            self._risk_checker._running = False
+            if self._proposal_router is not None:
+                self._proposal_router.stop()
+            # Their tasks are in _oms_tasks, will be cancelled below
 
             # Stop OMS and execution tasks
             all_tasks = self._oms_tasks + self._execution_tasks
@@ -419,9 +454,12 @@ class PlatformOrchestrator:
             bus=self._bus,
             store=paper_oms_store,
             idempotency_store=paper_idempotency,
+            proposals_topic=APPROVED_PROPOSALS_PAPER,
+            submit_commands_topic=SUBMIT_ORDER_COMMANDS_PAPER,
+            cancel_commands_topic=CANCEL_ORDER_COMMANDS_PAPER,
         )
 
-        # Create paper execution router
+        # Create paper execution router (lane topics)
         paper_adapter = PaperExecutionAdapter(
             bus=self._bus,
             store=self._store,
@@ -430,6 +468,8 @@ class PlatformOrchestrator:
             bus=self._bus,
             adapter=paper_adapter,
             is_paper_mode=True,
+            submit_commands_topic=SUBMIT_ORDER_COMMANDS_PAPER,
+            cancel_commands_topic=CANCEL_ORDER_COMMANDS_PAPER,
         )
 
         # Start OMS and execution
@@ -446,13 +486,16 @@ class PlatformOrchestrator:
         if not self._live_execution_router_factory:
             return
 
-        # Create live OMS
+        # Create live OMS (lane topics)
         live_oms_store = InMemoryOrderStore(self._bus)
         live_idempotency = IdempotencyStore()
         self._live_oms = OMSCore(
             bus=self._bus,
             store=live_oms_store,
             idempotency_store=live_idempotency,
+            proposals_topic=APPROVED_PROPOSALS_LIVE,
+            submit_commands_topic=SUBMIT_ORDER_COMMANDS_LIVE,
+            cancel_commands_topic=CANCEL_ORDER_COMMANDS_LIVE,
         )
 
         # Create live execution router (from factory)
