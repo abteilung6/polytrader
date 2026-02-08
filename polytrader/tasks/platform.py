@@ -15,6 +15,7 @@ to subscribers).
 
 import asyncio
 import signal
+from collections.abc import Callable
 from pathlib import Path
 
 import uvicorn
@@ -22,14 +23,21 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from polytrader.adapters import create_adapter_factory
 from polytrader.api.app import create_app
+from polytrader.clob import create_clob_client_factory
 from polytrader.config import PolymarketSecrets, get_database_url
 from polytrader.config.loader import load_platform_config
 from polytrader.config.models import PlatformConfig
-from polytrader.events import SYSTEM_LIFECYCLE, EventBus
+from polytrader.events import (
+    CANCEL_ORDER_COMMANDS_LIVE,
+    SUBMIT_ORDER_COMMANDS_LIVE,
+    SYSTEM_LIFECYCLE,
+    EventBus,
+)
 from polytrader.events.closed_trade_sink import ClosedTradeSink
 from polytrader.events.sink import EventSink
 from polytrader.events.stores import PostgreSQLEventStore
 from polytrader.events.types import SystemStartedEvent
+from polytrader.execution import ExecutionRouter, create_execution_router_factory
 from polytrader.logging_config import logger
 from polytrader.market_discovery import MarketDiscoveryService
 from polytrader.observer import create_observer_factory
@@ -163,6 +171,27 @@ async def platform_start_task(
     # In-memory set of active strategy IDs (proposal router + live execution read this)
     active_strategies: set[str] = set()
 
+    # Live execution router factory (only when config + credentials allow)
+    live_execution_router_factory: Callable[[], ExecutionRouter] | None = None
+    if pcfg.execution.live_lane_enabled and secrets.has_live_credentials():
+        clob_factory = create_clob_client_factory(secrets, pcfg)
+        live_execution_router_factory = create_execution_router_factory(
+            bus=bus,
+            clob_client_factory=clob_factory,
+            execution_control=execution_control,
+            active_strategies=active_strategies,
+            is_paper_mode=False,
+            submit_commands_topic=SUBMIT_ORDER_COMMANDS_LIVE,
+            cancel_commands_topic=CANCEL_ORDER_COMMANDS_LIVE,
+        )
+        logger.info("Live execution lane enabled (credentials present)")
+    else:
+        if pcfg.execution.live_lane_enabled and not secrets.has_live_credentials():
+            logger.warning(
+                "Live lane enabled in config but credentials missing or incomplete; "
+                "running paper-only"
+            )
+
     # Create platform orchestrator; keep session for full run so add_strategy works
     async with Session() as orchestrator_session:
         orchestrator = PlatformOrchestrator(
@@ -177,6 +206,7 @@ async def platform_start_task(
             platform_config=pcfg,
             execution_control=execution_control,
             get_active_strategies=lambda: active_strategies,
+            live_execution_router_factory=live_execution_router_factory,
         )
 
         # Start orchestrator (loads strategies, creates runners)

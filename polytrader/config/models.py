@@ -403,13 +403,17 @@ class PaperSimulationConfig(BaseModel):
 
 
 class ExecutionConfig(BaseModel):
-    """Execution layer settings: throttle, tactics, and paper simulation."""
+    """Execution layer settings: throttle, tactics, paper simulation, and live lane."""
 
     model_config = ConfigDict(frozen=True)
 
     throttle: ThrottleConfig = Field(default_factory=ThrottleConfig)
     tactics: TacticsConfig = Field(default_factory=TacticsConfig)
     paper_simulation: PaperSimulationConfig = Field(default_factory=PaperSimulationConfig)
+    live_lane_enabled: bool = Field(
+        default=False,
+        description="Enable live execution lane when credentials are present (default: False)",
+    )
 
 
 # ---------------------------------------------------------------------------
