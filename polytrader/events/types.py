@@ -366,12 +366,17 @@ class RiskCheckEvent(Event):
     Attributes:
         intent: The order intent that was checked
         result: The risk check result (allowed, reason_codes, projections, metadata)
+        lane: Resolved execution lane (paper or live) for observability.
     """
 
     source: EventSource = Field(default=EventSource.RISK)
 
     intent: "OrderIntentEvent" = Field(description="Order intent that was checked")  # noqa: UP037
     result: "RiskResult" = Field(description="Risk check result")  # noqa: UP037
+    lane: Literal["paper", "live"] | None = Field(
+        default=None,
+        description="Resolved execution lane (paper or live) for observability",
+    )
 
     @property
     def allowed(self) -> bool:

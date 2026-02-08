@@ -278,13 +278,13 @@ class RiskChecker:
         result = self.engine.check(context, limits_override=limits_override)
 
         # Emit metrics per observability.mdc §4
-        record_risk_check(allowed=result.allowed)
+        record_risk_check(allowed=result.allowed, lane=lane)
 
         if not result.allowed:
             # Record denial reason(s) per observability.mdc §4
             for reason_code in result.reason_codes:
                 if reason_code != RiskReasonCode.RISK_ALLOWED:
-                    record_risk_denial(reason=reason_code.value)
+                    record_risk_denial(reason=reason_code.value, lane=lane)
 
             # Log denial with correlation_id and reason codes per observability.mdc §2, §3
             # Filter out RISK_ALLOWED from denial messages (it's confusing to show both)
@@ -309,6 +309,7 @@ class RiskChecker:
             intent=intent,
             result=result,
             correlation_id=intent.correlation_id,  # Propagate per observability.mdc §2
+            lane=lane,
         )
         await self.bus.publish(RISK_CHECKS, event)
 

@@ -6,7 +6,7 @@ operator visibility via Grafana dashboards.
 """
 
 from collections import defaultdict
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 if TYPE_CHECKING:
     from polytrader.config import MetricsConfig
@@ -339,24 +339,38 @@ def set_metrics_collector(collector: IMetricsCollector | None) -> None:
 # Risk metrics functions per observability.mdc §4
 
 
-def record_risk_check(allowed: bool) -> None:
+def record_risk_check(
+    allowed: bool,
+    lane: Literal["paper", "live"] | None = None,
+) -> None:
     """Record a risk check per observability.mdc §4.
 
     Args:
         allowed: Whether the order was allowed
+        lane: Optional execution lane (paper/live) for observability
     """
+    labels: dict[str, str] = {"allowed": str(allowed).lower()}
+    if lane is not None:
+        labels["lane"] = lane
     collector = get_metrics_collector()
-    collector.increment_counter("risk_checks_total", labels={"allowed": str(allowed).lower()})
+    collector.increment_counter("risk_checks_total", labels=labels)
 
 
-def record_risk_denial(reason: str) -> None:
+def record_risk_denial(
+    reason: str,
+    lane: Literal["paper", "live"] | None = None,
+) -> None:
     """Record a risk denial per observability.mdc §4.
 
     Args:
         reason: Denial reason code (e.g., "RISK_MAX_POSITION")
+        lane: Optional execution lane (paper/live) for observability
     """
+    labels: dict[str, str] = {"reason": reason}
+    if lane is not None:
+        labels["lane"] = lane
     collector = get_metrics_collector()
-    collector.increment_counter("risk_denials_total", labels={"reason": reason})
+    collector.increment_counter("risk_denials_total", labels=labels)
 
 
 def record_projected_exposure(exposure: float) -> None:
