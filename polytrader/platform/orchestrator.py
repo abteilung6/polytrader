@@ -590,6 +590,9 @@ class PlatformOrchestrator:
             await runner.start()
             self._strategy_runners[strategy_id] = runner
 
+            # Commit so actual_state (RUNNING) is visible to API state endpoints
+            await self._session.commit()
+
             logger.bind(
                 strategy_id=strategy_id,
                 pattern=pattern,
@@ -653,6 +656,9 @@ class PlatformOrchestrator:
 
             # Release supervisor reference
             await self._supervisor_registry.release(pattern)
+
+            # Commit so actual_state (STOPPED) is visible to API state endpoints
+            await self._session.commit()
 
             logger.bind(
                 strategy_id=strategy_id,

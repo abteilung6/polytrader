@@ -329,15 +329,17 @@ class TestAddActiveStrategy:
         # Process command
         await service._process_command(cmd)
 
-        # Verify strategy is active in live_strategy_activation
+        # Verify strategy is in active live set (Mode becomes Live)
         active = await live_repo.list_active()
         assert test_strategy in active
 
-        # Verify strategy_instances.desired_state is RUNNING (sync for orchestrator)
+        # add_active_strategy does NOT change lifecycle (desired_state/actual_state
+        # are unchanged; Start/Stop control lifecycle separately)
         strategy = await strategy_registry.get_strategy(test_strategy)
         assert strategy is not None
-        assert strategy.desired_state == "RUNNING"
-        assert strategy.actual_state == "RUNNING"
+        # State unchanged by activation (fixture may be RUNNING or STOPPED)
+        assert strategy.desired_state in ("RUNNING", "STOPPED")
+        assert strategy.actual_state in ("RUNNING", "STOPPED")
 
         # Verify command is marked as applied
         found = await command_repo.find_by_client_request_id(
@@ -347,7 +349,7 @@ class TestAddActiveStrategy:
         assert found.status == "applied"
 
     @pytest.mark.asyncio
-    async def test_add_active_strategy_syncs_desired_state_from_stopped(
+    async def test_add_active_strategy_does_not_change_lifecycle(
         self,
         service: ControlPlaneService,
         repositories: tuple[
@@ -358,12 +360,12 @@ class TestAddActiveStrategy:
         ],
         db_session: AsyncSession,
     ) -> None:
-        """Test that add_active_strategy sets strategy_instances.desired_state to RUNNING."""
+        """Add to active only updates live list; desired_state/actual_state unchanged."""
         from polytrader.strategies.lifecycle_models import StrategyLifecycleState
 
-        command_repo, _, _, strategy_registry = repositories
+        command_repo, _, live_repo, strategy_registry = repositories
 
-        # Create strategy with STOPPED (e.g. created via API with desired_state=STOPPED)
+        # Create strategy with STOPPED
         strategy = StrategyRecord(
             strategy_id="vfmr-stopped-test",
             name="VFMR Stopped Test",
@@ -380,17 +382,22 @@ class TestAddActiveStrategy:
         cmd = ControlCommandRecord(
             command_type="add_active_strategy",
             strategy_id="vfmr-stopped-test",
-            reason="Activate for test",
+            reason="Add to active for test",
             issued_by="operator",
-            client_request_id="req-sync-desired-1",
+            client_request_id="req-add-active-no-lifecycle-1",
         )
         await command_repo.create_command(cmd)
         await service._process_command(cmd)
 
+        # In active list (Mode = Live)
+        active = await live_repo.list_active()
+        assert "vfmr-stopped-test" in active
+
+        # Lifecycle unchanged: still STOPPED (Start would be needed to run)
         loaded = await strategy_registry.get_strategy("vfmr-stopped-test")
         assert loaded is not None
-        assert loaded.desired_state == "RUNNING"
-        assert loaded.actual_state == "RUNNING"
+        assert loaded.desired_state == "STOPPED"
+        assert loaded.actual_state == "STOPPED"
 
     @pytest.mark.asyncio
     async def test_add_active_strategy_without_strategy_id_fails(
@@ -443,10 +450,19 @@ class TestRemoveActiveStrategy:
         ],
         test_strategy: str,
     ) -> None:
-        """Test that remove_active_strategy command is processed correctly."""
+        """Remove from active only updates live list; lifecycle unchanged (paper mode)."""
+        from polytrader.strategies.lifecycle_models import StrategyLifecycleState
+
         command_repo, _, live_repo, strategy_registry = repositories
 
-        # First activate strategy
+        # Ensure strategy is RUNNING (e.g. was started via UI)
+        strategy = await strategy_registry.get_strategy(test_strategy)
+        assert strategy is not None
+        strategy.desired_state = StrategyLifecycleState.RUNNING.value
+        strategy.actual_state = StrategyLifecycleState.RUNNING.value
+        await strategy_registry.update_strategy(strategy)
+
+        # Add to active then remove from active
         activate_cmd = ControlCommandRecord(
             command_type="add_active_strategy",
             strategy_id=test_strategy,
@@ -457,28 +473,26 @@ class TestRemoveActiveStrategy:
         await command_repo.create_command(activate_cmd)
         await service._process_command(activate_cmd)
 
-        # Now deactivate strategy
         deactivate_cmd = ControlCommandRecord(
             command_type="remove_active_strategy",
             strategy_id=test_strategy,
-            reason="Deactivate for testing",
+            reason="Remove from active (paper mode only)",
             issued_by="operator",
             client_request_id="req-remove-strategy-1",
         )
         await command_repo.create_command(deactivate_cmd)
         await service._process_command(deactivate_cmd)
 
-        # Verify strategy is not active in live_strategy_activation
+        # No longer in active list (Mode = Paper)
         active = await live_repo.list_active()
         assert test_strategy not in active
 
-        # Verify strategy_instances.desired_state is STOPPED (sync for orchestrator)
-        strategy = await strategy_registry.get_strategy(test_strategy)
-        assert strategy is not None
-        assert strategy.desired_state == "STOPPED"
-        assert strategy.actual_state == "STOPPED"
+        # Lifecycle unchanged: still RUNNING (instance keeps running in paper mode)
+        after = await strategy_registry.get_strategy(test_strategy)
+        assert after is not None
+        assert after.desired_state == "RUNNING"
+        assert after.actual_state == "RUNNING"
 
-        # Verify command is marked as applied
         found = await command_repo.find_by_client_request_id(
             "remove_active_strategy", test_strategy, "req-remove-strategy-1"
         )

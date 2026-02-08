@@ -1,7 +1,7 @@
 /**
  * Active strategies panel — lists strategies activated for live trading.
  * Single place to see and manage the live pool: remove via row dropdown.
- * Add to pool from Strategies → Instances ("Activate for Live").
+ * Add to pool from Strategies → Instances ("Add to active strategies").
  */
 
 import { useState } from 'react'

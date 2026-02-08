@@ -28,7 +28,6 @@ from polytrader.platform.control import (
     LiveStrategyRepository,
 )
 from polytrader.platform.registry import StrategyRegistry
-from polytrader.strategies.lifecycle_models import StrategyLifecycleState
 
 if TYPE_CHECKING:
     from polytrader.db.models import ControlCommandRecord
@@ -80,7 +79,7 @@ class ControlPlaneService:
             command_repo: Repository for control commands
             execution_repo: Repository for execution control
             live_repo: Repository for live strategy activation
-            strategy_registry: Registry to sync strategy_instances.desired_state
+            strategy_registry: Registry for strategy lookup (used by command handlers as needed)
             execution_control: In-memory execution control state
             bus: Event bus for emitting ControlCommandEvent
             poll_interval_s: Polling interval in seconds (default: 1.0)
@@ -294,11 +293,11 @@ class ControlPlaneService:
         )
 
     async def _add_active_strategy(self, cmd: "ControlCommandRecord") -> None:
-        """Add strategy to active set (apply add_active_strategy command).
+        """Add strategy to active live set (apply add_active_strategy command).
 
-        Updates live_strategy_activation to active=true and strategy_instances
-        desired_state/actual_state to RUNNING so the orchestrator starts the
-        strategy on next load (or on platform restart).
+        Only updates live_strategy_activation to active=true. Does NOT change
+        desired_state/actual_state (lifecycle). Instance stays RUNNING or STOPPED;
+        operator uses Start/Stop to control lifecycle separately.
         """
         if cmd.strategy_id is None:
             raise ValueError("add_active_strategy command requires strategy_id")
@@ -309,12 +308,6 @@ class ControlPlaneService:
             reason=cmd.reason,
         )
 
-        strategy = await self._strategy_registry.get_strategy(cmd.strategy_id)
-        if strategy is not None:
-            strategy.desired_state = StrategyLifecycleState.RUNNING.value
-            strategy.actual_state = StrategyLifecycleState.RUNNING.value
-            await self._strategy_registry.update_strategy(strategy)
-
         logger.info(
             "Strategy {strategy_id} activated via command {command_id}: {reason}",
             strategy_id=cmd.strategy_id,
@@ -323,11 +316,11 @@ class ControlPlaneService:
         )
 
     async def _remove_active_strategy(self, cmd: "ControlCommandRecord") -> None:
-        """Remove strategy from active set (apply remove_active_strategy command).
+        """Remove strategy from active live set (apply remove_active_strategy command).
 
-        Updates live_strategy_activation to active=false and strategy_instances
-        desired_state/actual_state to STOPPED so the orchestrator does not
-        start the strategy on next load.
+        Only updates live_strategy_activation to active=false. Does NOT change
+        desired_state/actual_state (lifecycle). Instance keeps running in paper
+        mode; operator uses Stop to stop it if desired.
         """
         if cmd.strategy_id is None:
             raise ValueError("remove_active_strategy command requires strategy_id")
@@ -337,12 +330,6 @@ class ControlPlaneService:
             activated_by=cmd.issued_by,
             reason=cmd.reason,
         )
-
-        strategy = await self._strategy_registry.get_strategy(cmd.strategy_id)
-        if strategy is not None:
-            strategy.desired_state = StrategyLifecycleState.STOPPED.value
-            strategy.actual_state = StrategyLifecycleState.STOPPED.value
-            await self._strategy_registry.update_strategy(strategy)
 
         logger.info(
             "Strategy {strategy_id} deactivated via command {command_id}: {reason}",

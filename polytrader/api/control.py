@@ -183,8 +183,16 @@ async def get_live_strategies(
     return LiveStrategiesResponse(active_strategies=list(active))
 
 
-def _strategy_record_to_response(s: StrategyRecordModel) -> StrategyResponse:
-    """Map DB StrategyRecord to API StrategyResponse (single source of truth)."""
+def _strategy_record_to_response(
+    s: StrategyRecordModel,
+    *,
+    is_live_activated: bool,
+) -> StrategyResponse:
+    """Map DB StrategyRecord to API StrategyResponse (single source of truth).
+
+    is_live_activated: True iff strategy_id is in the active live strategies list
+    (controls Mode badge Paper/Live). Distinct from lifecycle: Start = paper mode only.
+    """
     return StrategyResponse(
         strategy_id=s.strategy_id,
         name=s.name,
@@ -210,16 +218,27 @@ def _strategy_record_to_response(s: StrategyRecordModel) -> StrategyResponse:
         run_id=s.run_id,
         created_at=s.created_at,
         updated_at=s.updated_at,
+        enabled=is_live_activated,
     )
 
 
 @router.get("/state/strategies", response_model=StrategiesResponse)
 async def get_strategies(
     registry: StrategyRegistry = Depends(get_strategy_registry),  # noqa: B008
+    live_repo: LiveStrategyRepository = Depends(get_live_strategy_repo),  # noqa: B008
 ) -> StrategiesResponse:
-    """Get all strategies in registry."""
+    """Get all strategies in registry.
+
+    enabled (Mode Paper/Live) reflects activation for live trading, not lifecycle.
+    """
     strategies = await registry.list_strategies()
-    return StrategiesResponse(strategies=[_strategy_record_to_response(s) for s in strategies])
+    active_ids = await live_repo.list_active()
+    return StrategiesResponse(
+        strategies=[
+            _strategy_record_to_response(s, is_live_activated=(s.strategy_id in active_ids))
+            for s in strategies
+        ]
+    )
 
 
 @router.get("/state/strategies/templates", response_model=StrategyTypesResponse)
@@ -622,10 +641,12 @@ async def get_strategy_performance(
 async def get_strategy_by_id(
     strategy_id: str,
     registry: StrategyRegistry = Depends(get_strategy_registry),  # noqa: B008
+    live_repo: LiveStrategyRepository = Depends(get_live_strategy_repo),  # noqa: B008
 ) -> StrategyResponse:
     """Get a single strategy by ID.
 
     Returns 404 if the strategy is not in the registry.
+    enabled reflects activation for live trading (in active live strategies list).
     """
     strategy = await registry.get_strategy(strategy_id)
     if strategy is None:
@@ -633,7 +654,8 @@ async def get_strategy_by_id(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Strategy not found",
         )
-    return _strategy_record_to_response(strategy)
+    active_ids = await live_repo.list_active()
+    return _strategy_record_to_response(strategy, is_live_activated=(strategy_id in active_ids))
 
 
 @router.post(
@@ -1146,6 +1168,7 @@ async def create_strategy(
     registry: StrategyRegistry = Depends(get_strategy_registry),  # noqa: B008
     in_memory_registry: InMemoryStrategyRegistry = Depends(get_in_memory_strategy_registry),  # noqa: B008
     orchestrator: "PlatformOrchestrator | None" = Depends(get_orchestrator),  # noqa: B008
+    live_repo: LiveStrategyRepository = Depends(get_live_strategy_repo),  # noqa: B008
 ) -> StrategyResponse:
     """Create a new strategy in registry.
 
@@ -1308,35 +1331,9 @@ async def create_strategy(
             strategy_id=strategy.strategy_id,
         )
 
-    return StrategyResponse(
-        strategy_id=strategy.strategy_id,
-        name=strategy.name,
-        description=strategy.description,
-        config=strategy.config,
-        template_type_id=strategy.template_type_id,
-        template_version=strategy.template_version,
-        desired_state=strategy.desired_state,
-        actual_state=strategy.actual_state,
-        last_transition_at=strategy.last_transition_at,
-        last_error=strategy.last_error,
-        run_identity=(
-            RunIdentityResponse(
-                template_code_ref=strategy.template_code_ref,
-                config_hash=strategy.config_hash,
-                dependency_set=strategy.dependency_set,
-                market_data_snapshot_ref=strategy.market_data_snapshot_ref,
-            )
-            if (
-                strategy.template_code_ref
-                or strategy.dependency_set
-                or strategy.market_data_snapshot_ref
-            )
-            else None
-        ),
-        deployment_id=str(strategy.deployment_id) if strategy.deployment_id else None,
-        run_id=strategy.run_id,
-        created_at=strategy.created_at,
-        updated_at=strategy.updated_at,
+    active_ids = await live_repo.list_active()
+    return _strategy_record_to_response(
+        strategy, is_live_activated=(strategy.strategy_id in active_ids)
     )
 
 
@@ -1353,8 +1350,15 @@ async def update_strategy(
     strategy_id: str,
     request: UpdateStrategyRequest,
     registry: StrategyRegistry = Depends(get_strategy_registry),  # noqa: B008
+    live_repo: LiveStrategyRepository = Depends(get_live_strategy_repo),  # noqa: B008
+    orchestrator: "PlatformOrchestrator | None" = Depends(get_orchestrator),  # noqa: B008
 ) -> StrategyResponse:
-    """Update an existing strategy in registry."""
+    """Update an existing strategy in registry.
+
+    When desired_state is set to RUNNING, the strategy is added to the running
+    orchestrator so it starts (paper tracking). When set to STOPPED, it is
+    removed from the orchestrator so it stops.
+    """
     # Get existing strategy
     strategy = await registry.get_strategy(strategy_id)
     if strategy is None:
@@ -1374,7 +1378,6 @@ async def update_strategy(
     if request.config is not None:
         strategy.config = request.config
     if request.desired_state is not None:
-        # Update desired_state (lifecycle manager will handle actual_state transition)
         strategy.desired_state = request.desired_state
 
     try:
@@ -1393,33 +1396,32 @@ async def update_strategy(
             detail=ErrorResponse(error="Failed to update strategy", detail=str(e)).model_dump(),
         ) from e
 
-    return StrategyResponse(
-        strategy_id=updated_strategy.strategy_id,
-        name=updated_strategy.name,
-        description=updated_strategy.description,
-        config=updated_strategy.config,
-        template_type_id=updated_strategy.template_type_id,
-        template_version=updated_strategy.template_version,
-        desired_state=updated_strategy.desired_state,
-        actual_state=updated_strategy.actual_state,
-        last_transition_at=updated_strategy.last_transition_at,
-        last_error=updated_strategy.last_error,
-        run_identity=(
-            RunIdentityResponse(
-                template_code_ref=updated_strategy.template_code_ref,
-                config_hash=updated_strategy.config_hash,
-                dependency_set=updated_strategy.dependency_set,
-                market_data_snapshot_ref=updated_strategy.market_data_snapshot_ref,
-            )
-            if updated_strategy.template_code_ref
-            or updated_strategy.dependency_set
-            or updated_strategy.market_data_snapshot_ref
-            else None
-        ),
-        deployment_id=(
-            str(updated_strategy.deployment_id) if updated_strategy.deployment_id else None
-        ),
-        run_id=updated_strategy.run_id,
-        created_at=updated_strategy.created_at,
-        updated_at=updated_strategy.updated_at,
+    # Apply lifecycle to running orchestrator so actual_state transitions
+    if request.desired_state is not None and orchestrator is not None and orchestrator.is_running():
+        from polytrader.logging_config import logger
+
+        if request.desired_state == "RUNNING":
+            try:
+                await orchestrator.add_strategy(strategy_id)
+            except Exception as e:
+                logger.warning(
+                    "Strategy set RUNNING but could not add to orchestrator: {error}",
+                    strategy_id=strategy_id,
+                    error=str(e),
+                    error_type=type(e).__name__,
+                )
+        elif request.desired_state == "STOPPED":
+            try:
+                await orchestrator.remove_strategy(strategy_id)
+            except Exception as e:
+                logger.warning(
+                    "Strategy set STOPPED but could not remove from orchestrator: {error}",
+                    strategy_id=strategy_id,
+                    error=str(e),
+                    error_type=type(e).__name__,
+                )
+
+    active_ids = await live_repo.list_active()
+    return _strategy_record_to_response(
+        updated_strategy, is_live_activated=(strategy_id in active_ids)
     )

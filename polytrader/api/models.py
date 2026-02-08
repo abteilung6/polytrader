@@ -12,7 +12,7 @@ from decimal import Decimal
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, computed_field, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 # ============================================================================
 # Health & Status Models
@@ -212,11 +212,11 @@ class StrategyResponse(BaseModel):
     created_at: datetime = Field(description="Creation timestamp")
     updated_at: datetime = Field(description="Last update timestamp")
 
-    # Backward compatibility: enabled field derived from desired_state
-    @computed_field
-    def enabled(self) -> bool:
-        """Whether strategy is enabled (derived from desired_state == RUNNING)."""
-        return self.desired_state == "RUNNING"
+    # Activation for live (add to live pool); lifecycle = Start/Stop (paper).
+    enabled: bool = Field(
+        description="True if in active live strategies list (Mode Live). "
+        "Start/Stop control lifecycle; Activate adds to this set."
+    )
 
 
 class StrategiesResponse(BaseModel):

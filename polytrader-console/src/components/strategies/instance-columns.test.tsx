@@ -6,8 +6,8 @@
  * - Mode column badge (LIVE/PAPER) based on enabled field
  * - Start visible only when STOPPED/ERROR, calls mutation directly
  * - Stop visible only when RUNNING/STARTING, opens standard confirmation
- * - Activate for Live visible when not enabled, opens typed confirmation
- * - Deactivate from Live visible when enabled, opens standard confirmation
+ * - Add to active strategies visible when not enabled, opens typed confirmation
+ * - Remove from active visible when enabled, opens standard confirmation
  * - Dropdown shows correct actions based on state + enabled
  */
 import { screen, within } from '@testing-library/react'
@@ -158,25 +158,25 @@ describe('StrategyInstanceColumns — Dropdown lifecycle actions', () => {
 })
 
 describe('StrategyInstanceColumns — Dropdown activation actions', () => {
-  it('shows "Activate for Live" when enabled is false', async () => {
+  it('shows "Add to active strategies" when enabled is false', async () => {
     renderWithStrategies([createMockStrategyResponse({ enabled: false, actual_state: 'RUNNING' })])
 
     await openActionsDropdown()
 
-    expect(screen.getByTestId('action-activate')).toHaveTextContent('Activate for Live')
+    expect(screen.getByTestId('action-activate')).toHaveTextContent('Add to active strategies')
     expect(screen.queryByTestId('action-deactivate')).not.toBeInTheDocument()
   })
 
-  it('shows "Deactivate from Live" when enabled is true', async () => {
+  it('shows "Remove from active" when enabled is true', async () => {
     renderWithStrategies([createMockStrategyResponse({ enabled: true, actual_state: 'RUNNING' })])
 
     await openActionsDropdown()
 
-    expect(screen.getByTestId('action-deactivate')).toHaveTextContent('Deactivate from Live')
+    expect(screen.getByTestId('action-deactivate')).toHaveTextContent('Remove from active')
     expect(screen.queryByTestId('action-activate')).not.toBeInTheDocument()
   })
 
-  it('Activate for Live opens typed confirmation dialog with ACTIVATE word', async () => {
+  it('Add to active strategies opens typed confirmation dialog with ACTIVATE word', async () => {
     renderWithStrategies([
       createMockStrategyResponse({
         name: 'Conservative VFMR',
@@ -194,13 +194,13 @@ describe('StrategyInstanceColumns — Dropdown activation actions', () => {
 
     // Typed confirmation dialog should be visible
     const dialog = screen.getByRole('alertdialog')
-    expect(dialog).toHaveTextContent('Activate for Live Trading')
+    expect(dialog).toHaveTextContent('Add to active strategies')
     expect(dialog).toHaveTextContent('Conservative VFMR')
     expect(dialog).toHaveTextContent('vfmr')
     expect(dialog).toHaveTextContent('v2.0.0')
 
     // Confirm button should be disabled until typing ACTIVATE
-    const confirmBtn = within(dialog).getByRole('button', { name: /Activate/i })
+    const confirmBtn = within(dialog).getByRole('button', { name: /Add to active/i })
     expect(confirmBtn).toBeDisabled()
 
     // Type the confirmation word
@@ -210,7 +210,7 @@ describe('StrategyInstanceColumns — Dropdown activation actions', () => {
     expect(confirmBtn).toBeEnabled()
   })
 
-  it('Activate for Live calls mutation on confirmation', async () => {
+  it('Add to active strategies calls mutation on confirmation', async () => {
     const spy = vi
       .spyOn(controlApi, 'activateStrategyApiV1CommandsLiveStrategiesStrategyIdActivatePost')
       .mockResolvedValue(mockAxiosResponse({ data: mockCommandResponse }))
@@ -239,7 +239,7 @@ describe('StrategyInstanceColumns — Dropdown activation actions', () => {
     await user.type(input, 'ACTIVATE')
 
     const dialog = screen.getByRole('alertdialog')
-    const confirmBtn = within(dialog).getByRole('button', { name: /Activate/i })
+    const confirmBtn = within(dialog).getByRole('button', { name: /Add to active/i })
     await user.click(confirmBtn)
 
     expect(spy).toHaveBeenCalledWith(
@@ -249,7 +249,7 @@ describe('StrategyInstanceColumns — Dropdown activation actions', () => {
     )
   })
 
-  it('Deactivate from Live opens standard confirmation dialog', async () => {
+  it('Remove from active opens standard confirmation dialog', async () => {
     renderWithStrategies([
       createMockStrategyResponse({
         name: 'Aggressive VFMR',
@@ -265,7 +265,7 @@ describe('StrategyInstanceColumns — Dropdown activation actions', () => {
 
     // Standard confirmation dialog should be visible
     const dialog = screen.getByRole('alertdialog')
-    expect(dialog).toHaveTextContent('Deactivate from Live Trading')
+    expect(dialog).toHaveTextContent('Remove from active strategies')
     expect(dialog).toHaveTextContent('Aggressive VFMR')
     expect(dialog).toHaveTextContent('paper mode only')
   })

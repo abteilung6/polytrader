@@ -3,12 +3,22 @@
  * Strategy instance table columns — includes Mode column and expanded
  * actions dropdown per PILOT_LIVE.md Commit 8.
  *
- * Actions dropdown:
- * - Start (safe, no confirm) — when STOPPED or ERROR
- * - Stop (standard confirm) — when RUNNING or STARTING
- * - separator
- * - Activate for Live (typed confirm "ACTIVATE") — when not enabled
- * - Deactivate from Live (standard confirm) — when enabled
+ * TWO SEPARATE AXES (do not confuse):
+ *
+ * 1) LIFECYCLE (State column: Stopped / Running)
+ *    - Stopped = instance is not running, no paper tracking.
+ *    - Running = instance is running, producing signals, paper tracking (simulated orders).
+ *    - Start = transition Stopped → Running (starts paper tracking only).
+ *    - Stop  = transition Running → Stopped (halts the instance).
+ *
+ * 2) LIVE ACTIVATION (Mode column: Paper / Live)
+ *    - Paper = not in the "active live strategies" list → orders stay simulated.
+ *    - Live  = in the active list → when execution is enabled, orders can go to real venue.
+ *    - Add to active strategies    = add this instance to the live pool (promote to Live).
+ *    - Remove from active          = remove from live pool (back to Paper only).
+ *
+ * So: Start only starts paper tracking. To enable live trading you must also
+ * "Add to active strategies". Control page is the single place to see/manage that list.
  */
 
 import { useState } from 'react'
@@ -110,7 +120,7 @@ function StrategyInstanceActionsCell({ strategy }: { strategy: StrategyResponse 
               disabled={anyPending}
               data-testid="action-deactivate"
             >
-              {deactivateMutation.isPending ? 'Deactivating…' : 'Deactivate from Live'}
+              {deactivateMutation.isPending ? 'Removing…' : 'Remove from active'}
             </DropdownMenuItem>
           ) : (
             <DropdownMenuItem
@@ -118,7 +128,7 @@ function StrategyInstanceActionsCell({ strategy }: { strategy: StrategyResponse 
               disabled={anyPending}
               data-testid="action-activate"
             >
-              {activateMutation.isPending ? 'Activating…' : 'Activate for Live'}
+              {activateMutation.isPending ? 'Adding…' : 'Add to active strategies'}
             </DropdownMenuItem>
           )}
         </DropdownMenuContent>
@@ -139,13 +149,13 @@ function StrategyInstanceActionsCell({ strategy }: { strategy: StrategyResponse 
         }}
       />
 
-      {/* Activate for Live — typed confirmation */}
+      {/* Add to active strategies — typed confirmation (enables live when execution on) */}
       <TypedAlertDialog
         open={activateDialogOpen}
         onOpenChange={setActivateDialogOpen}
-        title="Activate for Live Trading"
-        description={`Activate "${strategy.name}" (${strategy.template_type_id} v${strategy.template_version}) for live trading. This strategy will be eligible for real order execution when execution is enabled.`}
-        confirmLabel="Activate"
+        title="Add to active strategies"
+        description={`Add "${strategy.name}" (${strategy.template_type_id} v${strategy.template_version}) to the active live strategies list. It will be eligible for real order execution when execution is enabled.`}
+        confirmLabel="Add to active"
         confirmWord="ACTIVATE"
         isPending={activateMutation.isPending}
         onConfirm={() => {
@@ -155,13 +165,13 @@ function StrategyInstanceActionsCell({ strategy }: { strategy: StrategyResponse 
         }}
       />
 
-      {/* Deactivate from Live — standard confirmation */}
+      {/* Remove from active — standard confirmation (back to paper only) */}
       <TypedAlertDialog
         open={deactivateDialogOpen}
         onOpenChange={setDeactivateDialogOpen}
-        title="Deactivate from Live Trading"
-        description={`Remove "${strategy.name}" from live trading. It will continue running in paper mode only.`}
-        confirmLabel="Deactivate"
+        title="Remove from active strategies"
+        description={`Remove "${strategy.name}" from the active live list. It will continue running in paper mode only.`}
+        confirmLabel="Remove from active"
         isPending={deactivateMutation.isPending}
         onConfirm={() => {
           deactivateMutation.mutate(undefined, {
