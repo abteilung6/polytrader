@@ -68,6 +68,33 @@ def service(
     )
 
 
+@pytest.fixture
+def active_strategies() -> set[str]:
+    """Mutable set for testing in-memory active_strategies updates."""
+    return set()
+
+
+@pytest.fixture
+def service_with_active_strategies(
+    mock_repos: tuple[MagicMock, MagicMock, MagicMock, MagicMock],
+    execution_control: ExecutionControl,
+    bus: EventBus,
+    active_strategies: set[str],
+) -> ControlPlaneService:
+    """ControlPlaneService with active_strategies set for testing."""
+    command_repo, execution_repo, live_repo, strategy_registry = mock_repos
+    return ControlPlaneService(
+        command_repo=command_repo,
+        execution_repo=execution_repo,
+        live_repo=live_repo,
+        strategy_registry=strategy_registry,
+        execution_control=execution_control,
+        bus=bus,
+        poll_interval_s=1.0,
+        active_strategies=active_strategies,
+    )
+
+
 class TestAddActiveStrategyDoesNotChangeLifecycle:
     """_add_active_strategy must only update live_repo, not desired_state/actual_state."""
 
@@ -168,3 +195,42 @@ class TestRemoveActiveStrategyDoesNotChangeLifecycle:
 
         live_repo.deactivate.assert_called_once()
         strategy_registry.update_strategy.assert_not_called()
+
+
+class TestControlPlaneUpdatesActiveStrategiesSet:
+    """With active_strategies set, add/remove commands update the in-memory set."""
+
+    @pytest.mark.asyncio
+    async def test_add_active_strategy_adds_to_set(
+        self,
+        service_with_active_strategies: ControlPlaneService,
+        active_strategies: set[str],
+    ) -> None:
+        """Process add_active_strategy → set contains strategy_id."""
+        cmd = ControlCommandRecord(
+            command_type="add_active_strategy",
+            strategy_id="strat-1",
+            reason="Add to active",
+            issued_by="operator",
+            client_request_id="req-1",
+        )
+        await service_with_active_strategies._add_active_strategy(cmd)
+        assert "strat-1" in active_strategies
+
+    @pytest.mark.asyncio
+    async def test_remove_active_strategy_removes_from_set(
+        self,
+        service_with_active_strategies: ControlPlaneService,
+        active_strategies: set[str],
+    ) -> None:
+        """Process remove_active_strategy → set no longer contains strategy_id."""
+        active_strategies.add("strat-1")
+        cmd = ControlCommandRecord(
+            command_type="remove_active_strategy",
+            strategy_id="strat-1",
+            reason="Remove from active",
+            issued_by="operator",
+            client_request_id="req-2",
+        )
+        await service_with_active_strategies._remove_active_strategy(cmd)
+        assert "strat-1" not in active_strategies

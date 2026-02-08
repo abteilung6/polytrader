@@ -160,6 +160,9 @@ async def platform_start_task(
     # Create execution control for control plane
     execution_control = ExecutionControl(bus=bus)
 
+    # In-memory set of active strategy IDs (proposal router + live execution read this)
+    active_strategies: set[str] = set()
+
     # Create platform orchestrator; keep session for full run so add_strategy works
     async with Session() as orchestrator_session:
         orchestrator = PlatformOrchestrator(
@@ -172,6 +175,8 @@ async def platform_start_task(
             position_manager=position_manager,
             paper_oms_store=oms_store_paper,
             platform_config=pcfg,
+            execution_control=execution_control,
+            get_active_strategies=lambda: active_strategies,
         )
 
         # Start orchestrator (loads strategies, creates runners)
@@ -185,7 +190,7 @@ async def platform_start_task(
             live_repo = LiveStrategyRepository(control_session)
             strategy_registry = StrategyRegistry(control_session)
 
-            # Create control plane service
+            # Create control plane service (updates active_strategies on add/remove commands)
             control_plane_service = ControlPlaneService(
                 command_repo=command_repo,
                 execution_repo=execution_repo,
@@ -194,6 +199,7 @@ async def platform_start_task(
                 execution_control=execution_control,
                 bus=bus,
                 poll_interval_s=pcfg.supervisor.control_plane_poll_interval_s,
+                active_strategies=active_strategies,
             )
 
             # Start control plane service

@@ -72,6 +72,7 @@ class ControlPlaneService:
         execution_control: ExecutionControl,
         bus: EventBus,
         poll_interval_s: float = 1.0,
+        active_strategies: set[str] | None = None,
     ) -> None:
         """Initialize control plane service.
 
@@ -83,6 +84,9 @@ class ControlPlaneService:
             execution_control: In-memory execution control state
             bus: Event bus for emitting ControlCommandEvent
             poll_interval_s: Polling interval in seconds (default: 1.0)
+            active_strategies: In-memory set of active strategy IDs (optional). When provided,
+                add/remove_active_strategy commands update this set so proposal router and
+                live execution can read it without DB on every intent.
         """
         self._command_repo = command_repo
         self._execution_repo = execution_repo
@@ -91,6 +95,7 @@ class ControlPlaneService:
         self._execution_control = execution_control
         self._bus = bus
         self._poll_interval_s = poll_interval_s
+        self._active_strategies = active_strategies
 
         self._running = False
         self._task: asyncio.Task[None] | None = None
@@ -111,6 +116,12 @@ class ControlPlaneService:
             return
 
         await self._reconcile_boot_state()
+
+        # Sync in-memory active_strategies from DB so boot state is correct
+        if self._active_strategies is not None:
+            db_active = await self._live_repo.list_active()
+            self._active_strategies.clear()
+            self._active_strategies.update(db_active)
 
         self._running = True
         self._task = asyncio.create_task(self._run())
@@ -307,6 +318,8 @@ class ControlPlaneService:
             activated_by=cmd.issued_by,
             reason=cmd.reason,
         )
+        if self._active_strategies is not None:
+            self._active_strategies.add(cmd.strategy_id)
 
         logger.info(
             "Strategy {strategy_id} activated via command {command_id}: {reason}",
@@ -330,6 +343,8 @@ class ControlPlaneService:
             activated_by=cmd.issued_by,
             reason=cmd.reason,
         )
+        if self._active_strategies is not None:
+            self._active_strategies.discard(cmd.strategy_id)
 
         logger.info(
             "Strategy {strategy_id} deactivated via command {command_id}: {reason}",
