@@ -704,6 +704,15 @@ class PlatformConfig(BaseModel):
     database: DatabasePoolConfig = Field(default_factory=DatabasePoolConfig)
     metrics: PlatformMetricsConfig = Field(default_factory=PlatformMetricsConfig)
     risk: RiskConfig = Field(default_factory=RiskConfig)
+    # When YAML has risk.paper and risk.live, these are set; else None (single risk for both lanes)
+    risk_paper: RiskConfig | None = Field(
+        default=None,
+        description="Optional risk limits for paper lane (when risk.paper and risk.live present)",
+    )
+    risk_live: RiskConfig | None = Field(
+        default=None,
+        description="Optional risk limits for live lane (when risk.paper and risk.live present)",
+    )
     health_gates: HealthGatesConfig = Field(default_factory=HealthGatesConfig)
     circuit_breakers: CircuitBreakerConfig = Field(default_factory=CircuitBreakerConfig)
     execution: ExecutionConfig = Field(default_factory=ExecutionConfig)
