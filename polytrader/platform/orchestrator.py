@@ -203,10 +203,26 @@ class PlatformOrchestrator:
             version=self._platform_config.version
         )
         risk_engine = RiskEngine(limits=risk_limits)
+        limits_paper = None
+        limits_live = None
+        if (
+            self._platform_config.risk_paper is not None
+            and self._platform_config.risk_live is not None
+        ):
+            limits_paper = self._platform_config.risk_paper.to_risk_limits(
+                version=self._platform_config.version
+            )
+            limits_live = self._platform_config.risk_live.to_risk_limits(
+                version=self._platform_config.version
+            )
         self._risk_checker = RiskChecker(
             bus=bus,
             engine=risk_engine,
             store=store,
+            execution_control=self._execution_control,
+            get_active_strategies=self._get_active_strategies,
+            limits_paper=limits_paper,
+            limits_live=limits_live,
         )
 
         # Strategy runners (created in start())
