@@ -79,6 +79,11 @@ const performancePaperRoute = createRoute({
 const performanceLiveRoute = createRoute({
   getParentRoute: () => performanceRoute,
   path: 'live',
+  validateSearch: (search: Record<string, unknown>): { tab?: 'strategies' | 'orders' } => {
+    const tab = search.tab
+    if (tab === 'strategies' || tab === 'orders') return { tab }
+    return {}
+  },
   component: LiveTradingPage,
 })
 
