@@ -192,6 +192,52 @@ describe('ActiveStrategiesPanel', () => {
     expect(screen.queryByTestId('active-strategy-strat-5')).not.toBeInTheDocument()
   })
 
+  it('shows card dropdown with Deactivate all when strategies are active', async () => {
+    const user = userEvent.setup()
+    mockLiveStrategies(['strat-001'])
+    mockInstances([makeStrategy({ strategy_id: 'strat-001', name: 'Alpha' })])
+
+    renderWithQueryAndRouter(<ActiveStrategiesPanel />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('active-strategies-card-actions')).toBeInTheDocument()
+    })
+    await user.click(screen.getByTestId('active-strategies-card-actions'))
+    expect(screen.getByTestId('active-strategies-deactivate-all')).toHaveTextContent(
+      'Deactivate all',
+    )
+  })
+
+  it('does not show card dropdown when no active strategies', async () => {
+    mockLiveStrategies([])
+    mockInstances([])
+
+    renderWithQueryAndRouter(<ActiveStrategiesPanel />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('active-strategies-empty')).toBeInTheDocument()
+    })
+    expect(screen.queryByTestId('active-strategies-card-actions')).not.toBeInTheDocument()
+  })
+
+  it('Deactivate all opens confirmation dialog', async () => {
+    const user = userEvent.setup()
+    mockLiveStrategies(['strat-001'])
+    mockInstances([makeStrategy({ strategy_id: 'strat-001', name: 'Alpha' })])
+
+    renderWithQueryAndRouter(<ActiveStrategiesPanel />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('active-strategies-card-actions')).toBeInTheDocument()
+    })
+    await user.click(screen.getByTestId('active-strategies-card-actions'))
+    await user.click(screen.getByTestId('active-strategies-deactivate-all'))
+
+    const dialog = screen.getByRole('alertdialog')
+    expect(dialog).toHaveTextContent('Deactivate all live strategies')
+    expect(dialog).toHaveTextContent('Remove all 1 strategy(ies) from the live pool')
+  })
+
   it('shows Remove from active in row dropdown and opens confirmation dialog', async () => {
     const user = userEvent.setup()
     mockLiveStrategies(['strat-001'])

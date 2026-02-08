@@ -27,7 +27,11 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { TypedAlertDialog } from '@/components/shared/typed-alert-dialog'
-import { useDeactivateStrategy, useStrategyInstancesQuery } from '@/hooks/strategy-instances'
+import {
+  useDeactivateAllStrategies,
+  useDeactivateStrategy,
+  useStrategyInstancesQuery,
+} from '@/hooks/strategy-instances'
 import { useLiveStrategiesQuery } from '@/hooks/use-live-strategies'
 import type { StrategyResponse } from '@/lib/api'
 
@@ -36,7 +40,9 @@ const PAGE_SIZE = 5
 export function ActiveStrategiesPanel() {
   const { data: liveData, isLoading: liveLoading } = useLiveStrategiesQuery()
   const { data: instancesData, isLoading: instancesLoading } = useStrategyInstancesQuery()
+  const deactivateAllMutation = useDeactivateAllStrategies()
   const [page, setPage] = useState(0)
+  const [deactivateAllDialogOpen, setDeactivateAllDialogOpen] = useState(false)
 
   const isLoading = liveLoading || instancesLoading
   const activeIds = liveData?.active_strategies ?? []
@@ -56,11 +62,50 @@ export function ActiveStrategiesPanel() {
             <CardTitle>Active Live Strategies</CardTitle>
             <CardDescription>Strategies currently activated for live trading.</CardDescription>
           </div>
-          <Badge variant="outline" data-testid="active-count-badge">
-            {activeIds.length}
-          </Badge>
+          <div className="flex items-center gap-2">
+            <Badge variant="outline" data-testid="active-count-badge">
+              {activeIds.length}
+            </Badge>
+            {activeIds.length > 0 && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-8"
+                    aria-label="Card actions"
+                    data-testid="active-strategies-card-actions"
+                  >
+                    <MoreVertical className="size-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem
+                    onClick={() => setDeactivateAllDialogOpen(true)}
+                    disabled={deactivateAllMutation.isPending}
+                    data-testid="active-strategies-deactivate-all"
+                  >
+                    {deactivateAllMutation.isPending ? 'Deactivating all…' : 'Deactivate all'}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+          </div>
         </div>
       </CardHeader>
+      <TypedAlertDialog
+        open={deactivateAllDialogOpen}
+        onOpenChange={setDeactivateAllDialogOpen}
+        title="Deactivate all live strategies"
+        description={`Remove all ${activeIds.length} strategy(ies) from the live pool? They will no longer be eligible for live execution. You can re-add them from Strategy instances.`}
+        confirmLabel="Deactivate all"
+        isPending={deactivateAllMutation.isPending}
+        onConfirm={() => {
+          deactivateAllMutation.mutate(activeIds, {
+            onSuccess: () => setDeactivateAllDialogOpen(false),
+          })
+        }}
+      />
       <CardContent>
         {isLoading && (
           <div className="grid gap-2" data-testid="active-strategies-loading">

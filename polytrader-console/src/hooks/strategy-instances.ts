@@ -56,3 +56,26 @@ export function useDeactivateStrategy(strategyId: string) {
     },
   })
 }
+
+export function useDeactivateAllStrategies() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (strategyIds: string[]) => {
+      for (const strategyId of strategyIds) {
+        await controlApi.deactivateStrategyApiV1CommandsLiveStrategiesStrategyIdDeactivatePost({
+          strategyId,
+          deactivateStrategyRequest: {
+            reason: 'Deactivate all from console',
+            issued_by: 'operator',
+            client_request_id: `disable-all-${strategyId}-${Date.now()}`,
+          },
+        })
+      }
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: QUERY_KEY_STRATEGY_INSTANCES })
+      void queryClient.invalidateQueries({ queryKey: QUERY_KEY_LIVE_STRATEGIES })
+    },
+  })
+}
