@@ -14,7 +14,8 @@ Per observability.mdc §2, §3:
 """
 
 import asyncio
-from typing import Any
+from collections.abc import Callable
+from typing import Any, Literal
 
 from polytrader.events import APPROVED_PROPOSALS, ORDERS, PROPOSALS, RISK_CHECKS, EventBus
 from polytrader.events.types import OrderIntentEvent, RiskCheckEvent
@@ -24,6 +25,7 @@ from polytrader.obs.metrics import (
     record_risk_check,
     record_risk_denial,
 )
+from polytrader.ops.control import ExecutionControl
 from polytrader.risk.models import RiskContext, RiskLimits, RiskReasonCode, RiskResult
 from polytrader.risk.policies import (
     Clock,
@@ -41,6 +43,29 @@ from polytrader.store import IMarketDataStore
 from polytrader.types import Outcome
 
 # No rebuild needed - no circular dependency anymore
+
+
+def resolve_lane(
+    intent: OrderIntentEvent,
+    execution_control: ExecutionControl | None,
+    get_active_strategies: Callable[[], set[str]] | None,
+) -> Literal["paper", "live"]:
+    """Resolve the execution lane for an intent (paper vs live).
+
+    Returns "live" iff execution is enabled and strategy is in the active set;
+    otherwise "paper". When execution_control or get_active_strategies is None,
+    returns "paper" (backward compatible).
+
+    Per PROPOSAL_PAPER_LIVE_RISK_LIMITS: same logic as ApprovedProposalRouter.
+    """
+    if execution_control is None or get_active_strategies is None:
+        return "paper"
+    if not execution_control.is_enabled():
+        return "paper"
+    if intent.strategy_id in get_active_strategies():
+        return "live"
+    return "paper"
+
 
 # Type for risk policy functions
 # Policies can have either (context, limits) -> RiskResult or
@@ -167,6 +192,11 @@ class RiskChecker:
         bus: EventBus,
         engine: RiskEngine,
         store: IMarketDataStore | None = None,
+        *,
+        execution_control: ExecutionControl | None = None,
+        get_active_strategies: Callable[[], set[str]] | None = None,
+        limits_paper: RiskLimits | None = None,
+        limits_live: RiskLimits | None = None,
     ) -> None:
         """Initialize risk checker.
 
@@ -174,10 +204,18 @@ class RiskChecker:
             bus: Event bus for publishing events
             engine: Risk engine for running checks
             store: Optional market data store for building context
+            execution_control: Optional execution control (for lane resolution)
+            get_active_strategies: Optional callable returning active strategy IDs for live
+            limits_paper: Optional risk limits for paper lane (when split config)
+            limits_live: Optional risk limits for live lane (when split config)
         """
         self.bus = bus
         self.engine = engine
         self.store = store
+        self._execution_control = execution_control
+        self._get_active_strategies = get_active_strategies
+        self._limits_paper = limits_paper
+        self._limits_live = limits_live
         self._executed_trades: set[tuple[str, str, Outcome]] = set()
         self._approved_trades: set[tuple[str, str, Outcome]] = set()
         # Maps correlation_id → (strategy_id, market_slug, outcome) for approved trades
