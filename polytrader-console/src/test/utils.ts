@@ -3,6 +3,7 @@ import type { AxiosResponse, InternalAxiosRequestConfig } from 'axios'
 export {
   createTestQueryClient,
   renderWithQuery,
+  renderWithQueryAndRouter,
   renderWithRouter,
   type RenderWithRouterOptions,
 } from './render'

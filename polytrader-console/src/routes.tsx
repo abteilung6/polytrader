@@ -6,6 +6,7 @@ import {
   redirect,
 } from '@tanstack/react-router'
 import { LayoutComponent, NotFound } from '@/route-components'
+import { ControlPage } from '@/pages/control'
 import { MarketDetailPage } from '@/pages/market-detail'
 import { MarketsPage } from '@/pages/markets'
 import { PerformancePage } from '@/pages/performance'
@@ -58,6 +59,12 @@ const performanceRoute = createRoute({
   component: PerformancePage,
 })
 
+const controlRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: 'control',
+  component: ControlPage,
+})
+
 const strategiesTemplatesRoute = createRoute({
   getParentRoute: () => layoutRoute,
   path: 'strategies/templates',
@@ -94,6 +101,7 @@ export const routeTree = rootRoute.addChildren([
     indexRoute,
     marketsRoute.addChildren([marketsIndexRoute, marketDetailRoute]),
     performanceRoute,
+    controlRoute,
     strategiesTemplatesRoute,
     strategiesInstancesRoute.addChildren([
       strategiesInstancesIndexRoute,

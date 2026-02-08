@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { Link } from '@tanstack/react-router'
-import { BarChart3, ChevronDown, TrendingUp, Workflow } from 'lucide-react'
+import { BarChart3, ChevronDown, Shield, TrendingUp, Workflow } from 'lucide-react'
 
 import {
   Sidebar,
@@ -44,6 +44,14 @@ export function AppSidebar({ variant = 'inset' }: AppSidebarProps) {
         <SidebarGroup>
           <SidebarGroupContent className="flex flex-col gap-2">
             <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton asChild tooltip="Control">
+                  <Link to="/control">
+                    <Shield />
+                    <span>Control</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton asChild tooltip="Performance">
                   <Link to="/performance">

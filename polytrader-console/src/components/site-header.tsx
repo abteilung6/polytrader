@@ -10,6 +10,7 @@ import {
 } from '@/components/ui/breadcrumb'
 import { Separator } from '@/components/ui/separator'
 import { SidebarTrigger } from '@/components/ui/sidebar'
+import { EnvironmentBadge } from '@/features/operations/environment-badge'
 import { useStrategyDetailQuery } from '@/hooks/strategy-detail'
 
 function useHeaderTitle(): { segments: { label: string; href?: string }[] } {
@@ -36,6 +37,9 @@ function useHeaderTitle(): { segments: { label: string; href?: string }[] } {
         { label: strategy?.name ?? strategyId ?? '' },
       ],
     }
+  }
+  if (pathname === '/control') {
+    return { segments: [{ label: 'Control' }] }
   }
   if (pathname === '/strategies/templates') {
     return { segments: [{ label: 'Strategy templates' }] }
@@ -75,6 +79,9 @@ export function SiteHeader() {
             ))}
           </BreadcrumbList>
         </Breadcrumb>
+        <div className="ml-auto">
+          <EnvironmentBadge />
+        </div>
       </div>
     </header>
   )
