@@ -1,13 +1,19 @@
 """Tests for OMS Core component."""
 
 import asyncio
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
+if TYPE_CHECKING:
+    from polytrader.oms.idempotency import IdempotencyStore
+    from polytrader.oms.store import InMemoryOrderStore
+
 from polytrader.events import (
     APPROVED_PROPOSALS,
+    APPROVED_PROPOSALS_PAPER,
     CANCEL_ORDER_COMMANDS,
+    CANCEL_ORDER_COMMANDS_PAPER,
     FILLS,
     ORDER_ACKS,
     ORDER_CANCELS,
@@ -15,6 +21,7 @@ from polytrader.events import (
     ORDER_REJECTS,
     ORDER_SUBMITTED,
     SUBMIT_ORDER_COMMANDS,
+    SUBMIT_ORDER_COMMANDS_PAPER,
 )
 from polytrader.events.bus import EventBus
 from polytrader.events.types import (
@@ -92,6 +99,42 @@ class TestOMSCoreOrderCreation:
         assert submit_command.client_order_id == order.client_order_id
         assert submit_command.intent == sample_intent
         assert submit_command.correlation_id == sample_intent.correlation_id
+
+    @pytest.mark.asyncio
+    async def test_create_order_publishes_to_injected_lane_topics(
+        self,
+        bus: EventBus,
+        order_store: "InMemoryOrderStore",
+        idempotency_store: "IdempotencyStore",
+        sample_intent: OrderIntentEvent,
+    ) -> None:
+        """With lane topic overrides, OMS publishes submit command to injected topic."""
+        oms_core = OMSCore(
+            bus=bus,
+            store=order_store,
+            idempotency_store=idempotency_store,
+            proposals_topic=APPROVED_PROPOSALS_PAPER,
+            submit_commands_topic=SUBMIT_ORDER_COMMANDS_PAPER,
+            cancel_commands_topic=CANCEL_ORDER_COMMANDS_PAPER,
+        )
+        published_items: list[tuple[str, object]] = []
+        original_publish = bus.publish
+
+        async def capture_publish(topic, item):
+            published_items.append((topic.name, item))
+            return await original_publish(topic, item)
+
+        bus.publish = capture_publish  # type: ignore[method-assign]
+        await oms_core.create_order(sample_intent)
+        submit_names = [name for name, _ in published_items if "submit" in name.lower()]
+        assert SUBMIT_ORDER_COMMANDS_PAPER.name in submit_names
+        submit_command = cast(
+            SubmitOrderCommand,
+            next(
+                item for name, item in published_items if name == SUBMIT_ORDER_COMMANDS_PAPER.name
+            ),
+        )
+        assert submit_command.intent == sample_intent
 
     @pytest.mark.asyncio
     async def test_create_order_idempotency(

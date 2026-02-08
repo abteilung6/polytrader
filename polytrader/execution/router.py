@@ -15,7 +15,7 @@ from polytrader.events import (
     EXECUTION_RESPONSES,
     SUBMIT_ORDER_COMMANDS,
 )
-from polytrader.events.bus import EventBus
+from polytrader.events.bus import EventBus, Topic
 from polytrader.events.types import (
     ExecutionErrorEvent,
     ExecutionRequestEvent,
@@ -55,6 +55,9 @@ class ExecutionRouter:
         execution_control: "ExecutionControl | None" = None,
         active_strategies: set[str] | None = None,
         is_paper_mode: bool = True,
+        *,
+        submit_commands_topic: Topic[object] | None = None,
+        cancel_commands_topic: Topic[object] | None = None,
     ) -> None:
         """Initialize execution router.
 
@@ -65,6 +68,8 @@ class ExecutionRouter:
             execution_control: Execution control for checking execution_enabled (optional)
             active_strategies: Set of active strategy IDs for live trading (optional)
             is_paper_mode: Whether system is in paper mode (default: True)
+            submit_commands_topic: Topic for submit commands (default: SUBMIT_ORDER_COMMANDS)
+            cancel_commands_topic: Topic for cancel commands (default: CANCEL_ORDER_COMMANDS)
         """
         from polytrader.execution.tactics import ExecutionTactics
 
@@ -74,6 +79,12 @@ class ExecutionRouter:
         self._execution_control = execution_control
         self._active_strategies = active_strategies or set()
         self._is_paper_mode = is_paper_mode
+        self._submit_commands_topic = (
+            submit_commands_topic if submit_commands_topic is not None else SUBMIT_ORDER_COMMANDS
+        )
+        self._cancel_commands_topic = (
+            cancel_commands_topic if cancel_commands_topic is not None else CANCEL_ORDER_COMMANDS
+        )
         self._running = False
 
     def get_adapter(self) -> IVenueAdapter:
@@ -93,8 +104,8 @@ class ExecutionRouter:
         from polytrader.logging_config import logger
 
         self._running = True
-        submit_queue = self._bus.subscribe(SUBMIT_ORDER_COMMANDS)
-        cancel_queue = self._bus.subscribe(CANCEL_ORDER_COMMANDS)
+        submit_queue = self._bus.subscribe(self._submit_commands_topic)
+        cancel_queue = self._bus.subscribe(self._cancel_commands_topic)
 
         async def process_submit_commands() -> None:
             """Process submit commands."""
