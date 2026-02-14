@@ -47,6 +47,18 @@ class PolymarketSecrets(BaseSettings):
         alias="SIGNATURE_TYPE",
     )
 
+    def has_live_credentials(self) -> bool:
+        """Return True if credentials are present and non-empty for live trading.
+
+        Used to gate creation of the live execution lane (Commit 6).
+        """
+        pk = self.private_key.get_secret_value().strip()
+        if not pk:
+            return False
+        if self.signature_type == 1:
+            return bool(self.funder and self.funder.strip())
+        return True
+
 
 class DatabaseConfig(BaseSettings):
     """Database configuration (PostgreSQL).

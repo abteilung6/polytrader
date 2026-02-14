@@ -264,6 +264,7 @@ class TestStrategyResponse:
             run_id="run_123",
             created_at=datetime.now(UTC),
             updated_at=datetime.now(UTC),
+            enabled=True,
         )
 
         assert response.strategy_id == "test_strategy"
@@ -275,12 +276,11 @@ class TestStrategyResponse:
         assert response.run_identity == run_identity
         assert response.deployment_id == deployment_id
         assert response.run_id == "run_123"
-        # enabled is a computed field, access it as a property
-        assert response.enabled is True  # type: ignore[comparison-overlap]  # Derived from desired_state == RUNNING
+        assert response.enabled is True  # Activation for live (distinct from lifecycle)
 
-    def test_strategy_response_enabled_derived_from_desired_state(self) -> None:
-        """Test that enabled field is derived from desired_state."""
-        response_running = StrategyResponse(
+    def test_strategy_response_enabled_is_activation_for_live(self) -> None:
+        """enabled = in active live list (Mode), not lifecycle."""
+        response_live = StrategyResponse(
             strategy_id="test_strategy",
             name="Test Strategy",
             config={},
@@ -290,25 +290,23 @@ class TestStrategyResponse:
             actual_state="RUNNING",
             created_at=datetime.now(UTC),
             updated_at=datetime.now(UTC),
+            enabled=True,
         )
+        assert response_live.enabled is True
 
-        # enabled is a computed field, access it as a property
-        assert response_running.enabled is True  # type: ignore[comparison-overlap]
-
-        response_stopped = StrategyResponse(
+        response_paper = StrategyResponse(
             strategy_id="test_strategy",
             name="Test Strategy",
             config={},
             template_type_id="simple_threshold",
             template_version="1.0.0",
-            desired_state="STOPPED",
-            actual_state="STOPPED",
+            desired_state="RUNNING",
+            actual_state="RUNNING",
             created_at=datetime.now(UTC),
             updated_at=datetime.now(UTC),
+            enabled=False,
         )
-
-        # enabled is a computed field, access it as a property
-        assert response_stopped.enabled is False
+        assert response_paper.enabled is False
 
     def test_strategy_response_with_optional_fields_none(self) -> None:
         """Test StrategyResponse with optional fields as None."""
@@ -320,6 +318,7 @@ class TestStrategyResponse:
             template_version="1.0.0",
             desired_state="STOPPED",
             actual_state="STOPPED",
+            enabled=False,
             created_at=datetime.now(UTC),
             updated_at=datetime.now(UTC),
         )
@@ -355,6 +354,7 @@ class TestStrategyResponse:
                 actual_state=state,
                 created_at=datetime.now(UTC),
                 updated_at=datetime.now(UTC),
+                enabled=False,
             )
 
             assert response.desired_state == state
@@ -372,4 +372,5 @@ class TestStrategyResponse:
                 actual_state="STOPPED",
                 created_at=datetime.now(UTC),
                 updated_at=datetime.now(UTC),
+                enabled=False,
             )

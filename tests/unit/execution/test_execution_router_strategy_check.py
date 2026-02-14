@@ -11,7 +11,12 @@ from unittest.mock import AsyncMock
 import pytest
 
 from polytrader.adapters.polymarket.models import VenueResponse
-from polytrader.events import ORDER_REJECTS, EventBus
+from polytrader.events import (
+    CANCEL_ORDER_COMMANDS_PAPER,
+    ORDER_REJECTS,
+    SUBMIT_ORDER_COMMANDS_PAPER,
+    EventBus,
+)
 from polytrader.events.types import OrderIntentEvent, OrderRejectedEvent
 from polytrader.execution.router import ExecutionRouter
 from polytrader.execution.tactics import ExecutionTactics
@@ -270,3 +275,53 @@ class TestExecutionRouterStrategyCheck:
 
         # Adapter should not have been called
         mock_adapter.submit_order.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_subscribes_to_injected_lane_topics(
+        self, bus: EventBus, tactics: ExecutionTactics
+    ) -> None:
+        """With lane topic overrides, router receives commands from injected topic."""
+        from polytrader.adapters.polymarket.models import VenueResponse
+
+        submitted: asyncio.Event = asyncio.Event()
+        response = VenueResponse(
+            venue_order_id="venue-test",
+            status="ACKED",
+            raw_response={"order_id": "venue-test"},
+        )
+        mock_adapter = AsyncMock()
+        mock_adapter.submit_order.return_value = response
+
+        async def set_submitted(*args: object, **kwargs: object) -> VenueResponse:
+            submitted.set()
+            return response
+
+        mock_adapter.submit_order.side_effect = set_submitted
+        mock_adapter.cancel_order = AsyncMock(
+            return_value=VenueResponse(
+                venue_order_id="v1",
+                status="CANCELLED",
+                raw_response={},
+            )
+        )
+        mock_adapter.get_open_orders = AsyncMock(return_value=[])
+
+        router = ExecutionRouter(
+            bus=bus,
+            adapter=mock_adapter,
+            tactics=tactics,
+            is_paper_mode=True,
+            submit_commands_topic=SUBMIT_ORDER_COMMANDS_PAPER,
+            cancel_commands_topic=CANCEL_ORDER_COMMANDS_PAPER,
+        )
+        router_task = asyncio.create_task(router.run())
+        await asyncio.sleep(0)  # Yield so router reaches submit_queue.get()
+        command = create_submit_order_command()
+        await bus.publish(SUBMIT_ORDER_COMMANDS_PAPER, command)
+        await asyncio.wait_for(submitted.wait(), timeout=2.0)
+        router_task.cancel()
+        try:
+            await router_task
+        except asyncio.CancelledError:
+            pass
+        mock_adapter.submit_order.assert_called_once()

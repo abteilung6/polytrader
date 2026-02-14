@@ -6,8 +6,10 @@ import {
   redirect,
 } from '@tanstack/react-router'
 import { LayoutComponent, NotFound } from '@/route-components'
+import { ControlPage } from '@/pages/control'
 import { MarketDetailPage } from '@/pages/market-detail'
 import { MarketsPage } from '@/pages/markets'
+import { LiveTradingPage } from '@/pages/live-trading'
 import { PerformancePage } from '@/pages/performance'
 import { StrategyInstanceDetailPage } from '@/pages/strategy-instance-detail'
 import { StrategiesInstancesPage } from '@/pages/strategies-instances'
@@ -55,7 +57,35 @@ const marketDetailRoute = createRoute({
 const performanceRoute = createRoute({
   getParentRoute: () => layoutRoute,
   path: 'performance',
+  component: () => <Outlet />,
+})
+
+const performanceIndexRoute = createRoute({
+  getParentRoute: () => performanceRoute,
+  path: '/',
+  beforeLoad: () => {
+    // TanStack Router redirect() is thrown for control flow; not an Error instance
+    // eslint-disable-next-line @typescript-eslint/only-throw-error -- framework API
+    throw redirect({ to: '/performance/paper' })
+  },
+})
+
+const performancePaperRoute = createRoute({
+  getParentRoute: () => performanceRoute,
+  path: 'paper',
   component: PerformancePage,
+})
+
+const performanceLiveRoute = createRoute({
+  getParentRoute: () => performanceRoute,
+  path: 'live',
+  component: LiveTradingPage,
+})
+
+const controlRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: 'control',
+  component: ControlPage,
 })
 
 const strategiesTemplatesRoute = createRoute({
@@ -93,7 +123,12 @@ export const routeTree = rootRoute.addChildren([
   layoutRoute.addChildren([
     indexRoute,
     marketsRoute.addChildren([marketsIndexRoute, marketDetailRoute]),
-    performanceRoute,
+    performanceRoute.addChildren([
+      performanceIndexRoute,
+      performancePaperRoute,
+      performanceLiveRoute,
+    ]),
+    controlRoute,
     strategiesTemplatesRoute,
     strategiesInstancesRoute.addChildren([
       strategiesInstancesIndexRoute,

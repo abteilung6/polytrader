@@ -50,7 +50,9 @@ export const CommandStatusResponseTypeEnum = {
     EnableExecution: 'enable_execution',
     DisableExecution: 'disable_execution',
     AddActiveStrategy: 'add_active_strategy',
-    RemoveActiveStrategy: 'remove_active_strategy'
+    RemoveActiveStrategy: 'remove_active_strategy',
+    KillSwitchActivate: 'kill_switch_activate',
+    KillSwitchReset: 'kill_switch_reset'
 } as const;
 
 export type CommandStatusResponseTypeEnum = typeof CommandStatusResponseTypeEnum[keyof typeof CommandStatusResponseTypeEnum];

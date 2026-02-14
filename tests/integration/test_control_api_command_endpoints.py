@@ -250,7 +250,8 @@ def test_create_strategy(client: TestClient) -> None:
     data = response.json()
     assert data["strategy_id"] == strategy_id
     assert data["name"] == "New Strategy"
-    assert data["enabled"] is True  # Computed field derived from desired_state == RUNNING
+    # enabled = in active live strategies list (Mode Live); new strategy is not in list
+    assert data["enabled"] is False
 
     # Verify template reference
     assert data["template_type_id"] == "simple_threshold"

@@ -24,7 +24,7 @@ from polytrader.events import (
     USER_STREAM_FILLS,
     USER_STREAM_REJECTS,
 )
-from polytrader.events.bus import EventBus
+from polytrader.events.bus import EventBus, Topic
 from polytrader.events.types import (
     CancelRequestedEvent,
     FillEvent,
@@ -89,6 +89,10 @@ class OMSCore:
         bus: EventBus,
         store: IEventHandlingOrderStore,
         idempotency_store: IdempotencyStore,
+        *,
+        proposals_topic: Topic[object] | None = None,
+        submit_commands_topic: Topic[object] | None = None,
+        cancel_commands_topic: Topic[object] | None = None,
     ) -> None:
         """Initialize OMS Core.
 
@@ -96,10 +100,22 @@ class OMSCore:
             bus: Event bus for publishing events and commands
             store: Order store with event handling capabilities
             idempotency_store: Idempotency store for duplicate detection
+            proposals_topic: Topic for approved intents (default: APPROVED_PROPOSALS)
+            submit_commands_topic: Topic for submit commands (default: SUBMIT_ORDER_COMMANDS)
+            cancel_commands_topic: Topic for cancel commands (default: CANCEL_ORDER_COMMANDS)
         """
         self._bus = bus
         self._store = store
         self._idempotency = idempotency_store
+        self._proposals_topic = (
+            proposals_topic if proposals_topic is not None else APPROVED_PROPOSALS
+        )
+        self._submit_commands_topic = (
+            submit_commands_topic if submit_commands_topic is not None else SUBMIT_ORDER_COMMANDS
+        )
+        self._cancel_commands_topic = (
+            cancel_commands_topic if cancel_commands_topic is not None else CANCEL_ORDER_COMMANDS
+        )
         self._running = False
         # Track order timestamps for latency calculation
         # order_id -> {"created": ts, "submitted": ts, "acked": ts, "first_fill": ts}
@@ -125,7 +141,7 @@ class OMSCore:
         Per flows.mdc §10: OMS handles user stream updates.
         """
         self._running = True
-        proposal_queue = self._bus.subscribe(APPROVED_PROPOSALS)
+        proposal_queue = self._bus.subscribe(self._proposals_topic)
 
         # Subscribe to user stream topics
         user_stream_acks_queue = self._bus.subscribe(USER_STREAM_ACKS)
@@ -339,7 +355,7 @@ class OMSCore:
             intent=intent,
             correlation_id=intent.correlation_id,
         )
-        await self._bus.publish(SUBMIT_ORDER_COMMANDS, command)
+        await self._bus.publish(self._submit_commands_topic, command)
 
         # Step 7: Transition to SUBMITTED and emit OrderSubmittedEvent
         order = transition_order_state(order, OrderState.SUBMITTED)
@@ -753,7 +769,7 @@ class OMSCore:
             reason=reason,
             correlation_id=order.correlation_id,
         )
-        await self._bus.publish(CANCEL_ORDER_COMMANDS, cancel_command)
+        await self._bus.publish(self._cancel_commands_topic, cancel_command)
 
         # Emit OrderCanceledEvent (store will handle state transition)
         cancel_event = OrderCanceledEvent(

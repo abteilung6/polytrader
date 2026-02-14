@@ -14,7 +14,9 @@ Per observability.mdc §2, §3:
 """
 
 import asyncio
-from typing import Any
+import time
+from collections.abc import Callable
+from typing import Any, Literal
 
 from polytrader.events import APPROVED_PROPOSALS, ORDERS, PROPOSALS, RISK_CHECKS, EventBus
 from polytrader.events.types import OrderIntentEvent, RiskCheckEvent
@@ -24,6 +26,7 @@ from polytrader.obs.metrics import (
     record_risk_check,
     record_risk_denial,
 )
+from polytrader.ops.control import ExecutionControl
 from polytrader.risk.models import RiskContext, RiskLimits, RiskReasonCode, RiskResult
 from polytrader.risk.policies import (
     Clock,
@@ -41,6 +44,29 @@ from polytrader.store import IMarketDataStore
 from polytrader.types import Outcome
 
 # No rebuild needed - no circular dependency anymore
+
+
+def resolve_lane(
+    intent: OrderIntentEvent,
+    execution_control: ExecutionControl | None,
+    get_active_strategies: Callable[[], set[str]] | None,
+) -> Literal["paper", "live"]:
+    """Resolve the execution lane for an intent (paper vs live).
+
+    Returns "live" iff execution is enabled and strategy is in the active set;
+    otherwise "paper". When execution_control or get_active_strategies is None,
+    returns "paper" (backward compatible).
+
+    Per PROPOSAL_PAPER_LIVE_RISK_LIMITS: same logic as ApprovedProposalRouter.
+    """
+    if execution_control is None or get_active_strategies is None:
+        return "paper"
+    if not execution_control.is_enabled():
+        return "paper"
+    if intent.strategy_id in get_active_strategies():
+        return "live"
+    return "paper"
+
 
 # Type for risk policy functions
 # Policies can have either (context, limits) -> RiskResult or
@@ -87,7 +113,9 @@ class RiskEngine:
             check_rate_limits,  # Last: rate limits
         ]
 
-    def check(self, context: RiskContext) -> RiskResult:
+    def check(
+        self, context: RiskContext, limits_override: RiskLimits | None = None
+    ) -> RiskResult:
         """Run all risk policies in fixed order and aggregate results per flows.mdc §6.
 
         Policies are run in order. If any policy denies, the final result
@@ -95,10 +123,12 @@ class RiskEngine:
 
         Args:
             context: Risk context with order intent and current state
+            limits_override: Optional limits to use instead of self.limits (e.g. per-lane)
 
         Returns:
             Aggregated RiskResult with final decision and all reason codes
         """
+        limits = limits_override if limits_override is not None else self.limits
         all_reasons: list[RiskReasonCode] = []
         all_projections: dict[str, Any] = {}
         all_metadata: dict[str, Any] = {}
@@ -108,9 +138,9 @@ class RiskEngine:
         for policy in self.policies:
             # Pass clock to policies that need it
             if policy in (check_proposal_validity, check_data_freshness):
-                result = policy(context, self.limits, self.clock)
+                result = policy(context, limits, self.clock)
             else:
-                result = policy(context, self.limits)
+                result = policy(context, limits)
 
             # Aggregate results
             all_reasons.extend(result.reason_codes)
@@ -167,6 +197,13 @@ class RiskChecker:
         bus: EventBus,
         engine: RiskEngine,
         store: IMarketDataStore | None = None,
+        *,
+        execution_control: ExecutionControl | None = None,
+        get_active_strategies: Callable[[], set[str]] | None = None,
+        limits_paper: RiskLimits | None = None,
+        limits_live: RiskLimits | None = None,
+        clock: Clock | None = None,
+        rate_reset_interval_s: float = 60.0,
     ) -> None:
         """Initialize risk checker.
 
@@ -174,19 +211,61 @@ class RiskChecker:
             bus: Event bus for publishing events
             engine: Risk engine for running checks
             store: Optional market data store for building context
+            execution_control: Optional execution control (for lane resolution)
+            get_active_strategies: Optional callable returning active strategy IDs for live
+            limits_paper: Optional risk limits for paper lane (when split config)
+            limits_live: Optional risk limits for live lane (when split config)
+            clock: Optional clock for rate-limit reset (for determinism in tests)
+            rate_reset_interval_s: Interval in seconds after which order_count per lane is reset
         """
         self.bus = bus
         self.engine = engine
         self.store = store
-        self._executed_trades: set[tuple[str, str, Outcome]] = set()
-        self._approved_trades: set[tuple[str, str, Outcome]] = set()
-        # Maps correlation_id → (strategy_id, market_slug, outcome) for approved trades
-        # so we can match OrderExecutedEvent (which lacks strategy_id) back to the right key
-        self._approved_correlation: dict[str, tuple[str, str, Outcome]] = {}
-        self._order_count_last_minute = 0
+        self._execution_control = execution_control
+        self._get_active_strategies = get_active_strategies
+        self._limits_paper = limits_paper
+        self._limits_live = limits_live
+        self._clock = clock
+        self._rate_reset_interval_s = rate_reset_interval_s
+        self._approved_trades_paper: set[tuple[str, str, Outcome]] = set()
+        self._approved_trades_live: set[tuple[str, str, Outcome]] = set()
+        self._executed_trades_paper: set[tuple[str, str, Outcome]] = set()
+        self._executed_trades_live: set[tuple[str, str, Outcome]] = set()
+        # Maps correlation_id → (lane, key) for approved trades (for ORDERS attribution)
+        self._approved_correlation: dict[
+            str, tuple[Literal["paper", "live"], tuple[str, str, Outcome]]
+        ] = {}
+        self._order_count_last_minute_paper = 0
+        self._order_count_last_minute_live = 0
+        self._last_reset_monotonic: float = 0.0
         self._running = False
 
-    async def check(self, intent: OrderIntentEvent, context: RiskContext) -> bool:
+    def _limits_for_lane(self, lane: Literal["paper", "live"]) -> RiskLimits:
+        """Return limits for the given lane (per-lane or shared)."""
+        if lane == "paper" and self._limits_paper is not None:
+            return self._limits_paper
+        if lane == "live" and self._limits_live is not None:
+            return self._limits_live
+        return self.engine.limits
+
+    def _maybe_reset_rate_counters(self) -> None:
+        """If rate_reset_interval_s has elapsed, reset both lane order counters."""
+        now = (
+            self._clock.monotonic()
+            if self._clock is not None
+            else time.monotonic()
+        )
+        if now - self._last_reset_monotonic >= self._rate_reset_interval_s:
+            self._order_count_last_minute_paper = 0
+            self._order_count_last_minute_live = 0
+            self._last_reset_monotonic = now
+
+    async def check(
+        self,
+        intent: OrderIntentEvent,
+        context: RiskContext,
+        lane: Literal["paper", "live"] = "paper",
+    ) -> bool:
         """Check an order intent and emit RiskCheckEvent per flows.mdc §6.
 
         This is the pure method that accepts context as parameter.
@@ -199,6 +278,7 @@ class RiskChecker:
         Args:
             intent: Order intent to check
             context: Risk context with current state
+            lane: Resolved lane (paper or live) for state updates and limits
 
         Returns:
             True if allowed, False if denied
@@ -214,16 +294,17 @@ class RiskChecker:
 
         log_context.debug("Starting risk check for order intent")
 
-        result = self.engine.check(context)
+        limits_override = self._limits_for_lane(lane)
+        result = self.engine.check(context, limits_override=limits_override)
 
         # Emit metrics per observability.mdc §4
-        record_risk_check(allowed=result.allowed)
+        record_risk_check(allowed=result.allowed, lane=lane)
 
         if not result.allowed:
             # Record denial reason(s) per observability.mdc §4
             for reason_code in result.reason_codes:
                 if reason_code != RiskReasonCode.RISK_ALLOWED:
-                    record_risk_denial(reason=reason_code.value)
+                    record_risk_denial(reason=reason_code.value, lane=lane)
 
             # Log denial with correlation_id and reason codes per observability.mdc §2, §3
             # Filter out RISK_ALLOWED from denial messages (it's confusing to show both)
@@ -248,19 +329,25 @@ class RiskChecker:
             intent=intent,
             result=result,
             correlation_id=intent.correlation_id,  # Propagate per observability.mdc §2
+            lane=lane,
         )
         await self.bus.publish(RISK_CHECKS, event)
 
         # If allowed, publish to APPROVED_PROPOSALS per flows.mdc §6
         if result.allowed:
             await self.bus.publish(APPROVED_PROPOSALS, intent)
-            self._order_count_last_minute += 1
+            if lane == "paper":
+                self._order_count_last_minute_paper += 1
+            else:
+                self._order_count_last_minute_live += 1
             # Track approved BUY orders immediately to prevent race condition
-            # where multiple orders pass risk checks before first one executes
             if intent.side == "BUY":
                 key = (intent.strategy_id, intent.market_slug, intent.outcome)
-                self._approved_trades.add(key)
-                self._approved_correlation[intent.correlation_id] = key
+                if lane == "paper":
+                    self._approved_trades_paper.add(key)
+                else:
+                    self._approved_trades_live.add(key)
+                self._approved_correlation[intent.correlation_id] = (lane, key)
                 log_context.debug(
                     "Tracked approved BUY for max_trades: {strategy_id}/{market_slug}/{outcome}",
                     strategy_id=intent.strategy_id,
@@ -294,17 +381,21 @@ class RiskChecker:
                 try:
                     order = await orders_queue.get()
                     if order.side == "BUY":
-                        # Match via correlation_id to find the strategy_id
-                        # (OrderExecutedEvent does not carry strategy_id)
-                        approved_key = self._approved_correlation.pop(order.correlation_id, None)
-                        if approved_key is not None:
-                            key = approved_key
-                            self._approved_trades.discard(key)
+                        # Match via correlation_id to find (lane, key)
+                        approved = self._approved_correlation.pop(order.correlation_id, None)
+                        if approved is not None:
+                            lane, key = approved
+                            if lane == "paper":
+                                self._approved_trades_paper.discard(key)
+                                self._executed_trades_paper.add(key)
+                            else:
+                                self._approved_trades_live.discard(key)
+                                self._executed_trades_live.add(key)
                         else:
-                            # Fallback: no approved match (e.g., restart with in-flight orders)
+                            # Fallback: attribute to paper when not tagged (MVP)
                             strategy_id = getattr(order, "strategy_id", "unknown")
                             key = (strategy_id, order.market_slug, order.outcome)
-                        self._executed_trades.add(key)
+                            self._executed_trades_paper.add(key)
                         logger.bind(
                             correlation_id=order.correlation_id,
                             strategy_id=key[0],
@@ -318,14 +409,25 @@ class RiskChecker:
         orders_task = asyncio.create_task(track_orders())
 
         try:
+            self._last_reset_monotonic = (
+                self._clock.monotonic() if self._clock else time.monotonic()
+            )
             while self._running:
                 proposal = await proposal_queue.get()
 
-                # Build RiskContext from available sources
-                context = self._build_context(proposal)
+                # Reset per-lane order count every rate_reset_interval_s
+                self._maybe_reset_rate_counters()
 
-                # Check and emit event (logging happens inside check() with correlation_id)
-                await self.check(proposal, context)
+                # Resolve lane then build context from that lane's state
+                lane = resolve_lane(
+                    proposal,
+                    self._execution_control,
+                    self._get_active_strategies,
+                )
+                context = self._build_context(proposal, lane)
+
+                # Check with lane-specific limits and update lane state on approval
+                await self.check(proposal, context, lane)
         except asyncio.CancelledError:
             logger.info("RiskChecker cancelled")
         except Exception:
@@ -340,7 +442,9 @@ class RiskChecker:
                 pass
             logger.info("RiskChecker stopped")
 
-    def _build_context(self, intent: OrderIntentEvent) -> RiskContext:
+    def _build_context(
+        self, intent: OrderIntentEvent, lane: Literal["paper", "live"]
+    ) -> RiskContext:
         """Build RiskContext from available sources.
 
         For Phase 2, this builds context from:
@@ -361,17 +465,27 @@ class RiskChecker:
         if self.store:
             market_data = self.store.latest(intent.market_slug, intent.outcome)
 
-        # Build owned tokens from executed trades (simplified for Phase 2)
+        if lane == "paper":
+            approved = self._approved_trades_paper
+            executed = self._executed_trades_paper
+            order_count = self._order_count_last_minute_paper
+        else:
+            approved = self._approved_trades_live
+            executed = self._executed_trades_live
+            order_count = self._order_count_last_minute_live
+        combined = executed | approved
+
+        # Build owned tokens and positions from this lane's state
         # In Phase 3, this will come from OMS state
         # owned_tokens is (market_slug, outcome) — global across strategies
         owned_tokens: set[tuple[str, Outcome]] = set()
-        for _sid, mkt, out in self._executed_trades:
+        for _sid, mkt, out in combined:
             owned_tokens.add((mkt, out))
 
         # Calculate current positions (simplified for Phase 2)
         # In Phase 3, this will come from OMS/PostTrade projections
         current_positions: dict[tuple[str, Outcome], float] = {}
-        for _sid, market_slug, outcome in self._executed_trades:
+        for _sid, market_slug, outcome in combined:
             # Simplified: assume 1.0 USD per executed trade
             # In Phase 3, this will be accurate from OMS state
             current_positions[(market_slug, outcome)] = (
@@ -379,25 +493,22 @@ class RiskChecker:
             )
 
         global_position = sum(current_positions.values())
-
-        # Combine executed and approved trades for max_trades_per_market check
-        # Keyed by (strategy_id, market_slug, outcome) — per-instance scoping
-        all_trades = self._executed_trades | self._approved_trades
+        all_trades = combined
+        limits = self._limits_for_lane(lane)
 
         return RiskContext(
             intent=intent,
             current_positions=current_positions,
             global_position=global_position,
-            executed_trades=all_trades,  # Include both executed and approved
+            executed_trades=all_trades,
             market_data=market_data,
             owned_tokens=owned_tokens,
-            # System health defaults for Phase 2 (will be implemented in Phase 3)
             kill_switch_active=False,
             circuit_breaker_active=False,
             reconciliation_healthy=True,
-            order_count_last_minute=self._order_count_last_minute,
-            cancel_count_last_minute=0,  # TODO: Track cancels in Phase 3
-            limits_version=self.engine.limits.version,
+            order_count_last_minute=order_count,
+            cancel_count_last_minute=0,
+            limits_version=limits.version,
         )
 
     def stop(self) -> None:

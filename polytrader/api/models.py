@@ -12,7 +12,7 @@ from decimal import Decimal
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, computed_field, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 # ============================================================================
 # Health & Status Models
@@ -54,9 +54,16 @@ class HealthResponse(BaseModel):
 
 
 class ExecutionStateResponse(BaseModel):
-    """Execution control state response."""
+    """Execution control state response.
+
+    Includes both DB-persisted execution_enabled state and in-memory
+    kill_switch_active state for the frontend control page.
+    """
 
     execution_enabled: bool = Field(description="Whether execution is enabled")
+    kill_switch_active: bool = Field(
+        default=False, description="Whether kill switch is active (in-memory state)"
+    )
     version: int = Field(description="Version for optimistic concurrency")
     updated_at: datetime = Field(description="Last update timestamp")
     updated_by: str = Field(description="User/system that made the update")
@@ -205,11 +212,11 @@ class StrategyResponse(BaseModel):
     created_at: datetime = Field(description="Creation timestamp")
     updated_at: datetime = Field(description="Last update timestamp")
 
-    # Backward compatibility: enabled field derived from desired_state
-    @computed_field
-    def enabled(self) -> bool:
-        """Whether strategy is enabled (derived from desired_state == RUNNING)."""
-        return self.desired_state == "RUNNING"
+    # Activation for live (add to live pool); lifecycle = Start/Stop (paper).
+    enabled: bool = Field(
+        description="True if in active live strategies list (Mode Live). "
+        "Start/Stop control lifecycle; Activate adds to this set."
+    )
 
 
 class StrategiesResponse(BaseModel):
@@ -380,6 +387,8 @@ class CommandStatusResponse(BaseModel):
         "disable_execution",
         "add_active_strategy",
         "remove_active_strategy",
+        "kill_switch_activate",
+        "kill_switch_reset",
     ] = Field(description="Command type")
     status: Literal["pending", "applied", "failed"] = Field(description="Command status")
     error_message: str | None = Field(default=None, description="Error message if failed")
@@ -434,6 +443,46 @@ class DeactivateStrategyRequest(BaseModel):
     reason: str = Field(description="Reason for deactivation")
     issued_by: str = Field(description="User/system issuing the command")
     client_request_id: str = Field(description="Client request ID for idempotency")
+
+
+class KillSwitchRequest(BaseModel):
+    """Request to activate the kill switch (emergency stop).
+
+    Per flows.mdc §13: Kill switch provides immediate stop-trading policy.
+    Activating the kill switch immediately disables execution and emits
+    KillSwitchEvent. This is a direct-apply action, not queued.
+    """
+
+    reason: str = Field(
+        description="Reason for activating kill switch",
+        min_length=1,
+    )
+    cancel_open_orders: bool = Field(
+        default=True,
+        description="Whether to cancel open orders when kill switch is activated",
+    )
+    issued_by: str = Field(
+        default="operator",
+        description="User/system activating the kill switch",
+    )
+
+
+class KillSwitchResetRequest(BaseModel):
+    """Request to reset (deactivate) the kill switch.
+
+    Resetting the kill switch does NOT re-enable execution — the operator
+    must explicitly re-enable execution separately. This is a safety measure
+    to prevent accidental re-enablement.
+    """
+
+    reason: str = Field(
+        description="Reason for resetting kill switch",
+        min_length=1,
+    )
+    issued_by: str = Field(
+        default="operator",
+        description="User/system resetting the kill switch",
+    )
 
 
 class CreateStrategyRequest(BaseModel):

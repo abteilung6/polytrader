@@ -18,6 +18,12 @@ _fills_topic: Topic | None = None
 _order_cancels_topic: Topic | None = None
 _submit_order_commands_topic: Topic | None = None
 _cancel_order_commands_topic: Topic | None = None
+_approved_proposals_paper_topic: Topic | None = None
+_approved_proposals_live_topic: Topic | None = None
+_submit_order_commands_paper_topic: Topic | None = None
+_submit_order_commands_live_topic: Topic | None = None
+_cancel_order_commands_paper_topic: Topic | None = None
+_cancel_order_commands_live_topic: Topic | None = None
 _execution_requests_topic: Topic | None = None
 _execution_responses_topic: Topic | None = None
 _execution_errors_topic: Topic | None = None
@@ -286,6 +292,96 @@ def get_cancel_order_commands_topic() -> Topic:
     if _cancel_order_commands_topic is None:
         _cancel_order_commands_topic = _create_cancel_order_commands_topic()
     return _cancel_order_commands_topic
+
+
+def _create_approved_proposals_paper_topic() -> Topic:
+    """Create the APPROVED_PROPOSALS_PAPER topic (lane-specific)."""
+    from polytrader.events.types import OrderIntentEvent
+
+    return Topic[OrderIntentEvent]("approved_proposals_paper")
+
+
+def get_approved_proposals_paper_topic() -> Topic:
+    """Get the APPROVED_PROPOSALS_PAPER topic (singleton)."""
+    global _approved_proposals_paper_topic
+    if _approved_proposals_paper_topic is None:
+        _approved_proposals_paper_topic = _create_approved_proposals_paper_topic()
+    return _approved_proposals_paper_topic
+
+
+def _create_approved_proposals_live_topic() -> Topic:
+    """Create the APPROVED_PROPOSALS_LIVE topic (lane-specific)."""
+    from polytrader.events.types import OrderIntentEvent
+
+    return Topic[OrderIntentEvent]("approved_proposals_live")
+
+
+def get_approved_proposals_live_topic() -> Topic:
+    """Get the APPROVED_PROPOSALS_LIVE topic (singleton)."""
+    global _approved_proposals_live_topic
+    if _approved_proposals_live_topic is None:
+        _approved_proposals_live_topic = _create_approved_proposals_live_topic()
+    return _approved_proposals_live_topic
+
+
+def _create_submit_order_commands_paper_topic() -> Topic:
+    """Create the SUBMIT_ORDER_COMMANDS_PAPER topic (lane-specific)."""
+    from polytrader.oms.commands import SubmitOrderCommand
+
+    return Topic[SubmitOrderCommand]("submit_order_commands_paper")
+
+
+def get_submit_order_commands_paper_topic() -> Topic:
+    """Get the SUBMIT_ORDER_COMMANDS_PAPER topic (singleton)."""
+    global _submit_order_commands_paper_topic
+    if _submit_order_commands_paper_topic is None:
+        _submit_order_commands_paper_topic = _create_submit_order_commands_paper_topic()
+    return _submit_order_commands_paper_topic
+
+
+def _create_submit_order_commands_live_topic() -> Topic:
+    """Create the SUBMIT_ORDER_COMMANDS_LIVE topic (lane-specific)."""
+    from polytrader.oms.commands import SubmitOrderCommand
+
+    return Topic[SubmitOrderCommand]("submit_order_commands_live")
+
+
+def get_submit_order_commands_live_topic() -> Topic:
+    """Get the SUBMIT_ORDER_COMMANDS_LIVE topic (singleton)."""
+    global _submit_order_commands_live_topic
+    if _submit_order_commands_live_topic is None:
+        _submit_order_commands_live_topic = _create_submit_order_commands_live_topic()
+    return _submit_order_commands_live_topic
+
+
+def _create_cancel_order_commands_paper_topic() -> Topic:
+    """Create the CANCEL_ORDER_COMMANDS_PAPER topic (lane-specific)."""
+    from polytrader.oms.commands import CancelOrderCommand
+
+    return Topic[CancelOrderCommand]("cancel_order_commands_paper")
+
+
+def get_cancel_order_commands_paper_topic() -> Topic:
+    """Get the CANCEL_ORDER_COMMANDS_PAPER topic (singleton)."""
+    global _cancel_order_commands_paper_topic
+    if _cancel_order_commands_paper_topic is None:
+        _cancel_order_commands_paper_topic = _create_cancel_order_commands_paper_topic()
+    return _cancel_order_commands_paper_topic
+
+
+def _create_cancel_order_commands_live_topic() -> Topic:
+    """Create the CANCEL_ORDER_COMMANDS_LIVE topic (lane-specific)."""
+    from polytrader.oms.commands import CancelOrderCommand
+
+    return Topic[CancelOrderCommand]("cancel_order_commands_live")
+
+
+def get_cancel_order_commands_live_topic() -> Topic:
+    """Get the CANCEL_ORDER_COMMANDS_LIVE topic (singleton)."""
+    global _cancel_order_commands_live_topic
+    if _cancel_order_commands_live_topic is None:
+        _cancel_order_commands_live_topic = _create_cancel_order_commands_live_topic()
+    return _cancel_order_commands_live_topic
 
 
 def _create_execution_requests_topic() -> Topic:
@@ -566,6 +662,10 @@ def __getattr__(name: str) -> Topic:
         return get_risk_checks_topic()
     elif name == "APPROVED_PROPOSALS":
         return get_approved_proposals_topic()
+    elif name == "APPROVED_PROPOSALS_PAPER":
+        return get_approved_proposals_paper_topic()
+    elif name == "APPROVED_PROPOSALS_LIVE":
+        return get_approved_proposals_live_topic()
     elif name == "ORDER_CREATED":
         return get_order_created_topic()
     elif name == "ORDER_SUBMITTED":
@@ -580,8 +680,16 @@ def __getattr__(name: str) -> Topic:
         return get_order_cancels_topic()
     elif name == "SUBMIT_ORDER_COMMANDS":
         return get_submit_order_commands_topic()
+    elif name == "SUBMIT_ORDER_COMMANDS_PAPER":
+        return get_submit_order_commands_paper_topic()
+    elif name == "SUBMIT_ORDER_COMMANDS_LIVE":
+        return get_submit_order_commands_live_topic()
     elif name == "CANCEL_ORDER_COMMANDS":
         return get_cancel_order_commands_topic()
+    elif name == "CANCEL_ORDER_COMMANDS_PAPER":
+        return get_cancel_order_commands_paper_topic()
+    elif name == "CANCEL_ORDER_COMMANDS_LIVE":
+        return get_cancel_order_commands_live_topic()
     elif name == "EXECUTION_REQUESTS":
         return get_execution_requests_topic()
     elif name == "EXECUTION_RESPONSES":

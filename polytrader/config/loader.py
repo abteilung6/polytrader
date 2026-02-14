@@ -100,6 +100,16 @@ async def load_platform_config(
         if data is None:
             data = {}
 
+        # Support risk: { paper: {...}, live: {...} } for separate paper/live limits
+        risk_block = data.get("risk")
+        if isinstance(risk_block, dict) and "paper" in risk_block and "live" in risk_block:
+            paper_dict = risk_block["paper"]
+            live_dict = risk_block["live"]
+            data = dict(data)
+            data["risk_paper"] = paper_dict
+            data["risk_live"] = live_dict
+            data["risk"] = paper_dict  # main risk field uses paper for backward compat
+
         # Pydantic validates all constraints atomically
         config = PlatformConfig.model_validate(data)
 

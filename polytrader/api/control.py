@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from polytrader.api.dependencies import (
     get_control_command_repo,
     get_event_repository,
+    get_execution_control,
     get_execution_control_repo,
     get_in_memory_strategy_registry,
     get_live_strategy_repo,
@@ -36,6 +37,8 @@ from polytrader.api.models import (
     HealthGates,
     HealthGateStatus,
     HealthResponse,
+    KillSwitchRequest,
+    KillSwitchResetRequest,
     LiveStrategiesResponse,
     PerformanceOverviewItemResponse,
     PerformanceOverviewResponse,
@@ -63,6 +66,7 @@ from polytrader.db.performance_repository import (
     SortByField,
 )
 from polytrader.db.repository import EventRepository
+from polytrader.ops.control import ExecutionControl
 from polytrader.platform.control import (
     ControlCommandRepository,
     ExecutionControlRepository,
@@ -137,11 +141,32 @@ async def get_health() -> HealthResponse:
 @router.get("/state/execution", response_model=ExecutionStateResponse)
 async def get_execution_state(
     execution_repo: ExecutionControlRepository = Depends(get_execution_control_repo),  # noqa: B008
+    exec_control: ExecutionControl | None = Depends(get_execution_control),  # noqa: B008
 ) -> ExecutionStateResponse:
-    """Get execution control state (with version for optimistic concurrency)."""
+    """Get execution control state (with version for optimistic concurrency).
+
+    Per boot reconciliation fix: execution_enabled is read from the **in-memory
+    runtime** state when the platform is running. This ensures the UI always
+    shows what the execution router will actually do. The DB is used for
+    metadata (version, updated_at, updated_by, reason) and as fallback when
+    the platform is not running (exec_control is None).
+
+    kill_switch_active is always in-memory only (not persisted in DB).
+    """
     control = await execution_repo.get_control()
+
+    # Runtime state is the source of truth for execution gating.
+    # Fall back to DB state only when platform is not running.
+    if exec_control is not None:
+        execution_enabled = exec_control.execution_enabled
+        kill_switch_active = exec_control.kill_switch_active
+    else:
+        execution_enabled = control.execution_enabled
+        kill_switch_active = False
+
     return ExecutionStateResponse(
-        execution_enabled=control.execution_enabled,
+        execution_enabled=execution_enabled,
+        kill_switch_active=kill_switch_active,
         version=control.version,
         updated_at=control.updated_at,
         updated_by=control.updated_by,
@@ -158,8 +183,16 @@ async def get_live_strategies(
     return LiveStrategiesResponse(active_strategies=list(active))
 
 
-def _strategy_record_to_response(s: StrategyRecordModel) -> StrategyResponse:
-    """Map DB StrategyRecord to API StrategyResponse (single source of truth)."""
+def _strategy_record_to_response(
+    s: StrategyRecordModel,
+    *,
+    is_live_activated: bool,
+) -> StrategyResponse:
+    """Map DB StrategyRecord to API StrategyResponse (single source of truth).
+
+    is_live_activated: True iff strategy_id is in the active live strategies list
+    (controls Mode badge Paper/Live). Distinct from lifecycle: Start = paper mode only.
+    """
     return StrategyResponse(
         strategy_id=s.strategy_id,
         name=s.name,
@@ -185,16 +218,27 @@ def _strategy_record_to_response(s: StrategyRecordModel) -> StrategyResponse:
         run_id=s.run_id,
         created_at=s.created_at,
         updated_at=s.updated_at,
+        enabled=is_live_activated,
     )
 
 
 @router.get("/state/strategies", response_model=StrategiesResponse)
 async def get_strategies(
     registry: StrategyRegistry = Depends(get_strategy_registry),  # noqa: B008
+    live_repo: LiveStrategyRepository = Depends(get_live_strategy_repo),  # noqa: B008
 ) -> StrategiesResponse:
-    """Get all strategies in registry."""
+    """Get all strategies in registry.
+
+    enabled (Mode Paper/Live) reflects activation for live trading, not lifecycle.
+    """
     strategies = await registry.list_strategies()
-    return StrategiesResponse(strategies=[_strategy_record_to_response(s) for s in strategies])
+    active_ids = await live_repo.list_active()
+    return StrategiesResponse(
+        strategies=[
+            _strategy_record_to_response(s, is_live_activated=(s.strategy_id in active_ids))
+            for s in strategies
+        ]
+    )
 
 
 @router.get("/state/strategies/templates", response_model=StrategyTypesResponse)
@@ -597,10 +641,12 @@ async def get_strategy_performance(
 async def get_strategy_by_id(
     strategy_id: str,
     registry: StrategyRegistry = Depends(get_strategy_registry),  # noqa: B008
+    live_repo: LiveStrategyRepository = Depends(get_live_strategy_repo),  # noqa: B008
 ) -> StrategyResponse:
     """Get a single strategy by ID.
 
     Returns 404 if the strategy is not in the registry.
+    enabled reflects activation for live trading (in active live strategies list).
     """
     strategy = await registry.get_strategy(strategy_id)
     if strategy is None:
@@ -608,7 +654,8 @@ async def get_strategy_by_id(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Strategy not found",
         )
-    return _strategy_record_to_response(strategy)
+    active_ids = await live_repo.list_active()
+    return _strategy_record_to_response(strategy, is_live_activated=(strategy_id in active_ids))
 
 
 @router.post(
@@ -873,6 +920,143 @@ async def disable_execution(
 
 
 @router.post(
+    "/commands/execution/kill-switch",
+    response_model=CommandEnvelopeResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        400: {"model": ErrorResponse, "description": "Validation error"},
+        503: {"model": ErrorResponse, "description": "Platform not running"},
+    },
+)
+async def activate_kill_switch(
+    request: KillSwitchRequest,
+    exec_control: ExecutionControl | None = Depends(get_execution_control),  # noqa: B008
+    command_repo: ControlCommandRepository = Depends(get_control_command_repo),  # noqa: B008
+    execution_repo: ExecutionControlRepository = Depends(get_execution_control_repo),  # noqa: B008
+) -> CommandEnvelopeResponse:
+    """Activate kill switch (emergency stop — immediate, not queued).
+
+    Per flows.mdc §13: Kill switch provides immediate stop-trading policy.
+    This endpoint directly applies the kill switch to in-memory state,
+    disables execution in the DB, and creates an audit command record.
+
+    Unlike enable/disable which go through the command queue, the kill switch
+    is applied immediately because it is a safety-critical emergency action.
+
+    After activation:
+    - execution_enabled = false
+    - kill_switch_active = true
+    - KillSwitchEvent emitted
+    - All pending orders will be rejected by execution router
+
+    Reset requires a separate call to /commands/execution/kill-switch/reset
+    followed by /commands/execution/enable.
+    """
+    if exec_control is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=ErrorResponse(
+                error="Platform not running",
+                detail="Kill switch requires the platform runtime to be active. "
+                "ExecutionControl is not available.",
+            ).model_dump(),
+        )
+
+    # Apply immediately to in-memory state (not queued)
+    await exec_control.set_kill_switch(
+        active=True,
+        reason=request.reason,
+        cancel_open_orders=request.cancel_open_orders,
+        triggered_by="operator",
+    )
+
+    # Persist execution_enabled=false in DB for consistency
+    await execution_repo.update_control(
+        execution_enabled=False,
+        updated_by=request.issued_by,
+        reason=f"Kill switch activated: {request.reason}",
+    )
+
+    # Create audit command record (marked as applied immediately)
+    now = datetime.now(UTC)
+    cmd = ControlCommandRecord(
+        command_type="kill_switch_activate",
+        reason=request.reason,
+        issued_by=request.issued_by,
+    )
+    command_id = await command_repo.create_command(cmd)
+    await command_repo.mark_applied(command_id)
+
+    return CommandEnvelopeResponse(
+        command_id=command_id,
+        status="applied",
+        submitted_at=now,
+        links={"status": f"/api/v1/state/commands/{command_id}"},
+    )
+
+
+@router.post(
+    "/commands/execution/kill-switch/reset",
+    response_model=CommandEnvelopeResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        400: {"model": ErrorResponse, "description": "Validation error"},
+        503: {"model": ErrorResponse, "description": "Platform not running"},
+    },
+)
+async def reset_kill_switch(
+    request: KillSwitchResetRequest,
+    exec_control: ExecutionControl | None = Depends(get_execution_control),  # noqa: B008
+    command_repo: ControlCommandRepository = Depends(get_control_command_repo),  # noqa: B008
+) -> CommandEnvelopeResponse:
+    """Reset (deactivate) the kill switch.
+
+    Resetting the kill switch does NOT re-enable execution. The operator must
+    separately call /commands/execution/enable to resume trading. This is a
+    deliberate safety measure to prevent accidental re-enablement.
+
+    After reset:
+    - kill_switch_active = false
+    - execution_enabled remains false (unchanged)
+    - KillSwitchEvent emitted (triggered=false)
+    """
+    if exec_control is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=ErrorResponse(
+                error="Platform not running",
+                detail="Kill switch reset requires the platform runtime to be active. "
+                "ExecutionControl is not available.",
+            ).model_dump(),
+        )
+
+    # Apply immediately to in-memory state
+    await exec_control.set_kill_switch(
+        active=False,
+        reason=request.reason,
+        cancel_open_orders=False,
+        triggered_by="operator",
+    )
+
+    # Create audit command record (marked as applied immediately)
+    now = datetime.now(UTC)
+    cmd = ControlCommandRecord(
+        command_type="kill_switch_reset",
+        reason=request.reason,
+        issued_by=request.issued_by,
+    )
+    command_id = await command_repo.create_command(cmd)
+    await command_repo.mark_applied(command_id)
+
+    return CommandEnvelopeResponse(
+        command_id=command_id,
+        status="applied",
+        submitted_at=now,
+        links={"status": f"/api/v1/state/commands/{command_id}"},
+    )
+
+
+@router.post(
     "/commands/live-strategies/{strategy_id}/activate",
     response_model=CommandEnvelopeResponse,
     status_code=status.HTTP_200_OK,
@@ -984,6 +1168,7 @@ async def create_strategy(
     registry: StrategyRegistry = Depends(get_strategy_registry),  # noqa: B008
     in_memory_registry: InMemoryStrategyRegistry = Depends(get_in_memory_strategy_registry),  # noqa: B008
     orchestrator: "PlatformOrchestrator | None" = Depends(get_orchestrator),  # noqa: B008
+    live_repo: LiveStrategyRepository = Depends(get_live_strategy_repo),  # noqa: B008
 ) -> StrategyResponse:
     """Create a new strategy in registry.
 
@@ -1146,35 +1331,9 @@ async def create_strategy(
             strategy_id=strategy.strategy_id,
         )
 
-    return StrategyResponse(
-        strategy_id=strategy.strategy_id,
-        name=strategy.name,
-        description=strategy.description,
-        config=strategy.config,
-        template_type_id=strategy.template_type_id,
-        template_version=strategy.template_version,
-        desired_state=strategy.desired_state,
-        actual_state=strategy.actual_state,
-        last_transition_at=strategy.last_transition_at,
-        last_error=strategy.last_error,
-        run_identity=(
-            RunIdentityResponse(
-                template_code_ref=strategy.template_code_ref,
-                config_hash=strategy.config_hash,
-                dependency_set=strategy.dependency_set,
-                market_data_snapshot_ref=strategy.market_data_snapshot_ref,
-            )
-            if (
-                strategy.template_code_ref
-                or strategy.dependency_set
-                or strategy.market_data_snapshot_ref
-            )
-            else None
-        ),
-        deployment_id=str(strategy.deployment_id) if strategy.deployment_id else None,
-        run_id=strategy.run_id,
-        created_at=strategy.created_at,
-        updated_at=strategy.updated_at,
+    active_ids = await live_repo.list_active()
+    return _strategy_record_to_response(
+        strategy, is_live_activated=(strategy.strategy_id in active_ids)
     )
 
 
@@ -1191,8 +1350,15 @@ async def update_strategy(
     strategy_id: str,
     request: UpdateStrategyRequest,
     registry: StrategyRegistry = Depends(get_strategy_registry),  # noqa: B008
+    live_repo: LiveStrategyRepository = Depends(get_live_strategy_repo),  # noqa: B008
+    orchestrator: "PlatformOrchestrator | None" = Depends(get_orchestrator),  # noqa: B008
 ) -> StrategyResponse:
-    """Update an existing strategy in registry."""
+    """Update an existing strategy in registry.
+
+    When desired_state is set to RUNNING, the strategy is added to the running
+    orchestrator so it starts (paper tracking). When set to STOPPED, it is
+    removed from the orchestrator so it stops.
+    """
     # Get existing strategy
     strategy = await registry.get_strategy(strategy_id)
     if strategy is None:
@@ -1212,7 +1378,6 @@ async def update_strategy(
     if request.config is not None:
         strategy.config = request.config
     if request.desired_state is not None:
-        # Update desired_state (lifecycle manager will handle actual_state transition)
         strategy.desired_state = request.desired_state
 
     try:
@@ -1231,33 +1396,32 @@ async def update_strategy(
             detail=ErrorResponse(error="Failed to update strategy", detail=str(e)).model_dump(),
         ) from e
 
-    return StrategyResponse(
-        strategy_id=updated_strategy.strategy_id,
-        name=updated_strategy.name,
-        description=updated_strategy.description,
-        config=updated_strategy.config,
-        template_type_id=updated_strategy.template_type_id,
-        template_version=updated_strategy.template_version,
-        desired_state=updated_strategy.desired_state,
-        actual_state=updated_strategy.actual_state,
-        last_transition_at=updated_strategy.last_transition_at,
-        last_error=updated_strategy.last_error,
-        run_identity=(
-            RunIdentityResponse(
-                template_code_ref=updated_strategy.template_code_ref,
-                config_hash=updated_strategy.config_hash,
-                dependency_set=updated_strategy.dependency_set,
-                market_data_snapshot_ref=updated_strategy.market_data_snapshot_ref,
-            )
-            if updated_strategy.template_code_ref
-            or updated_strategy.dependency_set
-            or updated_strategy.market_data_snapshot_ref
-            else None
-        ),
-        deployment_id=(
-            str(updated_strategy.deployment_id) if updated_strategy.deployment_id else None
-        ),
-        run_id=updated_strategy.run_id,
-        created_at=updated_strategy.created_at,
-        updated_at=updated_strategy.updated_at,
+    # Apply lifecycle to running orchestrator so actual_state transitions
+    if request.desired_state is not None and orchestrator is not None and orchestrator.is_running():
+        from polytrader.logging_config import logger
+
+        if request.desired_state == "RUNNING":
+            try:
+                await orchestrator.add_strategy(strategy_id)
+            except Exception as e:
+                logger.warning(
+                    "Strategy set RUNNING but could not add to orchestrator: {error}",
+                    strategy_id=strategy_id,
+                    error=str(e),
+                    error_type=type(e).__name__,
+                )
+        elif request.desired_state == "STOPPED":
+            try:
+                await orchestrator.remove_strategy(strategy_id)
+            except Exception as e:
+                logger.warning(
+                    "Strategy set STOPPED but could not remove from orchestrator: {error}",
+                    strategy_id=strategy_id,
+                    error=str(e),
+                    error_type=type(e).__name__,
+                )
+
+    active_ids = await live_repo.list_active()
+    return _strategy_record_to_response(
+        updated_strategy, is_live_activated=(strategy_id in active_ids)
     )

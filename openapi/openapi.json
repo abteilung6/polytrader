@@ -34,7 +34,7 @@
           "control"
         ],
         "summary": "Get Execution State",
-        "description": "Get execution control state (with version for optimistic concurrency).",
+        "description": "Get execution control state (with version for optimistic concurrency).\n\nIncludes kill_switch_active from in-memory state (not persisted in DB).\nWhen the platform is not running (exec_control is None), kill_switch_active\ndefaults to False.",
         "operationId": "get_execution_state_api_v1_state_execution_get",
         "responses": {
           "200": {
@@ -910,6 +910,130 @@
         }
       }
     },
+    "/api/v1/commands/execution/kill-switch": {
+      "post": {
+        "tags": [
+          "control"
+        ],
+        "summary": "Activate Kill Switch",
+        "description": "Activate kill switch (emergency stop \u2014 immediate, not queued).\n\nPer flows.mdc \u00a713: Kill switch provides immediate stop-trading policy.\nThis endpoint directly applies the kill switch to in-memory state,\ndisables execution in the DB, and creates an audit command record.\n\nUnlike enable/disable which go through the command queue, the kill switch\nis applied immediately because it is a safety-critical emergency action.\n\nAfter activation:\n- execution_enabled = false\n- kill_switch_active = true\n- KillSwitchEvent emitted\n- All pending orders will be rejected by execution router\n\nReset requires a separate call to /commands/execution/kill-switch/reset\nfollowed by /commands/execution/enable.",
+        "operationId": "activate_kill_switch_api_v1_commands_execution_kill_switch_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KillSwitchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandEnvelopeResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Platform not running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/commands/execution/kill-switch/reset": {
+      "post": {
+        "tags": [
+          "control"
+        ],
+        "summary": "Reset Kill Switch",
+        "description": "Reset (deactivate) the kill switch.\n\nResetting the kill switch does NOT re-enable execution. The operator must\nseparately call /commands/execution/enable to resume trading. This is a\ndeliberate safety measure to prevent accidental re-enablement.\n\nAfter reset:\n- kill_switch_active = false\n- execution_enabled remains false (unchanged)\n- KillSwitchEvent emitted (triggered=false)",
+        "operationId": "reset_kill_switch_api_v1_commands_execution_kill_switch_reset_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KillSwitchResetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandEnvelopeResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Platform not running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/commands/live-strategies/{strategy_id}/activate": {
       "post": {
         "tags": [
@@ -1650,7 +1774,9 @@
               "enable_execution",
               "disable_execution",
               "add_active_strategy",
-              "remove_active_strategy"
+              "remove_active_strategy",
+              "kill_switch_activate",
+              "kill_switch_reset"
             ],
             "title": "Type",
             "description": "Command type"
@@ -1936,6 +2062,12 @@
             "title": "Execution Enabled",
             "description": "Whether execution is enabled"
           },
+          "kill_switch_active": {
+            "type": "boolean",
+            "title": "Kill Switch Active",
+            "description": "Whether kill switch is active (in-memory state)",
+            "default": false
+          },
           "version": {
             "type": "integer",
             "title": "Version",
@@ -1967,7 +2099,7 @@
           "reason"
         ],
         "title": "ExecutionStateResponse",
-        "description": "Execution control state response."
+        "description": "Execution control state response.\n\nIncludes both DB-persisted execution_enabled state and in-memory\nkill_switch_active state for the frontend control page."
       },
       "HTTPValidationError": {
         "properties": {
@@ -2102,6 +2234,56 @@
         ],
         "title": "HistoricalTicksResponse",
         "description": "Historical ticks response.\n\nFor a 15-minute market window, all ticks should fit in a single response.\nUse from_ts/to_ts to narrow the time range if needed."
+      },
+      "KillSwitchRequest": {
+        "properties": {
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Reason",
+            "description": "Reason for activating kill switch"
+          },
+          "cancel_open_orders": {
+            "type": "boolean",
+            "title": "Cancel Open Orders",
+            "description": "Whether to cancel open orders when kill switch is activated",
+            "default": true
+          },
+          "issued_by": {
+            "type": "string",
+            "title": "Issued By",
+            "description": "User/system activating the kill switch",
+            "default": "operator"
+          }
+        },
+        "type": "object",
+        "required": [
+          "reason"
+        ],
+        "title": "KillSwitchRequest",
+        "description": "Request to activate the kill switch (emergency stop).\n\nPer flows.mdc \u00a713: Kill switch provides immediate stop-trading policy.\nActivating the kill switch immediately disables execution and emits\nKillSwitchEvent. This is a direct-apply action, not queued."
+      },
+      "KillSwitchResetRequest": {
+        "properties": {
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Reason",
+            "description": "Reason for resetting kill switch"
+          },
+          "issued_by": {
+            "type": "string",
+            "title": "Issued By",
+            "description": "User/system resetting the kill switch",
+            "default": "operator"
+          }
+        },
+        "type": "object",
+        "required": [
+          "reason"
+        ],
+        "title": "KillSwitchResetRequest",
+        "description": "Request to reset (deactivate) the kill switch.\n\nResetting the kill switch does NOT re-enable execution \u2014 the operator\nmust explicitly re-enable execution separately. This is a safety measure\nto prevent accidental re-enablement."
       },
       "LiveStrategiesResponse": {
         "properties": {

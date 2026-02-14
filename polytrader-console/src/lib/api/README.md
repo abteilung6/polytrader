@@ -51,6 +51,7 @@ All URIs are relative to *http://localhost*
 
 Class | Method | HTTP request | Description
 ------------ | ------------- | ------------- | -------------
+*ControlApi* | [**activateKillSwitchApiV1CommandsExecutionKillSwitchPost**](docs/ControlApi.md#activatekillswitchapiv1commandsexecutionkillswitchpost) | **POST** /api/v1/commands/execution/kill-switch | Activate Kill Switch
 *ControlApi* | [**activateStrategyApiV1CommandsLiveStrategiesStrategyIdActivatePost**](docs/ControlApi.md#activatestrategyapiv1commandslivestrategiesstrategyidactivatepost) | **POST** /api/v1/commands/live-strategies/{strategy_id}/activate | Activate Strategy
 *ControlApi* | [**createStrategyApiV1CommandsStrategiesPost**](docs/ControlApi.md#createstrategyapiv1commandsstrategiespost) | **POST** /api/v1/commands/strategies | Create Strategy
 *ControlApi* | [**deactivateStrategyApiV1CommandsLiveStrategiesStrategyIdDeactivatePost**](docs/ControlApi.md#deactivatestrategyapiv1commandslivestrategiesstrategyiddeactivatepost) | **POST** /api/v1/commands/live-strategies/{strategy_id}/deactivate | Deactivate Strategy
@@ -69,6 +70,7 @@ Class | Method | HTTP request | Description
 *ControlApi* | [**getStrategyTemplateApiV1StateStrategiesTemplatesTypeIdGet**](docs/ControlApi.md#getstrategytemplateapiv1statestrategiestemplatestypeidget) | **GET** /api/v1/state/strategies/templates/{type_id} | Get Strategy Template
 *ControlApi* | [**getStrategyTemplateVersionApiV1StateStrategiesTemplatesTypeIdVersionsVersionGet**](docs/ControlApi.md#getstrategytemplateversionapiv1statestrategiestemplatestypeidversionsversionget) | **GET** /api/v1/state/strategies/templates/{type_id}/versions/{version} | Get Strategy Template Version
 *ControlApi* | [**listStrategyTemplatesApiV1StateStrategiesTemplatesGet**](docs/ControlApi.md#liststrategytemplatesapiv1statestrategiestemplatesget) | **GET** /api/v1/state/strategies/templates | List Strategy Templates
+*ControlApi* | [**resetKillSwitchApiV1CommandsExecutionKillSwitchResetPost**](docs/ControlApi.md#resetkillswitchapiv1commandsexecutionkillswitchresetpost) | **POST** /api/v1/commands/execution/kill-switch/reset | Reset Kill Switch
 *ControlApi* | [**updateStrategyApiV1CommandsStrategiesStrategyIdPatch**](docs/ControlApi.md#updatestrategyapiv1commandsstrategiesstrategyidpatch) | **PATCH** /api/v1/commands/strategies/{strategy_id} | Update Strategy
 *ControlApi* | [**validateStrategyConfigApiV1StateStrategiesValidatePost**](docs/ControlApi.md#validatestrategyconfigapiv1statestrategiesvalidatepost) | **POST** /api/v1/state/strategies/validate | Validate Strategy Config
 *MarketApi* | [**getHistoricalTicksApiV1MarketTicksHistoryGet**](docs/MarketApi.md#gethistoricalticksapiv1markettickshistoryget) | **GET** /api/v1/market/ticks/history | Get Historical Ticks
@@ -93,6 +95,8 @@ Class | Method | HTTP request | Description
  - [HealthGates](docs/HealthGates.md)
  - [HealthResponse](docs/HealthResponse.md)
  - [HistoricalTicksResponse](docs/HistoricalTicksResponse.md)
+ - [KillSwitchRequest](docs/KillSwitchRequest.md)
+ - [KillSwitchResetRequest](docs/KillSwitchResetRequest.md)
  - [LiveStrategiesResponse](docs/LiveStrategiesResponse.md)
  - [LocationInner](docs/LocationInner.md)
  - [MarketInfoResponse](docs/MarketInfoResponse.md)

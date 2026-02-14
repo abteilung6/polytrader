@@ -29,6 +29,7 @@ describe('StrategiesInstancesPage', () => {
     expect(headerRow).toHaveTextContent('Template type ID')
     expect(headerRow).toHaveTextContent('Template version')
     expect(headerRow).toHaveTextContent('Actual state')
+    expect(headerRow).toHaveTextContent('Mode')
     expect(headerRow).toHaveTextContent('Created at')
     expect(headerRow).toHaveTextContent('Actions')
 

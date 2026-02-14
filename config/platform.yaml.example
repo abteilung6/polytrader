@@ -13,6 +13,15 @@
 #
 # On load: validated atomically via Pydantic, hashed (SHA256),
 #          and emitted as ConfigLoadedEvent for audit trail.
+#
+# Available profiles:
+#   config/platform.paper.yaml       — Paper trading (default, safe)
+#   config/platform.live-pilot.yaml  — Live pilot (infrastructure validation,
+#                                      ultra-conservative limits, first real trade)
+#   config/platform.yaml.example     — Full reference with all fields documented
+#
+# Profile selection is an infrastructure decision, not a runtime toggle.
+# The execution_enabled flag provides the runtime gate within a profile.
 # ============================================================================
 
 version: "1.0"

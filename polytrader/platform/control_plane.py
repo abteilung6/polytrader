@@ -11,6 +11,7 @@ Responsibilities:
 - Update in-memory ExecutionControl state
 - Emit ControlCommandEvent for audit trail
 - Handle validation and errors
+- Boot reconciliation: reset DB execution state to match runtime default (disabled)
 """
 
 import asyncio
@@ -27,7 +28,6 @@ from polytrader.platform.control import (
     LiveStrategyRepository,
 )
 from polytrader.platform.registry import StrategyRegistry
-from polytrader.strategies.lifecycle_models import StrategyLifecycleState
 
 if TYPE_CHECKING:
     from polytrader.db.models import ControlCommandRecord
@@ -72,6 +72,7 @@ class ControlPlaneService:
         execution_control: ExecutionControl,
         bus: EventBus,
         poll_interval_s: float = 1.0,
+        active_strategies: set[str] | None = None,
     ) -> None:
         """Initialize control plane service.
 
@@ -79,10 +80,13 @@ class ControlPlaneService:
             command_repo: Repository for control commands
             execution_repo: Repository for execution control
             live_repo: Repository for live strategy activation
-            strategy_registry: Registry to sync strategy_instances.desired_state
+            strategy_registry: Registry for strategy lookup (used by command handlers as needed)
             execution_control: In-memory execution control state
             bus: Event bus for emitting ControlCommandEvent
             poll_interval_s: Polling interval in seconds (default: 1.0)
+            active_strategies: In-memory set of active strategy IDs (optional). When provided,
+                add/remove_active_strategy commands update this set so proposal router and
+                live execution can read it without DB on every intent.
         """
         self._command_repo = command_repo
         self._execution_repo = execution_repo
@@ -91,15 +95,33 @@ class ControlPlaneService:
         self._execution_control = execution_control
         self._bus = bus
         self._poll_interval_s = poll_interval_s
+        self._active_strategies = active_strategies
 
         self._running = False
         self._task: asyncio.Task[None] | None = None
 
     async def start(self) -> None:
-        """Start the control plane service (begin polling for commands)."""
+        """Start the control plane service (begin polling for commands).
+
+        Per flows.mdc §2 / troubleshooting_foundational.mdc §0:
+        On boot, execution is ALWAYS disabled. The DB state is reset to match
+        the runtime default (execution_enabled=false). This prevents stale DB
+        state from causing unintended live execution after a restart.
+
+        The operator must explicitly re-enable execution after verifying
+        health gates — this is an institutional safety requirement.
+        """
         if self._running:
             logger.warning("ControlPlaneService is already running")
             return
+
+        await self._reconcile_boot_state()
+
+        # Sync in-memory active_strategies from DB so boot state is correct
+        if self._active_strategies is not None:
+            db_active = await self._live_repo.list_active()
+            self._active_strategies.clear()
+            self._active_strategies.update(db_active)
 
         self._running = True
         self._task = asyncio.create_task(self._run())
@@ -115,6 +137,53 @@ class ControlPlaneService:
             except asyncio.CancelledError:
                 pass
         logger.info("ControlPlaneService stopped")
+
+    async def _reconcile_boot_state(self) -> None:
+        """Reconcile DB execution state with runtime default on boot.
+
+        Per flows.mdc §2: Default safe state is **no trading**.
+        On every platform boot, the DB execution state is reset to disabled.
+        This prevents stale DB state (e.g. from a previous session or test)
+        from accidentally enabling live execution without explicit operator
+        action.
+
+        The in-memory ExecutionControl already defaults to disabled; this
+        method ensures the DB matches, so the API reports a consistent view.
+        """
+        try:
+            db_state = await self._execution_repo.get_control()
+            if db_state.execution_enabled:
+                logger.warning(
+                    "Boot reconciliation: DB had execution_enabled=true "
+                    "(version={version}, set by={updated_by}, reason={reason}). "
+                    "Resetting to false for safety.",
+                    version=db_state.version,
+                    updated_by=db_state.updated_by,
+                    reason=db_state.reason,
+                )
+                await self._execution_repo.update_control(
+                    execution_enabled=False,
+                    updated_by="system",
+                    reason="Boot reconciliation: execution disabled on startup (safety default)",
+                )
+            else:
+                logger.info(
+                    "Boot reconciliation: DB execution state already disabled (version={version})",
+                    version=db_state.version,
+                )
+
+            # Ensure in-memory state is consistent (should already be False)
+            self._execution_control.execution_enabled = False
+            self._execution_control.kill_switch_active = False
+
+        except Exception as e:
+            logger.exception(
+                "Boot reconciliation failed: {error}. "
+                "In-memory execution remains disabled (safe default).",
+                error=str(e),
+            )
+            # Even on failure, in-memory state stays disabled — fail-safe
+            self._execution_control.execution_enabled = False
 
     async def _run(self) -> None:
         """Main loop: poll for pending commands and process them."""
@@ -235,11 +304,11 @@ class ControlPlaneService:
         )
 
     async def _add_active_strategy(self, cmd: "ControlCommandRecord") -> None:
-        """Add strategy to active set (apply add_active_strategy command).
+        """Add strategy to active live set (apply add_active_strategy command).
 
-        Updates live_strategy_activation to active=true and strategy_instances
-        desired_state/actual_state to RUNNING so the orchestrator starts the
-        strategy on next load (or on platform restart).
+        Only updates live_strategy_activation to active=true. Does NOT change
+        desired_state/actual_state (lifecycle). Instance stays RUNNING or STOPPED;
+        operator uses Start/Stop to control lifecycle separately.
         """
         if cmd.strategy_id is None:
             raise ValueError("add_active_strategy command requires strategy_id")
@@ -249,12 +318,8 @@ class ControlPlaneService:
             activated_by=cmd.issued_by,
             reason=cmd.reason,
         )
-
-        strategy = await self._strategy_registry.get_strategy(cmd.strategy_id)
-        if strategy is not None:
-            strategy.desired_state = StrategyLifecycleState.RUNNING.value
-            strategy.actual_state = StrategyLifecycleState.RUNNING.value
-            await self._strategy_registry.update_strategy(strategy)
+        if self._active_strategies is not None:
+            self._active_strategies.add(cmd.strategy_id)
 
         logger.info(
             "Strategy {strategy_id} activated via command {command_id}: {reason}",
@@ -264,11 +329,11 @@ class ControlPlaneService:
         )
 
     async def _remove_active_strategy(self, cmd: "ControlCommandRecord") -> None:
-        """Remove strategy from active set (apply remove_active_strategy command).
+        """Remove strategy from active live set (apply remove_active_strategy command).
 
-        Updates live_strategy_activation to active=false and strategy_instances
-        desired_state/actual_state to STOPPED so the orchestrator does not
-        start the strategy on next load.
+        Only updates live_strategy_activation to active=false. Does NOT change
+        desired_state/actual_state (lifecycle). Instance keeps running in paper
+        mode; operator uses Stop to stop it if desired.
         """
         if cmd.strategy_id is None:
             raise ValueError("remove_active_strategy command requires strategy_id")
@@ -278,12 +343,8 @@ class ControlPlaneService:
             activated_by=cmd.issued_by,
             reason=cmd.reason,
         )
-
-        strategy = await self._strategy_registry.get_strategy(cmd.strategy_id)
-        if strategy is not None:
-            strategy.desired_state = StrategyLifecycleState.STOPPED.value
-            strategy.actual_state = StrategyLifecycleState.STOPPED.value
-            await self._strategy_registry.update_strategy(strategy)
+        if self._active_strategies is not None:
+            self._active_strategies.discard(cmd.strategy_id)
 
         logger.info(
             "Strategy {strategy_id} deactivated via command {command_id}: {reason}",

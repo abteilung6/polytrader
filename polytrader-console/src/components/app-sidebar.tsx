@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { Link } from '@tanstack/react-router'
-import { BarChart3, ChevronDown, TrendingUp, Workflow } from 'lucide-react'
+import { BarChart3, ChevronDown, Shield, TrendingUp, Workflow } from 'lucide-react'
 
 import {
   Sidebar,
@@ -26,6 +26,7 @@ interface AppSidebarProps {
 
 export function AppSidebar({ variant = 'inset' }: AppSidebarProps) {
   const [strategiesOpen, setStrategiesOpen] = useState(true)
+  const [performanceOpen, setPerformanceOpen] = useState(true)
 
   return (
     <Sidebar collapsible="icon" variant={variant}>
@@ -45,12 +46,47 @@ export function AppSidebar({ variant = 'inset' }: AppSidebarProps) {
           <SidebarGroupContent className="flex flex-col gap-2">
             <SidebarMenu>
               <SidebarMenuItem>
-                <SidebarMenuButton asChild tooltip="Performance">
-                  <Link to="/performance">
-                    <TrendingUp />
-                    <span>Performance</span>
+                <SidebarMenuButton asChild tooltip="Control">
+                  <Link to="/control">
+                    <Shield />
+                    <span>Control</span>
                   </Link>
                 </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  tooltip="Performance"
+                  className="cursor-pointer"
+                  onClick={() => setPerformanceOpen((open) => !open)}
+                >
+                  <TrendingUp />
+                  <span>Performance</span>
+                  <ChevronDown
+                    className={cn(
+                      'ml-auto size-4 shrink-0 transition-transform',
+                      !performanceOpen && '-rotate-90',
+                    )}
+                    aria-hidden
+                  />
+                </SidebarMenuButton>
+                {performanceOpen && (
+                  <SidebarMenuSub>
+                    <SidebarMenuSubItem>
+                      <SidebarMenuSubButton asChild>
+                        <Link to="/performance/live">
+                          <span>Live Trading</span>
+                        </Link>
+                      </SidebarMenuSubButton>
+                    </SidebarMenuSubItem>
+                    <SidebarMenuSubItem>
+                      <SidebarMenuSubButton asChild>
+                        <Link to="/performance/paper">
+                          <span>Paper Trading</span>
+                        </Link>
+                      </SidebarMenuSubButton>
+                    </SidebarMenuSubItem>
+                  </SidebarMenuSub>
+                )}
               </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton asChild tooltip="Markets">
